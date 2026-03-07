@@ -31,6 +31,12 @@ sql_files=(
   /opt/platform/snowflake/sql/01_snowflake_foundation.sql.tpl
 )
 
+if [ -d /opt/platform/snowflake/sql/products ]; then
+  while IFS= read -r sql_file; do
+    sql_files+=("${sql_file}")
+  done < <(find /opt/platform/snowflake/sql/products -maxdepth 1 -type f -name '*.sql.tpl' | sort)
+fi
+
 if [ -n "${OPEN_CATALOG_URI:-}" ] && [ -n "${OPEN_CATALOG_NAME:-}" ] && [ -n "${OPEN_CATALOG_CLIENT_ID:-}" ] && [ -n "${OPEN_CATALOG_CLIENT_SECRET:-}" ]; then
   sql_files+=(
     /opt/platform/snowflake/sql/02_open_catalog_integration.sql.tpl

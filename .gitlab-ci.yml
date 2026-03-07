@@ -1,7 +1,3 @@
-stages:
-  - ingestion
-  - dbt
-
 workflow:
   name: Local Platform Promotion
   rules:
@@ -11,18 +7,5 @@ workflow:
     - if: '$CI_PIPELINE_SOURCE == "pipeline"'
     - when: never
 
-promote_ingestion_pipeline:
-  stage: ingestion
-  trigger:
-    include:
-      - local: .gitlab/ci/ingestion-promotion.yml
-    strategy: depend
-
-promote_dbt_pipeline:
-  stage: dbt
-  needs:
-    - promote_ingestion_pipeline
-  trigger:
-    include:
-      - local: .gitlab/ci/dbt-promotion.yml
-    strategy: depend
+include:
+  - local: .gitlab/ci/generated/root-pipeline.yml

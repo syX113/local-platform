@@ -9,10 +9,6 @@ local_platform:
       role: "{{ env_var('SNOWFLAKE_ROLE') }}"
       warehouse: "{{ env_var('SNOWFLAKE_WAREHOUSE') }}"
       database: "{{ env_var('SNOWFLAKE_EDP_DATABASE') }}"
-      schema: "{{ env_var('SNOWFLAKE_EDP_ACC_SCHEMA', 'ACC') }}"
-      quoting:
-        database: false
-        schema: true
-        identifier: false
+      schema: "{{ env_var('SNOWFLAKE_EDP_ACC_SCHEMA', 'ACCESS') }}"
       threads: "{{ env_var('DBT_THREADS', 4) | int }}"
       client_session_keep_alive: false

@@ -2,23 +2,23 @@
 
 with orders as (
     select *
-    from {{ ref('edp_in_orders') }}
+    from {{ ref('model_edp_orders_core_orders_3nf') }}
 ),
 items as (
     select
       order_id,
       sum(line_total) as item_revenue,
       count(*) as item_rows
-    from {{ ref('edp_in_order_items') }}
+    from {{ ref('model_edp_orders_core_order_lines_3nf') }}
     group by 1
 ),
 dim_customers as (
     select customer_sk, customer_id
-    from {{ ref('edp_core_dim_customers') }}
+    from {{ ref('model_edp_orders_core_dim_customers') }}
 ),
 dim_order_status as (
     select status_sk, order_status
-    from {{ ref('edp_core_dim_order_status') }}
+    from {{ ref('model_edp_orders_core_dim_order_status') }}
 )
 select
   orders.order_id,

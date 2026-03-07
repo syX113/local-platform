@@ -121,8 +121,10 @@ if [ -n "${GITLAB_BOOTSTRAP_PAT:-}" ] || [ -n "${GITLAB_PROJECT_ID:-}" ] || [ -n
 fi
 
 printf 'Useful Commands\n'
+printf '  Reset local platform: ./scripts/reset-platform.sh\n'
 printf '  Seed source data: ./scripts/load-source-sample-data.sh\n'
 printf '  Run local pipeline: ./scripts/run-local-pipeline.sh\n'
+printf '  Bootstrap local platform: ./scripts/bootstrap.sh\n'
 printf '  Bootstrap GitLab runner/project: ./scripts/bootstrap-gitlab.sh\n'
 printf '  Sync GitLab CI variables: ./scripts/sync-gitlab-ci-variables.sh\n'
 printf '  Show this summary again: ./scripts/print-setup-summary.sh\n'

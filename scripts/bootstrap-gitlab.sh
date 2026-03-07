@@ -9,16 +9,40 @@ ensure_platform_env
 
 mkdir -p gitlab-runner/generated
 
+CURL_RETRY_ARGS=(
+  --silent
+  --show-error
+  --location
+  --connect-timeout 5
+  --max-time 30
+  --retry 20
+  --retry-delay 5
+  --retry-all-errors
+)
+
 wait_for_gitlab() {
-  until curl -fsS "http://localhost:${GITLAB_HTTP_PORT}/help" >/dev/null; do
-    internal_status="$(
-      docker compose exec -T gitlab-platform /bin/bash -lc \
-        "curl -sS -o /dev/null -w '%{http_code}' http://127.0.0.1/help || true"
+  local stable=0
+
+  while [ "${stable}" -lt 2 ]; do
+    help_status="$(
+      curl "${CURL_RETRY_ARGS[@]}" -o /dev/null -w '%{http_code}' "http://localhost:${GITLAB_HTTP_PORT}/help" || true
     )"
-    if [ "${internal_status}" = "200" ]; then
-      return 0
+    sign_in_status="$(
+      curl "${CURL_RETRY_ARGS[@]}" -o /dev/null -w '%{http_code}' "http://localhost:${GITLAB_HTTP_PORT}/users/sign_in" || true
+    )"
+    api_status="$(
+      curl "${CURL_RETRY_ARGS[@]}" -o /dev/null -w '%{http_code}' "http://localhost:${GITLAB_HTTP_PORT}/api/v4/version" || true
+    )"
+
+    if [ "${help_status}" = "200" ] && [ "${sign_in_status}" = "200" ] && { [ "${api_status}" = "200" ] || [ "${api_status}" = "401" ]; }; then
+      stable=$((stable + 1))
+      echo "GitLab endpoints are healthy (${stable}/2)"
+      sleep 5
+      continue
     fi
-    echo "waiting for GitLab web endpoint"
+
+    stable=0
+    echo "waiting for GitLab UI/API readiness (help=${help_status} sign_in=${sign_in_status} api=${api_status})"
     sleep 10
   done
 }
@@ -34,9 +58,45 @@ bootstrap_pat_works() {
     return 1
   fi
 
-  curl -fsS \
+  curl --fail "${CURL_RETRY_ARGS[@]}" \
     --header "PRIVATE-TOKEN: ${token}" \
     "http://localhost:${GITLAB_HTTP_PORT}/api/v4/user" >/dev/null
+}
+
+gitlab_api_request() {
+  local method="${1:?method is required}"
+  local path="${2:?path is required}"
+  shift 2
+
+  curl --fail "${CURL_RETRY_ARGS[@]}" \
+    --request "${method}" \
+    --header "PRIVATE-TOKEN: ${BOOTSTRAP_PAT}" \
+    "$@" \
+    "http://localhost:${GITLAB_HTTP_PORT}/api/v4${path}"
+}
+
+configure_local_git_remote() {
+  if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    return 0
+  fi
+
+  local remote_url branch
+  remote_url="http://oauth2:${BOOTSTRAP_PAT}@localhost:${GITLAB_HTTP_PORT}/root/${GITLAB_PROJECT_PATH}.git"
+  branch="$(git rev-parse --abbrev-ref HEAD)"
+  if [ "${branch}" = "HEAD" ]; then
+    branch="main"
+  fi
+
+  if git remote get-url local-gitlab >/dev/null 2>&1; then
+    git remote set-url local-gitlab "${remote_url}"
+  else
+    git remote add local-gitlab "${remote_url}"
+  fi
+
+  if git rev-parse --verify HEAD >/dev/null 2>&1; then
+    echo "pushing current committed branch to local GitLab remote"
+    git push --set-upstream local-gitlab "HEAD:refs/heads/${branch}"
+  fi
 }
 
 wait_for_gitlab
@@ -52,6 +112,7 @@ if [ -f gitlab-runner/generated/bootstrap.env ]; then
 fi
 
 if [ -z "${BOOTSTRAP_PAT}" ]; then
+  echo "creating bootstrap PAT"
   BOOTSTRAP_PAT="$(
     docker compose exec -T gitlab-platform gitlab-rails runner "
       user = User.find_by_username('root')
@@ -64,18 +125,18 @@ fi
 
 echo "GITLAB_BOOTSTRAP_PAT=${BOOTSTRAP_PAT}" > gitlab-runner/generated/bootstrap.env
 
+echo "creating or resolving GitLab project"
 PROJECT_JSON="$(
-  curl -fsS --header "PRIVATE-TOKEN: ${BOOTSTRAP_PAT}" \
+  gitlab_api_request POST /projects \
     --data-urlencode "name=${GITLAB_PROJECT_NAME}" \
     --data-urlencode "path=${GITLAB_PROJECT_PATH}" \
-    --request POST "http://localhost:${GITLAB_HTTP_PORT}/api/v4/projects" \
     || true
 )"
 
 if [ -n "${PROJECT_JSON}" ] && [ "$(printf '%s' "${PROJECT_JSON}" | json_field id)" != "" ]; then
   PROJECT_ID="$(printf '%s' "${PROJECT_JSON}" | json_field id)"
 else
-  SEARCH_JSON="$(curl -fsS --header "PRIVATE-TOKEN: ${BOOTSTRAP_PAT}" "http://localhost:${GITLAB_HTTP_PORT}/api/v4/projects?search=${GITLAB_PROJECT_PATH}")"
+  SEARCH_JSON="$(gitlab_api_request GET "/projects?search=${GITLAB_PROJECT_PATH}")"
   PROJECT_ID="$(
     GITLAB_PROJECT_PATH="${GITLAB_PROJECT_PATH}" python3 -c '
 import json
@@ -96,6 +157,7 @@ if [ -z "${PROJECT_ID}" ]; then
   exit 1
 fi
 
+echo "creating project runner token"
 RUNNER_JSON="$(
   TAG_ARGS=()
   OLD_IFS="${IFS}"
@@ -105,12 +167,11 @@ RUNNER_JSON="$(
   done
   IFS="${OLD_IFS}"
 
-  curl -fsS --header "PRIVATE-TOKEN: ${BOOTSTRAP_PAT}" \
+  gitlab_api_request POST /user/runners \
     --data-urlencode "runner_type=project_type" \
     --data-urlencode "project_id=${PROJECT_ID}" \
     --data-urlencode "description=${GITLAB_RUNNER_DESCRIPTION}" \
-    "${TAG_ARGS[@]}" \
-    --request POST "http://localhost:${GITLAB_HTTP_PORT}/api/v4/user/runners"
+    "${TAG_ARGS[@]}"
 )"
 
 RUNNER_TOKEN="$(printf '%s' "${RUNNER_JSON}" | json_field token)"
@@ -134,7 +195,10 @@ sed \
   -e "s|__RUNNER_NETWORK__|${PLATFORM_DOCKER_NETWORK}|g" \
   gitlab-runner/config.template.toml > gitlab-runner/generated/config.toml
 
+configure_local_git_remote
+
 docker compose restart gitlab-fargate-runner
+echo "syncing GitLab CI variables"
 ./scripts/sync-gitlab-ci-variables.sh
 
 echo "gitlab bootstrap complete"

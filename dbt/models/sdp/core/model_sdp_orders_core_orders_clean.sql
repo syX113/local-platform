@@ -1,4 +1,4 @@
-{{ config(alias='ORDERS') }}
+{{ config(alias='T_ORDERS_CLEAN') }}
 
 select
   cast(order_id as varchar) as order_id,
@@ -12,5 +12,6 @@ select
     else 'LOW'
   end as order_value_band,
   to_timestamp_ntz(order_created_at) as order_created_at,
-  cast(load_batch as varchar) as load_batch
-from {{ source('sdp_in', 'ext_raw_orders') }}
+  cast(load_batch as varchar) as load_batch,
+  current_timestamp() as cleaned_at
+from {{ source('source_sdp_orders_inbound', 'EXT_ORDERS_RAW') }}

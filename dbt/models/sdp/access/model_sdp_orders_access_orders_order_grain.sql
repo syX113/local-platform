@@ -1,4 +1,4 @@
-{{ config(alias='ORDERS') }}
+{{ config(alias='T_ORDERS_ORDER_GRAIN') }}
 
 select
   order_id,
@@ -9,5 +9,5 @@ select
   order_value_band,
   order_created_at,
   load_batch,
-  current_timestamp() as published_at
-from {{ ref('sdp_core_orders') }}
+  cleaned_at
+from {{ ref('model_sdp_orders_core_orders_clean') }}

@@ -1,0 +1,16 @@
+{
+  "jobs": [
+    {
+      "job_name": "promote_ingestion_pipeline",
+      "stage": "ingestion",
+      "include": ".gitlab/ci/ingestion-promotion.yml",
+      "needs": []
+    },
+    {
+      "job_name": "promote_dbt_pipeline",
+      "stage": "dbt",
+      "include": ".gitlab/ci/dbt-promotion.yml",
+      "needs": []
+    }
+  ]
+}

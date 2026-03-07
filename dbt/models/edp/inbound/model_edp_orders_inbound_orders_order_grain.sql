@@ -1,4 +1,4 @@
-{{ config(alias='ORDERS') }}
+{{ config(alias='V_IN_ORDERS_ORDER_GRAIN') }}
 
 select
   order_id,
@@ -9,5 +9,5 @@ select
   order_value_band,
   order_created_at,
   load_batch,
-  published_at as sdp_published_at
-from {{ ref('sdp_acc_orders') }}
+  cleaned_at
+from {{ ref('model_sdp_orders_access_orders_order_grain') }}

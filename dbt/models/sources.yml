@@ -1,19 +1,15 @@
 version: 2
 
 sources:
-  - name: sdp_in
+  - name: source_sdp_orders_inbound
     database: "{{ env_var('SNOWFLAKE_SDP_DATABASE') }}"
-    schema: "{{ env_var('SNOWFLAKE_SDP_IN_SCHEMA', 'IN') }}"
-    quoting:
-      database: false
-      schema: true
-      identifier: false
+    schema: "{{ env_var('SNOWFLAKE_SDP_IN_SCHEMA', 'INBOUND') }}"
     tables:
-      - name: ext_raw_orders
-      - name: ext_raw_order_items
+      - name: EXT_ORDERS_RAW
+      - name: EXT_ORDER_ITEMS_RAW
 
 models:
-  - name: sdp_core_orders
+  - name: model_sdp_orders_core_orders_clean
     columns:
       - name: order_id
         tests:
@@ -22,7 +18,7 @@ models:
       - name: order_total
         tests:
           - not_null
-  - name: sdp_core_order_items
+  - name: model_sdp_orders_core_order_items_clean
     columns:
       - name: order_id
         tests:
@@ -30,19 +26,25 @@ models:
       - name: item_id
         tests:
           - not_null
-  - name: edp_core_dim_customers
+  - name: model_sdp_orders_core_customer_order_summary
+    columns:
+      - name: customer_id
+        tests:
+          - not_null
+          - unique
+  - name: model_edp_orders_core_dim_customers
     columns:
       - name: customer_sk
         tests:
           - not_null
           - unique
-  - name: edp_core_dim_order_status
+  - name: model_edp_orders_core_dim_order_status
     columns:
       - name: status_sk
         tests:
           - not_null
           - unique
-  - name: edp_core_fct_order_revenue_star
+  - name: model_edp_orders_core_fct_order_revenue_star
     columns:
       - name: order_id
         tests:

@@ -103,13 +103,13 @@ def rows_to_tuples(rows: Iterable[dict[str, Any]], columns: list[str]) -> list[t
 def ensure_foundation(cursor) -> None:
     warehouse = os.environ["SNOWFLAKE_WAREHOUSE"]
     sdp_database = os.environ["SNOWFLAKE_SDP_DATABASE"]
-    sdp_in_schema = os.environ.get("SNOWFLAKE_SDP_IN_SCHEMA", "IN")
+    sdp_in_schema = os.environ.get("SNOWFLAKE_SDP_IN_SCHEMA", "INBOUND")
     sdp_core_schema = os.environ.get("SNOWFLAKE_SDP_CORE_SCHEMA", "CORE")
-    sdp_acc_schema = os.environ.get("SNOWFLAKE_SDP_ACC_SCHEMA", "ACC")
+    sdp_acc_schema = os.environ.get("SNOWFLAKE_SDP_ACC_SCHEMA", "ACCESS")
     edp_database = os.environ["SNOWFLAKE_EDP_DATABASE"]
-    edp_in_schema = os.environ.get("SNOWFLAKE_EDP_IN_SCHEMA", "IN")
+    edp_in_schema = os.environ.get("SNOWFLAKE_EDP_IN_SCHEMA", "INBOUND")
     edp_core_schema = os.environ.get("SNOWFLAKE_EDP_CORE_SCHEMA", "CORE")
-    edp_acc_schema = os.environ.get("SNOWFLAKE_EDP_ACC_SCHEMA", "ACC")
+    edp_acc_schema = os.environ.get("SNOWFLAKE_EDP_ACC_SCHEMA", "ACCESS")
 
     cursor.execute(f"use role {os.environ['SNOWFLAKE_ROLE']}")
     cursor.execute(
@@ -131,7 +131,7 @@ def ensure_foundation(cursor) -> None:
     cursor.execute(f"create schema if not exists {ident(edp_database, edp_acc_schema)}")
     cursor.execute(
         f"""
-        create or replace transient table {ident(sdp_database, sdp_in_schema, 'EXT_RAW_ORDERS')} (
+        create or replace transient table {ident(sdp_database, sdp_in_schema, 'EXT_ORDERS_RAW')} (
           ORDER_ID varchar,
           CUSTOMER_ID varchar,
           STATUS varchar,
@@ -144,7 +144,7 @@ def ensure_foundation(cursor) -> None:
     )
     cursor.execute(
         f"""
-        create or replace transient table {ident(sdp_database, sdp_in_schema, 'EXT_RAW_ORDER_ITEMS')} (
+        create or replace transient table {ident(sdp_database, sdp_in_schema, 'EXT_ORDER_ITEMS_RAW')} (
           ORDER_ID varchar,
           ITEM_ID varchar,
           SKU varchar,
@@ -159,7 +159,7 @@ def ensure_foundation(cursor) -> None:
 
 def load_raw_tables() -> None:
     sdp_database = os.environ["SNOWFLAKE_SDP_DATABASE"]
-    sdp_in_schema = os.environ.get("SNOWFLAKE_SDP_IN_SCHEMA", "IN")
+    sdp_in_schema = os.environ.get("SNOWFLAKE_SDP_IN_SCHEMA", "INBOUND")
     load_batch = datetime.utcnow().strftime("postgres-seed-%Y%m%dT%H%M%SZ")
 
     orders = fetch_rows(ORDERS_EXPORT_SQL, {"load_batch": load_batch})
@@ -190,7 +190,7 @@ def load_raw_tables() -> None:
             ensure_foundation(cursor)
             cursor.executemany(
                 f"""
-                insert into {ident(sdp_database, sdp_in_schema, 'EXT_RAW_ORDERS')}
+                insert into {ident(sdp_database, sdp_in_schema, 'EXT_ORDERS_RAW')}
                 (ORDER_ID, CUSTOMER_ID, STATUS, ITEM_COUNT, ORDER_TOTAL, ORDER_CREATED_AT, LOAD_BATCH)
                 values (%s, %s, %s, %s, %s, %s, %s)
                 """,
@@ -198,7 +198,7 @@ def load_raw_tables() -> None:
             )
             cursor.executemany(
                 f"""
-                insert into {ident(sdp_database, sdp_in_schema, 'EXT_RAW_ORDER_ITEMS')}
+                insert into {ident(sdp_database, sdp_in_schema, 'EXT_ORDER_ITEMS_RAW')}
                 (ORDER_ID, ITEM_ID, SKU, QUANTITY, UNIT_PRICE, LINE_TOTAL, LOADED_AT)
                 values (%s, %s, %s, %s, %s, %s, %s)
                 """,

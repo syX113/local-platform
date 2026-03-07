@@ -1,0 +1,17 @@
+stages:
+  - ingestion
+  - dbt
+
+promote_ingestion_pipeline:
+  stage: ingestion
+  trigger:
+    include:
+      - local: .gitlab/ci/ingestion-promotion.yml
+    strategy: depend
+
+promote_dbt_pipeline:
+  stage: dbt
+  trigger:
+    include:
+      - local: .gitlab/ci/dbt-promotion.yml
+    strategy: depend

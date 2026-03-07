@@ -21,6 +21,16 @@ if [ -z "${GITLAB_BOOTSTRAP_PAT:-}" ] || [ -z "${GITLAB_PROJECT_ID:-}" ]; then
 fi
 
 gitlab_api_url="http://localhost:${GITLAB_HTTP_PORT}/api/v4/projects/${GITLAB_PROJECT_ID}/variables"
+CURL_RETRY_ARGS=(
+  --silent
+  --show-error
+  --location
+  --connect-timeout 5
+  --max-time 30
+  --retry 20
+  --retry-delay 5
+  --retry-all-errors
+)
 
 ci_variable_keys=(
   COMPOSE_PROJECT_NAME
@@ -98,13 +108,13 @@ for key in "${ci_variable_keys[@]}"; do
   value="${!key}"
 
   status_code="$(
-    curl -sS -o /dev/null -w "%{http_code}" \
+    curl "${CURL_RETRY_ARGS[@]}" -o /dev/null -w "%{http_code}" \
       --header "PRIVATE-TOKEN: ${GITLAB_BOOTSTRAP_PAT}" \
       "${gitlab_api_url}/${key}"
   )"
 
   if [ "${status_code}" = "200" ]; then
-    curl -fsS \
+    curl --fail "${CURL_RETRY_ARGS[@]}" \
       --request PUT \
       --header "PRIVATE-TOKEN: ${GITLAB_BOOTSTRAP_PAT}" \
       --data-urlencode "value=${value}" \
@@ -113,7 +123,7 @@ for key in "${ci_variable_keys[@]}"; do
       --data-urlencode "raw=true" \
       "${gitlab_api_url}/${key}" >/dev/null
   else
-    curl -fsS \
+    curl --fail "${CURL_RETRY_ARGS[@]}" \
       --request POST \
       --header "PRIVATE-TOKEN: ${GITLAB_BOOTSTRAP_PAT}" \
       --data-urlencode "key=${key}" \

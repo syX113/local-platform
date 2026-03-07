@@ -1,145 +1,277 @@
 # Local Platform
 
-This repo scaffolds a local platform for testing GitLab CI/CD, containerized GitLab runners, Airflow orchestration, dlt ingestion, dbt transformations, MinIO as an S3 stand-in, a seeded PostgreSQL source system, and Snowflake connectivity.
+This repository provides a local integration platform for fast CI testing across `GitLab`, `GitLab Runner`, `Airflow`, `dlt`, `dbt`, `PostgreSQL`, `MinIO`, and `Snowflake`.
 
-## What the stack does
+The default sample flow is:
 
-- `gitlab-platform` runs GitLab locally for pipelines and repo hosting.
-- `gitlab-fargate-runner` uses the Docker executor to approximate AWS Fargate-style ephemeral job containers.
-- `lakehouse-object-store` provides local S3-compatible object storage via MinIO.
-- `source-postgres-db` acts as the operational source database and ships with deterministic sample data.
-- `airflow-metadata-db` stores Airflow metadata and the local Iceberg SQL catalog database.
-- `Airflow` orchestrates a three-step pipeline:
-  1. reseed PostgreSQL sample data
-  2. launch a separate `dlt-extractor` container to read PostgreSQL and write Iceberg tables to object storage
-  3. optionally launch a separate `dlt-extractor` container to mirror the raw export data into Snowflake for local mode
-  4. launch a separate `dbt-executor` container to build Snowflake models
-- `dbt` is executed outside Snowflake in a dedicated container and uses the Snowflake adapter to modify data in Snowflake.
+`PostgreSQL -> Airflow -> dlt -> MinIO/Iceberg -> Snowflake -> dbt`
 
-## Pipeline shape
+`dbt` and `dlt` always run in external containers. Locally those containers stand in for the real Fargate or EKS runtimes.
 
-The default local data flow is:
+## Services
 
-`source-postgres-db` -> `Airflow` -> `dlt-extractor` -> `lakehouse-object-store` (Iceberg tables) -> `dbt-executor` -> `Snowflake`
+- `gitlab-platform`: local GitLab UI and API
+- `gitlab-fargate-runner`: local Docker executor runner that approximates ephemeral Fargate-style jobs
+- `airflow-webserver` and `airflow-scheduler`: orchestration layer
+- `dlt-extractor`: ingestion runtime container
+- `dbt-executor`: dbt runtime container
+- `source-postgres-db`: operational source database with deterministic sample data
+- `lakehouse-object-store`: MinIO as local S3-compatible storage
+- `airflow-metadata-db`: Airflow metadata plus local Iceberg SQL catalog
 
-`dbt-executor` is the local stand-in for the real external runtime. In production, that same role would typically be implemented as a Fargate task or an EKS job. Snowflake remains only the target warehouse and execution engine for SQL statements submitted by dbt.
+## Sample Data Products
 
-The source PostgreSQL schema uses normalized tables (`customers`, `orders`, `order_items`) and exposes export views (`raw_orders_export`, `raw_order_items_export`) that dlt loads into Iceberg as `raw_orders` and `raw_order_items`.
+The repo ships with two sample Snowflake data products built by dbt.
 
-## Important constraints
+### SDP
 
-Two current Snowflake limitations shape this setup:
+Database: `DB_SDP_ORDERS`
 
-- A private `localhost:9000` MinIO endpoint is not reachable by Snowflake.
-- Snowflake Open Catalog manages storage in Amazon S3, Google Cloud Storage, or Azure Storage, not MinIO.
+Schemas:
 
-Because of that, this repo supports two modes:
+- `INBOUND`
+- `CORE`
+- `ACCESS`
 
-- Local mode:
-  dlt writes Iceberg tables to MinIO and registers them in a local Postgres-backed Iceberg SQL catalog.
-- Snowflake end-to-end mode:
-  use the same dlt/dbt code, but switch the storage target from MinIO to real S3 and fill the Open Catalog and Snowflake credentials in `.env`.
+Objects:
 
-## Quick start
+- `INBOUND.EXT_ORDERS_RAW`
+- `INBOUND.EXT_ORDER_ITEMS_RAW`
+- `CORE.T_ORDERS_CLEAN`
+- `CORE.T_ORDER_ITEMS_CLEAN`
+- `CORE.T_CUSTOMER_ORDER_SUMMARY`
+- `ACCESS.T_ORDERS_ORDER_GRAIN`
+- `ACCESS.T_ORDERS_CUSTOMER_GRAIN`
+- `ACCESS.T_ORDER_LINES_ORDER_GRAIN`
 
-1. Copy `.env.example` to `.env`.
-2. Fill the Snowflake variables only if you want Snowflake connectivity.
-3. Start or refresh the stack:
+Meaning:
+
+- `INBOUND` is the source-facing landing layer.
+- In local mode, `EXT_*` objects are Snowflake transient-table stand-ins for external tables because Snowflake cannot query private local MinIO directly.
+- With real S3 plus Open Catalog, this layer is where the true external-table pattern belongs.
+- `CORE` contains basic cleanup and shaping.
+- `ACCESS` publishes reusable order-grain and customer-grain outputs for downstream products.
+
+### EDP
+
+Database: `DB_EDP_ORDERS`
+
+Schemas:
+
+- `INBOUND`
+- `CORE`
+- `ACCESS`
+
+Objects:
+
+- `INBOUND.V_IN_ORDERS_ORDER_GRAIN`
+- `INBOUND.V_IN_ORDERS_CUSTOMER_GRAIN`
+- `INBOUND.V_IN_ORDER_LINES_ORDER_GRAIN`
+- `CORE.T_ORDERS_3NF`
+- `CORE.T_ORDER_LINES_3NF`
+- `CORE.T_CUSTOMERS_3NF`
+- `CORE.DIM_CUSTOMERS`
+- `CORE.DIM_ORDER_STATUS`
+- `CORE.FCT_ORDER_REVENUE_STAR`
+- `ACCESS.T_ORDERS_ONLY`
+- `ACCESS.T_ORDERS_COMPLETE`
+- `ACCESS.T_ORDERS_FULFILLED`
+
+Meaning:
+
+- `INBOUND` consumes the published `ACCESS` layer from the SDP.
+- `CORE` contains the business model: first 3NF tables, then the star schema.
+- `ACCESS` publishes business-facing outputs derived from the star schema.
+
+## dbt Naming
+
+The dbt nodes follow the `model_sdp_orders_*` and `model_edp_orders_*` naming pattern.
+
+Examples:
+
+- `model_sdp_orders_core_orders_clean`
+- `model_sdp_orders_access_orders_customer_grain`
+- `model_edp_orders_core_fct_order_revenue_star`
+- `model_edp_orders_access_orders_complete`
+
+## Full Reset And Bootstrap
+
+To kill everything and start again from a clean local state:
 
 ```bash
+./scripts/reset-platform.sh
 ./scripts/bootstrap.sh
 ```
 
-If you change `.env` later, rerun `./scripts/bootstrap.sh` so the long-running Airflow and GitLab services pick up the new values.
-
-4. Wait for GitLab to finish booting, then bootstrap the project runner:
+After GitLab is reachable on `http://localhost:8080`, finish the GitLab bootstrap:
 
 ```bash
 ./scripts/bootstrap-gitlab.sh
 ```
 
-Both setup scripts print a full access summary at the end, including local URLs, credentials from `.env`, runtime service names, important filesystem paths, generated GitLab runner/project details, and the local GitLab project URL. `bootstrap-gitlab.sh` also syncs the runtime-related `.env` values into the GitLab project's CI/CD variables so pipelines can run without manually re-entering Snowflake, MinIO, PostgreSQL, and dbt/dlt settings.
+That is the intended full local restart flow.
 
-5. Reseed the source system at any time:
+## Quick Start
+
+1. Copy `.env.example` to `.env`.
+2. Fill the Snowflake variables if you want Snowflake connectivity.
+3. Reset if you want a clean rebuild:
+
+```bash
+./scripts/reset-platform.sh
+```
+
+4. Bootstrap the platform:
+
+```bash
+./scripts/bootstrap.sh
+```
+
+5. Wait for the web UIs:
+
+- GitLab: `http://localhost:8080`
+- Airflow: `http://localhost:8088`
+- MinIO console: `http://localhost:9001`
+
+GitLab is the slowest service in the stack. After a full reset it can take a few minutes before `http://localhost:8080/users/sign_in` stops returning warm-up errors.
+
+6. Bootstrap the local GitLab project and runner:
+
+```bash
+./scripts/bootstrap-gitlab.sh
+```
+
+7. Print the current URLs, credentials, paths, and generated GitLab details at any time:
+
+```bash
+./scripts/print-setup-summary.sh
+```
+
+## Useful Commands
+
+Reset and rebuild:
+
+```bash
+./scripts/reset-platform.sh
+./scripts/bootstrap.sh
+./scripts/bootstrap-gitlab.sh
+```
+
+Reload only the sample source data:
 
 ```bash
 ./scripts/load-source-sample-data.sh
 ```
 
-6. Run the pipeline directly:
+Run the default local pipeline:
 
 ```bash
 ./scripts/run-local-pipeline.sh
 ```
 
-7. Validate the Airflow DAG end to end from the command line:
+Test the Airflow DAG from the CLI:
 
 ```bash
 ./scripts/test-airflow-dag.sh
 ```
 
-8. Or trigger the Airflow DAG at `http://localhost:8088` and the GitLab UI at `http://localhost:8080`.
-
-If Snowflake credentials are not set, the direct script and Airflow DAG still run the PostgreSQL-to-Iceberg `dlt` load and skip the `dbt` step.
-
-## GitLab promotion pipelines
-
-The GitLab CI setup now fans out into two child pipelines from the root [.gitlab-ci.yml](/Users/taagiti2/Documents/01%20Projects/Valiant/repos/local-platform/.gitlab-ci.yml):
-
-- [ingestion-promotion.yml](/Users/taagiti2/Documents/01%20Projects/Valiant/repos/local-platform/.gitlab/ci/ingestion-promotion.yml)
-  validates and promotes the PostgreSQL -> Airflow/dlt -> MinIO/Iceberg path. It compiles the Airflow and dlt assets, runs the `local_platform_ingest` DAG in ingestion-only mode, verifies source counts, confirms Iceberg catalog entries, and checks MinIO parquet row counts.
-- [dbt-promotion.yml](/Users/taagiti2/Documents/01%20Projects/Valiant/repos/local-platform/.gitlab/ci/dbt-promotion.yml)
-  validates and promotes the Snowflake-facing dbt layer. It bootstraps Snowflake, refreshes the local landing data, runs `dbt parse`, runs `dbt build`, executes the zero-copy clone check, and verifies the modeled row counts in Snowflake.
-
-Each child pipeline ends with a mock CD job that writes a small artifact instead of deploying anywhere. That keeps the promotion flow structurally complete while remaining safe in a single local environment.
-
-The promotion logic lives in [verify-ingestion-promotion.sh](/Users/taagiti2/Documents/01%20Projects/Valiant/repos/local-platform/scripts/verify-ingestion-promotion.sh) and [verify-dbt-promotion.sh](/Users/taagiti2/Documents/01%20Projects/Valiant/repos/local-platform/scripts/verify-dbt-promotion.sh). Each child pipeline publishes its own `artifacts/` directory back to GitLab.
-
-## Sample data
-
-The sample source dataset is deterministic and loaded automatically on first source database startup. It can also be reset on demand with `./scripts/load-source-sample-data.sh`.
-
-Current seed volume:
-
-- 12 customers
-- 30 orders
-- 60 order items
-
-## Snowflake bootstrap
-
-To bootstrap the Snowflake warehouse and databases in local mode, run:
+Bootstrap Snowflake only:
 
 ```bash
 ./scripts/bootstrap-snowflake.sh
 ```
 
-This always applies the foundation SQL. If `OPEN_CATALOG_*` variables are present, it also applies the Open Catalog integration SQL and the catalog-linked raw database SQL. In strictly local MinIO mode those steps are skipped by design.
+## Validation Commands
 
-Then build the dbt project:
+Validate the ingestion promotion flow:
 
 ```bash
-docker compose run --rm dbt-executor dbt build --project-dir /opt/platform/dbt --profiles-dir /opt/platform/dbt/profiles
+./scripts/verify-ingestion-promotion.sh
 ```
 
-To run the clone check that approximates a zero-copy CI test:
+Validate the Snowflake and dbt promotion flow:
+
+```bash
+./scripts/verify-dbt-promotion.sh
+```
+
+Run the zero-copy clone check:
 
 ```bash
 docker compose run --rm dbt-executor python /opt/platform/dbt/scripts/zero_copy_clone_check.py
 ```
 
-## Notes on GitLab Runner behavior
+## GitLab CI Layout
 
-The runner uses Docker executor containers on the same Docker network as GitLab, Airflow, MinIO, the PostgreSQL services, and the tooling images. That gives you the local ergonomics of ephemeral containers without pretending it is literally Fargate. The main gap is that Fargate networking, IAM, and task metadata are not reproduced locally.
+The root pipeline fans out into child pipelines through [.gitlab/ci/generated/root-pipeline.yml](/Users/taagiti2/Documents/01%20Projects/Valiant/repos/local-platform/.gitlab/ci/generated/root-pipeline.yml).
 
-For the same reason, the local `airflow-scheduler` service runs as `root` so `DockerOperator` can access the mounted Docker socket and launch the external `dlt-extractor` and `dbt-executor` containers. That is a local convenience for this sandbox, not the intended production security model.
+Current shipped child pipelines:
 
-The GitLab CI jobs use a separate `COMPOSE_PROJECT_NAME` per pipeline run and random host port assignments for MinIO and PostgreSQL. That avoids collisions with the always-on local platform stack while still using the same service definitions, images, and scripts.
+- [.gitlab/ci/ingestion-promotion.yml](/Users/taagiti2/Documents/01%20Projects/Valiant/repos/local-platform/.gitlab/ci/ingestion-promotion.yml)
+- [.gitlab/ci/dbt-promotion.yml](/Users/taagiti2/Documents/01%20Projects/Valiant/repos/local-platform/.gitlab/ci/dbt-promotion.yml)
 
-The dbt promotion pipeline still uses the local Snowflake raw sync path when `SNOWFLAKE_LOCAL_RAW_SYNC=true`. That is the local stand-in for the production Open Catalog path, because Snowflake cannot query a private local MinIO endpoint directly.
+Each child pipeline ends with a mock CD step so the CI/CD structure can be tested locally without a second environment.
 
-## Source references
+## Scaffolding New Assets
 
-- Snowflake docs state that Open Catalog uses S3, GCS, or Azure storage and that Snowflake can query but not write to Open Catalog-managed tables.
-- Snowflake docs also state that catalog-linked databases are supported for REST catalog integrations such as Snowflake Open Catalog.
-- GitLab docs show the current runner creation workflow based on `POST /user/runners`.
-- dlt docs show Iceberg support on the filesystem destination and support for SQL or REST catalogs.
+Create a new ingestion pipeline scaffold:
+
+```bash
+python3 scripts/scaffold_ingestion_pipeline.py retail_orders
+```
+
+That creates:
+
+- a new Airflow DAG
+- a new dlt pipeline script
+- a verification script
+- a GitLab child pipeline and root-pipeline registration
+
+Create a new SDP/EDP dbt product scaffold:
+
+```bash
+python3 scripts/scaffold_mesh_product.py finance_orders
+```
+
+That creates:
+
+- Snowflake foundation SQL for the new product databases
+- dbt model skeletons
+- a dbt verification script
+- a GitLab child pipeline and root-pipeline registration
+
+Create a generic GitLab child pipeline scaffold:
+
+```bash
+python3 scripts/scaffold_gitlab_pipeline.py smoke_checks --kind generic --verify-script ./scripts/print-setup-summary.sh
+```
+
+If you edit the pipeline registry manually, regenerate the root fan-out file with:
+
+```bash
+python3 scripts/render_gitlab_root_pipeline.py
+```
+
+## Local Constraints
+
+- Snowflake cannot read private `localhost` MinIO endpoints.
+- Snowflake Open Catalog requires real cloud object storage, not local MinIO.
+- Because of that, local mode uses the `snowflake_raw_sync.py` bridge to mirror the SDP inbound layer into Snowflake before dbt runs.
+- The GitLab runner uses Docker executor locally. It is a pragmatic stand-in for Fargate, not a literal reproduction of AWS networking or IAM.
+
+## Sample Source Data
+
+The seeded PostgreSQL source contains:
+
+- `12` customers
+- `30` orders
+- `60` order items
+
+The default validations currently prove:
+
+- PostgreSQL -> Airflow/dlt -> MinIO/Iceberg works
+- Snowflake inbound raw sync works
+- SDP dbt product build works
+- EDP dbt product build works
+- zero-copy clone smoke test works
+- GitLab child pipelines for ingestion and dbt promotion work locally
