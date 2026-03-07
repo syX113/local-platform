@@ -1,0 +1,15 @@
+name: local_platform
+version: 1.0.0
+config-version: 2
+profile: local_platform
+
+model-paths: ["models"]
+seed-paths: ["seeds"]
+clean-targets:
+  - target
+  - dbt_packages
+
+models:
+  local_platform:
+    +materialized: view
+

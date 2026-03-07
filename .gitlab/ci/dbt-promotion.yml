@@ -1,0 +1,48 @@
+include:
+  - local: .gitlab/ci/common.yml
+
+workflow:
+  name: DBT Promotion
+
+stages:
+  - build
+  - validate
+  - promote
+  - mock_cd
+
+build_dbt_runtimes:
+  stage: build
+  script:
+    - docker compose build dlt-extractor dbt-executor
+
+validate_dbt_assets:
+  stage: validate
+  script:
+    - docker compose config -q
+    - docker compose run --rm --no-deps dlt-extractor python -m compileall /opt/platform/dlt /opt/platform/scripts
+    - docker compose run --rm --no-deps dbt-executor python -m compileall /opt/platform/dbt /opt/platform/scripts
+    - docker compose run --rm --no-deps dbt-executor dbt parse --project-dir /opt/platform/dbt --profiles-dir /opt/platform/dbt/profiles
+
+promote_dbt_models:
+  stage: promote
+  script:
+    - ./scripts/verify-dbt-promotion.sh
+  artifacts:
+    when: always
+    expire_in: 7 days
+    paths:
+      - artifacts/dbt/
+
+mock_cd_dbt:
+  stage: mock_cd
+  needs:
+    - promote_dbt_models
+  script:
+    - mkdir -p artifacts/dbt
+    - printf 'mock_cd=dbt\nstatus=skipped_real_deploy\nreason=no_second_environment\n' > artifacts/dbt/mock_cd.txt
+    - cat artifacts/dbt/mock_cd.txt
+  artifacts:
+    when: always
+    expire_in: 7 days
+    paths:
+      - artifacts/dbt/mock_cd.txt

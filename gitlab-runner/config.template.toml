@@ -1,0 +1,19 @@
+concurrent = 4
+check_interval = 2
+
+[[runners]]
+  name = "__RUNNER_DESCRIPTION__"
+  url = "__GITLAB_URL__"
+  token = "__RUNNER_TOKEN__"
+  executor = "docker"
+  clone_url = "__CLONE_URL__"
+  environment = ["DOCKER_HOST=unix:///var/run/docker.sock"]
+
+  [runners.docker]
+    image = "__JOB_IMAGE__"
+    privileged = false
+    disable_cache = false
+    network_mode = "__RUNNER_NETWORK__"
+    pull_policy = "if-not-present"
+    volumes = ["/cache", "/var/run/docker.sock:/var/run/docker.sock"]
+

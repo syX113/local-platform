@@ -1,0 +1,123 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "${ROOT_DIR}"
+
+source "${ROOT_DIR}/scripts/common.sh"
+ensure_platform_env
+
+if [ ! -f "${ROOT_DIR}/gitlab-runner/generated/bootstrap.env" ] || [ ! -f "${ROOT_DIR}/gitlab-runner/generated/project.env" ]; then
+  echo "GitLab bootstrap artifacts are missing; run ./scripts/bootstrap-gitlab.sh first" >&2
+  exit 1
+fi
+
+load_env_preserving_existing "${ROOT_DIR}/gitlab-runner/generated/bootstrap.env"
+load_env_preserving_existing "${ROOT_DIR}/gitlab-runner/generated/project.env"
+
+if [ -z "${GITLAB_BOOTSTRAP_PAT:-}" ] || [ -z "${GITLAB_PROJECT_ID:-}" ]; then
+  echo "GitLab bootstrap token or project id is missing" >&2
+  exit 1
+fi
+
+gitlab_api_url="http://localhost:${GITLAB_HTTP_PORT}/api/v4/projects/${GITLAB_PROJECT_ID}/variables"
+
+ci_variable_keys=(
+  COMPOSE_PROJECT_NAME
+  PLATFORM_DOCKER_NETWORK
+  AIRFLOW_PORT
+  AIRFLOW_UID
+  AIRFLOW_ADMIN_USERNAME
+  AIRFLOW_ADMIN_PASSWORD
+  AIRFLOW_ADMIN_EMAIL
+  AIRFLOW_FERNET_KEY
+  AIRFLOW_WEBSERVER_SECRET_KEY
+  AIRFLOW_METADATA_DB_USER
+  AIRFLOW_METADATA_DB_PASSWORD
+  AIRFLOW_METADATA_DB_NAME
+  AIRFLOW_METADATA_DB_PORT
+  SOURCE_POSTGRES_HOST
+  SOURCE_POSTGRES_PORT
+  SOURCE_POSTGRES_EXPOSE_PORT
+  SOURCE_POSTGRES_DB
+  SOURCE_POSTGRES_USER
+  SOURCE_POSTGRES_PASSWORD
+  SOURCE_POSTGRES_SCHEMA
+  DLT_PIPELINE_NAME
+  DLT_REFRESH_MODE
+  ICEBERG_NAMESPACE
+  ICEBERG_CATALOG_TYPE
+  ICEBERG_SQL_URI
+  MINIO_API_PORT
+  MINIO_CONSOLE_PORT
+  MINIO_ROOT_USER
+  MINIO_ROOT_PASSWORD
+  MINIO_REGION
+  MINIO_BUCKET
+  MINIO_PREFIX
+  MINIO_ENDPOINT
+  MINIO_PUBLIC_ENDPOINT
+  MINIO_USE_SSL
+  OBJECT_STORE_TYPE
+  OBJECT_STORE_BUCKET
+  OBJECT_STORE_ACCESS_KEY_ID
+  OBJECT_STORE_SECRET_ACCESS_KEY
+  OBJECT_STORE_ENDPOINT_URL
+  OBJECT_STORE_REGION
+  OBJECT_STORE_USE_SSL
+  OPEN_CATALOG_URI
+  OPEN_CATALOG_NAME
+  OPEN_CATALOG_CLIENT_ID
+  OPEN_CATALOG_CLIENT_SECRET
+  OPEN_CATALOG_SCOPE
+  OPEN_CATALOG_ACCESS_DELEGATION
+  SNOWFLAKE_ACCOUNT
+  SNOWFLAKE_USER
+  SNOWFLAKE_PASSWORD
+  SNOWFLAKE_ROLE
+  SNOWFLAKE_WAREHOUSE
+  SNOWFLAKE_TARGET_DATABASE
+  SNOWFLAKE_TARGET_SCHEMA
+  SNOWFLAKE_RAW_DATABASE
+  SNOWFLAKE_CATALOG_INTEGRATION
+  SNOWFLAKE_CLONE_SCHEMA
+  SNOWFLAKE_LOCAL_RAW_SYNC
+  DBT_THREADS
+)
+
+for key in "${ci_variable_keys[@]}"; do
+  if [ -z "${!key+x}" ]; then
+    continue
+  fi
+
+  value="${!key}"
+
+  status_code="$(
+    curl -sS -o /dev/null -w "%{http_code}" \
+      --header "PRIVATE-TOKEN: ${GITLAB_BOOTSTRAP_PAT}" \
+      "${gitlab_api_url}/${key}"
+  )"
+
+  if [ "${status_code}" = "200" ]; then
+    curl -fsS \
+      --request PUT \
+      --header "PRIVATE-TOKEN: ${GITLAB_BOOTSTRAP_PAT}" \
+      --data-urlencode "value=${value}" \
+      --data-urlencode "masked=false" \
+      --data-urlencode "protected=false" \
+      --data-urlencode "raw=true" \
+      "${gitlab_api_url}/${key}" >/dev/null
+  else
+    curl -fsS \
+      --request POST \
+      --header "PRIVATE-TOKEN: ${GITLAB_BOOTSTRAP_PAT}" \
+      --data-urlencode "key=${key}" \
+      --data-urlencode "value=${value}" \
+      --data-urlencode "masked=false" \
+      --data-urlencode "protected=false" \
+      --data-urlencode "raw=true" \
+      "${gitlab_api_url}" >/dev/null
+  fi
+done
+
+echo "Synced ${#ci_variable_keys[@]} GitLab CI/CD variables to project ${GITLAB_PROJECT_ID}"

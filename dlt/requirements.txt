@@ -1,0 +1,4 @@
+dlt[filesystem,pyiceberg]>=1.21,<2
+psycopg2-binary>=2.9,<3
+sqlalchemy>=2.0.18,<3
+snowflake-connector-python>=3.12,<4
