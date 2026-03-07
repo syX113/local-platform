@@ -10,15 +10,15 @@ ensure_platform_env
 mkdir -p gitlab-runner/generated
 
 wait_for_gitlab() {
-  until curl -fsS "http://localhost:${GITLAB_HTTP_PORT}/-/readiness" >/dev/null; do
+  until curl -fsS "http://localhost:${GITLAB_HTTP_PORT}/help" >/dev/null; do
     internal_status="$(
       docker compose exec -T gitlab-platform /bin/bash -lc \
-        "curl -sS -o /dev/null -w '%{http_code}' http://127.0.0.1/-/readiness || true"
+        "curl -sS -o /dev/null -w '%{http_code}' http://127.0.0.1/help || true"
     )"
     if [ "${internal_status}" = "200" ]; then
       return 0
     fi
-    echo "waiting for GitLab readiness endpoint"
+    echo "waiting for GitLab web endpoint"
     sleep 10
   done
 }
@@ -27,16 +27,40 @@ json_field() {
   python3 -c 'import json,sys; print(json.load(sys.stdin).get(sys.argv[1], ""))' "$1"
 }
 
+bootstrap_pat_works() {
+  local token="${1:-}"
+
+  if [ -z "${token}" ]; then
+    return 1
+  fi
+
+  curl -fsS \
+    --header "PRIVATE-TOKEN: ${token}" \
+    "http://localhost:${GITLAB_HTTP_PORT}/api/v4/user" >/dev/null
+}
+
 wait_for_gitlab
 
-BOOTSTRAP_PAT="$(
-  docker compose exec -T gitlab-platform gitlab-rails runner "
-    user = User.find_by_username('root')
-    user.personal_access_tokens.where(name: 'local-platform-bootstrap').each(&:revoke!)
-    token = user.personal_access_tokens.create!(scopes: ['api', 'create_runner', 'admin_mode'], name: 'local-platform-bootstrap', expires_at: 365.days.from_now)
-    puts token.token
-  " | tail -n 1
-)"
+BOOTSTRAP_PAT=""
+
+if [ -f gitlab-runner/generated/bootstrap.env ]; then
+  # shellcheck disable=SC1091
+  source gitlab-runner/generated/bootstrap.env
+  if bootstrap_pat_works "${GITLAB_BOOTSTRAP_PAT:-}"; then
+    BOOTSTRAP_PAT="${GITLAB_BOOTSTRAP_PAT}"
+  fi
+fi
+
+if [ -z "${BOOTSTRAP_PAT}" ]; then
+  BOOTSTRAP_PAT="$(
+    docker compose exec -T gitlab-platform gitlab-rails runner "
+      user = User.find_by_username('root')
+      user.personal_access_tokens.where(name: 'local-platform-bootstrap').each(&:revoke!)
+      token = user.personal_access_tokens.create!(scopes: ['api', 'create_runner', 'admin_mode'], name: 'local-platform-bootstrap', expires_at: 365.days.from_now)
+      puts token.token
+    " | tail -n 1
+  )"
+fi
 
 echo "GITLAB_BOOTSTRAP_PAT=${BOOTSTRAP_PAT}" > gitlab-runner/generated/bootstrap.env
 
