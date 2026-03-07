@@ -8,8 +8,11 @@ local_platform:
       password: "{{ env_var('SNOWFLAKE_PASSWORD') }}"
       role: "{{ env_var('SNOWFLAKE_ROLE') }}"
       warehouse: "{{ env_var('SNOWFLAKE_WAREHOUSE') }}"
-      database: "{{ env_var('SNOWFLAKE_TARGET_DATABASE') }}"
-      schema: "{{ env_var('SNOWFLAKE_TARGET_SCHEMA') }}"
+      database: "{{ env_var('SNOWFLAKE_EDP_DATABASE') }}"
+      schema: "{{ env_var('SNOWFLAKE_EDP_ACC_SCHEMA', 'ACC') }}"
+      quoting:
+        database: false
+        schema: true
+        identifier: false
       threads: "{{ env_var('DBT_THREADS', 4) | int }}"
       client_session_keep_alive: false
-

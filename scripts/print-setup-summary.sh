@@ -91,8 +91,10 @@ printf 'Storage And Data Targets\n'
 printf '  MinIO bucket: %s\n' "${MINIO_BUCKET}"
 printf '  MinIO prefix: %s\n' "${MINIO_PREFIX}"
 printf '  Iceberg namespace: %s\n' "${ICEBERG_NAMESPACE}"
-printf '  Snowflake raw database: %s\n' "${SNOWFLAKE_RAW_DATABASE}"
-printf '  Snowflake target database/schema: %s.%s\n' "${SNOWFLAKE_TARGET_DATABASE}" "${SNOWFLAKE_TARGET_SCHEMA}"
+printf '  Snowflake SDP database: %s\n' "${SNOWFLAKE_SDP_DATABASE}"
+printf '  Snowflake SDP schemas: %s, %s, %s\n' "${SNOWFLAKE_SDP_IN_SCHEMA}" "${SNOWFLAKE_SDP_CORE_SCHEMA}" "${SNOWFLAKE_SDP_ACC_SCHEMA}"
+printf '  Snowflake EDP database: %s\n' "${SNOWFLAKE_EDP_DATABASE}"
+printf '  Snowflake EDP schemas: %s, %s, %s\n' "${SNOWFLAKE_EDP_IN_SCHEMA}" "${SNOWFLAKE_EDP_CORE_SCHEMA}" "${SNOWFLAKE_EDP_ACC_SCHEMA}"
 printf '  Snowflake warehouse: %s\n' "${SNOWFLAKE_WAREHOUSE}"
 printf '  Local Snowflake raw sync: %s\n' "${SNOWFLAKE_LOCAL_RAW_SYNC:-false}"
 printf '\n'

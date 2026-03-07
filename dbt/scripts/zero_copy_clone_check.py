@@ -7,7 +7,7 @@ import snowflake.connector
 
 
 def ident(*parts: str) -> str:
-    return ".".join(parts)
+    return ".".join(f'"{part}"' for part in parts)
 
 
 def connect():
@@ -17,8 +17,8 @@ def connect():
         password=os.environ["SNOWFLAKE_PASSWORD"],
         role=os.environ["SNOWFLAKE_ROLE"],
         warehouse=os.environ["SNOWFLAKE_WAREHOUSE"],
-        database=os.environ["SNOWFLAKE_TARGET_DATABASE"],
-        schema=os.environ["SNOWFLAKE_TARGET_SCHEMA"],
+        database=os.environ["SNOWFLAKE_EDP_DATABASE"],
+        schema=os.environ["SNOWFLAKE_EDP_CORE_SCHEMA"],
     )
 
 
@@ -28,10 +28,10 @@ def scalar(cursor, sql: str):
 
 
 def main() -> int:
-    database = os.environ["SNOWFLAKE_TARGET_DATABASE"]
-    schema = os.environ["SNOWFLAKE_TARGET_SCHEMA"]
+    database = os.environ["SNOWFLAKE_EDP_DATABASE"]
+    schema = os.environ["SNOWFLAKE_EDP_CORE_SCHEMA"]
     clone_schema = os.environ.get("SNOWFLAKE_CLONE_SCHEMA", f"{schema}_CLONE_CI")
-    fact_table = "FCT_ORDER_REVENUE"
+    fact_table = "FCT_ORDER_REVENUE_STAR"
 
     connection = connect()
     try:
@@ -61,4 +61,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

@@ -11,5 +11,24 @@ clean-targets:
 
 models:
   local_platform:
-    +materialized: view
-
+    sdp:
+      +database: "{{ env_var('SNOWFLAKE_SDP_DATABASE') }}"
+      core:
+        +schema: "{{ env_var('SNOWFLAKE_SDP_CORE_SCHEMA', 'CORE') }}"
+        +materialized: view
+      acc:
+        +schema: "{{ env_var('SNOWFLAKE_SDP_ACC_SCHEMA', 'ACC') }}"
+        +materialized: view
+    edp:
+      in:
+        +database: "{{ env_var('SNOWFLAKE_EDP_DATABASE') }}"
+        +schema: "{{ env_var('SNOWFLAKE_EDP_IN_SCHEMA', 'IN') }}"
+        +materialized: view
+      core:
+        +database: "{{ env_var('SNOWFLAKE_EDP_DATABASE') }}"
+        +schema: "{{ env_var('SNOWFLAKE_EDP_CORE_SCHEMA', 'CORE') }}"
+        +materialized: table
+      acc:
+        +database: "{{ env_var('SNOWFLAKE_EDP_DATABASE') }}"
+        +schema: "{{ env_var('SNOWFLAKE_EDP_ACC_SCHEMA', 'ACC') }}"
+        +materialized: materialized_view

@@ -17,9 +17,12 @@ required_vars=(
   SNOWFLAKE_PASSWORD
   SNOWFLAKE_ROLE
   SNOWFLAKE_WAREHOUSE
-  SNOWFLAKE_TARGET_DATABASE
-  SNOWFLAKE_TARGET_SCHEMA
-  SNOWFLAKE_RAW_DATABASE
+  SNOWFLAKE_SDP_DATABASE
+  SNOWFLAKE_SDP_IN_SCHEMA
+  SNOWFLAKE_SDP_ACC_SCHEMA
+  SNOWFLAKE_EDP_DATABASE
+  SNOWFLAKE_EDP_CORE_SCHEMA
+  SNOWFLAKE_EDP_ACC_SCHEMA
 )
 
 for key in "${required_vars[@]}"; do
@@ -54,22 +57,41 @@ import os
 
 import snowflake.connector
 
+def ident(*parts: str) -> str:
+    return ".".join(f'"{part}"' for part in parts)
+
 queries = {
-    "raw_orders": (
-        f"select count(*) from {os.environ['SNOWFLAKE_RAW_DATABASE']}.LANDING.RAW_ORDERS",
+    "sdp_ext_raw_orders": (
+        f"select count(*) from {ident(os.environ['SNOWFLAKE_SDP_DATABASE'], os.environ['SNOWFLAKE_SDP_IN_SCHEMA'], 'EXT_RAW_ORDERS')}",
         30,
     ),
-    "raw_order_items": (
-        f"select count(*) from {os.environ['SNOWFLAKE_RAW_DATABASE']}.LANDING.RAW_ORDER_ITEMS",
+    "sdp_ext_raw_order_items": (
+        f"select count(*) from {ident(os.environ['SNOWFLAKE_SDP_DATABASE'], os.environ['SNOWFLAKE_SDP_IN_SCHEMA'], 'EXT_RAW_ORDER_ITEMS')}",
         60,
     ),
-    "stg_raw_orders": (
-        f"select count(*) from {os.environ['SNOWFLAKE_TARGET_DATABASE']}.{os.environ['SNOWFLAKE_TARGET_SCHEMA']}.STG_RAW_ORDERS",
+    "sdp_access_orders": (
+        f"select count(*) from {ident(os.environ['SNOWFLAKE_SDP_DATABASE'], os.environ['SNOWFLAKE_SDP_ACC_SCHEMA'], 'ORDERS')}",
         30,
     ),
-    "fct_order_revenue": (
-        f"select count(*) from {os.environ['SNOWFLAKE_TARGET_DATABASE']}.{os.environ['SNOWFLAKE_TARGET_SCHEMA']}.FCT_ORDER_REVENUE",
+    "edp_dim_customers": (
+        f"select count(*) from {ident(os.environ['SNOWFLAKE_EDP_DATABASE'], os.environ['SNOWFLAKE_EDP_CORE_SCHEMA'], 'DIM_CUSTOMERS')}",
+        12,
+    ),
+    "edp_dim_order_status": (
+        f"select count(*) from {ident(os.environ['SNOWFLAKE_EDP_DATABASE'], os.environ['SNOWFLAKE_EDP_CORE_SCHEMA'], 'DIM_ORDER_STATUS')}",
+        3,
+    ),
+    "edp_fact_order_revenue_star": (
+        f"select count(*) from {ident(os.environ['SNOWFLAKE_EDP_DATABASE'], os.environ['SNOWFLAKE_EDP_CORE_SCHEMA'], 'FCT_ORDER_REVENUE_STAR')}",
         30,
+    ),
+    "edp_mv_order_revenue_created": (
+        f"select count(*) from {ident(os.environ['SNOWFLAKE_EDP_DATABASE'], os.environ['SNOWFLAKE_EDP_ACC_SCHEMA'], 'MV_ORDER_REVENUE_CREATED')}",
+        10,
+    ),
+    "edp_mv_order_revenue_fulfilled": (
+        f"select count(*) from {ident(os.environ['SNOWFLAKE_EDP_DATABASE'], os.environ['SNOWFLAKE_EDP_ACC_SCHEMA'], 'MV_ORDER_REVENUE_FULFILLED')}",
+        20,
     ),
 }
 
@@ -97,8 +119,12 @@ PY
 
 cat > "${ARTIFACT_DIR}/summary.txt" <<EOF
 DBT promotion succeeded.
-snowflake.raw_orders=30
-snowflake.raw_order_items=60
-snowflake.stg_raw_orders=30
-snowflake.fct_order_revenue=30
+snowflake.sdp_ext_raw_orders=30
+snowflake.sdp_ext_raw_order_items=60
+snowflake.sdp_access_orders=30
+snowflake.edp_dim_customers=12
+snowflake.edp_dim_order_status=3
+snowflake.edp_fact_order_revenue_star=30
+snowflake.edp_mv_order_revenue_created=10
+snowflake.edp_mv_order_revenue_fulfilled=20
 EOF

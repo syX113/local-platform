@@ -1,15 +1,19 @@
 version: 2
 
 sources:
-  - name: lakehouse
-    database: "{{ env_var('SNOWFLAKE_RAW_DATABASE') }}"
-    schema: "{{ env_var('ICEBERG_NAMESPACE', 'landing') }}"
+  - name: sdp_in
+    database: "{{ env_var('SNOWFLAKE_SDP_DATABASE') }}"
+    schema: "{{ env_var('SNOWFLAKE_SDP_IN_SCHEMA', 'IN') }}"
+    quoting:
+      database: false
+      schema: true
+      identifier: false
     tables:
-      - name: raw_orders
-      - name: raw_order_items
+      - name: ext_raw_orders
+      - name: ext_raw_order_items
 
 models:
-  - name: stg_raw_orders
+  - name: sdp_core_orders
     columns:
       - name: order_id
         tests:
@@ -18,10 +22,35 @@ models:
       - name: order_total
         tests:
           - not_null
-  - name: fct_order_revenue
+  - name: sdp_core_order_items
+    columns:
+      - name: order_id
+        tests:
+          - not_null
+      - name: item_id
+        tests:
+          - not_null
+  - name: edp_core_dim_customers
+    columns:
+      - name: customer_sk
+        tests:
+          - not_null
+          - unique
+  - name: edp_core_dim_order_status
+    columns:
+      - name: status_sk
+        tests:
+          - not_null
+          - unique
+  - name: edp_core_fct_order_revenue_star
     columns:
       - name: order_id
         tests:
           - not_null
           - unique
-
+      - name: customer_sk
+        tests:
+          - not_null
+      - name: status_sk
+        tests:
+          - not_null

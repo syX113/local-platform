@@ -50,9 +50,14 @@ ENV_KEYS = [
     "SNOWFLAKE_PASSWORD",
     "SNOWFLAKE_ROLE",
     "SNOWFLAKE_WAREHOUSE",
-    "SNOWFLAKE_TARGET_DATABASE",
-    "SNOWFLAKE_TARGET_SCHEMA",
-    "SNOWFLAKE_RAW_DATABASE",
+    "SNOWFLAKE_SDP_DATABASE",
+    "SNOWFLAKE_SDP_IN_SCHEMA",
+    "SNOWFLAKE_SDP_CORE_SCHEMA",
+    "SNOWFLAKE_SDP_ACC_SCHEMA",
+    "SNOWFLAKE_EDP_DATABASE",
+    "SNOWFLAKE_EDP_IN_SCHEMA",
+    "SNOWFLAKE_EDP_CORE_SCHEMA",
+    "SNOWFLAKE_EDP_ACC_SCHEMA",
     "SNOWFLAKE_CATALOG_INTEGRATION",
     "SNOWFLAKE_CLONE_SCHEMA",
     "SNOWFLAKE_LOCAL_RAW_SYNC",
@@ -71,7 +76,8 @@ def _should_run_dbt() -> bool:
         "SNOWFLAKE_ACCOUNT",
         "SNOWFLAKE_USER",
         "SNOWFLAKE_PASSWORD",
-        "SNOWFLAKE_RAW_DATABASE",
+        "SNOWFLAKE_SDP_DATABASE",
+        "SNOWFLAKE_EDP_DATABASE",
     ]
     return all(os.environ.get(key) for key in required)
 
@@ -115,7 +121,7 @@ def _seed_source_postgres() -> None:
 
 with DAG(
     dag_id="local_platform_ingest",
-    description="Seeds PostgreSQL sample data, writes Iceberg tables to object storage, optionally mirrors raw tables into Snowflake for local mode, and runs dbt in an external container against Snowflake.",
+    description="Seeds PostgreSQL sample data, writes Iceberg tables to object storage, mirrors source data product landing tables into Snowflake for local mode, and runs dbt in an external container to build the SDP and EDP layers.",
     schedule=None,
     start_date=datetime(2024, 1, 1),
     catchup=False,
