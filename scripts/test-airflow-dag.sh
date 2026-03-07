@@ -13,4 +13,8 @@ docker compose up -d airflow-init
 docker compose up -d airflow-scheduler
 
 docker compose exec -T airflow-scheduler airflow dags list-import-errors
-docker compose exec -T airflow-scheduler airflow dags test local_platform_ingest "${1:-2026-03-07}"
+docker compose exec -T airflow-scheduler \
+  airflow dags test \
+  --subdir /opt/airflow/dags/local_platform_pipeline.py \
+  local_platform_ingest \
+  "${1:-2026-03-07}"
