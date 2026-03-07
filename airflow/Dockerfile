@@ -13,3 +13,4 @@ RUN pip install --no-cache-dir \
 
 COPY airflow/dags /opt/airflow/dags
 COPY airflow/init-airflow.sh /opt/platform/airflow/init-airflow.sh
+COPY postgres/source-init /opt/platform/postgres/source-init

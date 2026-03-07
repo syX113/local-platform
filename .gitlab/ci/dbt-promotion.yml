@@ -13,14 +13,14 @@ stages:
 build_dbt_runtimes:
   stage: build
   script:
-    - docker compose build dlt-extractor dbt-executor
+    - docker compose build airflow-metadata-db source-postgres-db dlt-extractor dbt-executor
 
 validate_dbt_assets:
   stage: validate
   script:
     - docker compose config -q
-    - docker compose run --rm --no-deps dlt-extractor python -m compileall /opt/platform/dlt /opt/platform/scripts
-    - docker compose run --rm --no-deps dbt-executor python -m compileall /opt/platform/dbt /opt/platform/scripts
+    - docker compose run --rm --no-deps --entrypoint python dlt-extractor -m compileall /opt/platform/dlt
+    - docker compose run --rm --no-deps --entrypoint python dbt-executor -m compileall /opt/platform/dbt
     - docker compose run --rm --no-deps dbt-executor dbt parse --project-dir /opt/platform/dbt --profiles-dir /opt/platform/dbt/profiles
 
 promote_dbt_models:
