@@ -10,18 +10,19 @@ load_env_preserving_existing() {
   local preserved_env
   preserved_env="$(mktemp)"
 
-  env | while IFS='=' read -r key value; do
-    printf '%s=%q\n' "${key}" "${value}"
-  done > "${preserved_env}"
+  # Use null-delimited env output so CI variables containing newlines do not
+  # corrupt the restore file.
+  while IFS='=' read -r -d '' key value; do
+    printf 'export %s=%q\n' "${key}" "${value}"
+  done < <(env -0) > "${preserved_env}"
 
   set -a
   # shellcheck disable=SC1090
   source "${env_file}"
   set +a
 
-  while IFS= read -r assignment; do
-    eval "export ${assignment}"
-  done < "${preserved_env}"
+  # shellcheck disable=SC1090
+  source "${preserved_env}"
 
   rm -f "${preserved_env}"
 }
