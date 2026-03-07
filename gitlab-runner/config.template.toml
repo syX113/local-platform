@@ -1,4 +1,4 @@
-concurrent = 4
+concurrent = 1
 check_interval = 2
 
 [[runners]]
@@ -7,6 +7,7 @@ check_interval = 2
   token = "__RUNNER_TOKEN__"
   executor = "docker"
   clone_url = "__CLONE_URL__"
+  request_concurrency = 1
   environment = ["DOCKER_HOST=unix:///var/run/docker.sock"]
 
   [runners.docker]
@@ -16,4 +17,3 @@ check_interval = 2
     network_mode = "__RUNNER_NETWORK__"
     pull_policy = "if-not-present"
     volumes = ["/cache", "/var/run/docker.sock:/var/run/docker.sock"]
-
