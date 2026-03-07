@@ -19,7 +19,7 @@ validate_ingestion_assets:
   stage: validate
   script:
     - docker compose config -q
-    - docker compose run --rm --no-deps airflow-webserver python -m compileall /opt/airflow/dags
+    - docker compose run --rm --no-deps --entrypoint python airflow-webserver -m compileall /opt/airflow/dags
     - docker compose run --rm --no-deps --entrypoint python dlt-extractor -m compileall /opt/platform/dlt
 
 promote_ingestion:
