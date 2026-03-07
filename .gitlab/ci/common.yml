@@ -17,4 +17,11 @@ default:
     - export MINIO_CONSOLE_PORT=0
     - export AIRFLOW_PORT=0
   after_script:
+    - export COMPOSE_PROJECT_NAME="local-platform-ci-${CI_PIPELINE_ID:-0}-${CI_JOB_ID:-0}"
+    - export PLATFORM_DOCKER_NETWORK="${COMPOSE_PROJECT_NAME}-net"
+    - export AIRFLOW_METADATA_DB_PORT=0
+    - export SOURCE_POSTGRES_EXPOSE_PORT=0
+    - export MINIO_API_PORT=0
+    - export MINIO_CONSOLE_PORT=0
+    - export AIRFLOW_PORT=0
     - docker compose down -v --remove-orphans || true
