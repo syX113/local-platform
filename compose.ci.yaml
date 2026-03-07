@@ -32,7 +32,9 @@ services:
     volumes: !reset []
 
   airflow-scheduler:
-    volumes: !reset []
+    volumes: !override
+      - airflow-logs:/opt/airflow/logs
+      - /var/run/docker.sock:/var/run/docker.sock
 
   dlt-extractor:
     volumes: !reset []
