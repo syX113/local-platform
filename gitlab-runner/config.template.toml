@@ -1,6 +1,3 @@
-concurrent = 1
-check_interval = 2
-
 [[runners]]
   name = "__RUNNER_DESCRIPTION__"
   url = "__GITLAB_URL__"

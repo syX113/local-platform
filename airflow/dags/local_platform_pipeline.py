@@ -11,9 +11,16 @@ from airflow.providers.docker.operators.docker import DockerOperator
 from platform_support import docker_environment, seed_source_postgres, snowflake_configured
 
 
+def resolve_sdp_dbt_project_dir() -> str:
+    nested_project_dir = "/opt/platform/dbt/projects/proj_sdp_orders"
+    if os.path.exists(f"{nested_project_dir}/dbt_project.yml"):
+        return nested_project_dir
+    return "/opt/platform/dbt"
+
+
 with DAG(
     dag_id="local_platform_ingest",
-    description="Seeds PostgreSQL sample data, writes Iceberg tables to object storage, mirrors the SDP inbound layer into Snowflake for local mode, and runs dbt in an external container to build the SDP and EDP data products.",
+    description="Seeds PostgreSQL sample data, writes Iceberg tables to object storage, mirrors the SDP inbound layer into Snowflake for local mode, and runs the SDP dbt project in an external container.",
     schedule=None,
     start_date=datetime(2024, 1, 1),
     catchup=False,
@@ -56,11 +63,11 @@ with DAG(
     )
 
     run_dbt = DockerOperator(
-        task_id="run_external_dbt_build",
+        task_id="run_external_sdp_dbt_build",
         image=os.environ.get("DBT_RUNNER_IMAGE", "local-platform/dbt-executor:dev"),
         docker_url=os.environ.get("DOCKER_URL", "unix:///var/run/docker.sock"),
         command=(
-            "dbt build --project-dir /opt/platform/dbt "
+            f"dbt build --project-dir {resolve_sdp_dbt_project_dir()} "
             "--profiles-dir /opt/platform/dbt/profiles"
         ),
         network_mode=os.environ.get("PLATFORM_DOCKER_NETWORK", "local-platform-net"),

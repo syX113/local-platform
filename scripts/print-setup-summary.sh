@@ -11,13 +11,15 @@ if [ -f "${ROOT_DIR}/gitlab-runner/generated/bootstrap.env" ]; then
   load_env_preserving_existing "${ROOT_DIR}/gitlab-runner/generated/bootstrap.env"
 fi
 
-if [ -f "${ROOT_DIR}/gitlab-runner/generated/project.env" ]; then
-  load_env_preserving_existing "${ROOT_DIR}/gitlab-runner/generated/project.env"
+if [ -f "${ROOT_DIR}/gitlab-runner/generated/projects.env" ]; then
+  load_env_preserving_existing "${ROOT_DIR}/gitlab-runner/generated/projects.env"
 fi
 
 gitlab_http_url="http://localhost:${GITLAB_HTTP_PORT}"
-gitlab_project_url="${gitlab_http_url}/root/${GITLAB_PROJECT_PATH}"
-gitlab_ssh_clone_url="ssh://git@localhost:${GITLAB_SSH_PORT}/root/${GITLAB_PROJECT_PATH}.git"
+sdp_gitlab_project_url="${gitlab_http_url}/root/${GITLAB_SDP_PROJECT_PATH}"
+sdp_gitlab_ssh_clone_url="ssh://git@localhost:${GITLAB_SSH_PORT}/root/${GITLAB_SDP_PROJECT_PATH}.git"
+edp_gitlab_project_url="${gitlab_http_url}/root/${GITLAB_EDP_PROJECT_PATH}"
+edp_gitlab_ssh_clone_url="ssh://git@localhost:${GITLAB_SSH_PORT}/root/${GITLAB_EDP_PROJECT_PATH}.git"
 airflow_url="http://localhost:${AIRFLOW_PORT}"
 minio_console_url="http://localhost:${MINIO_CONSOLE_PORT}"
 minio_api_url="http://localhost:${MINIO_API_PORT}"
@@ -47,7 +49,8 @@ printf '\n'
 
 printf 'Web URLs\n'
 printf '  GitLab UI: %s\n' "${gitlab_http_url}"
-printf '  GitLab project: %s\n' "${gitlab_project_url}"
+printf '  GitLab SDP project: %s\n' "${sdp_gitlab_project_url}"
+printf '  GitLab EDP project: %s\n' "${edp_gitlab_project_url}"
 printf '  Airflow UI: %s\n' "${airflow_url}"
 printf '  MinIO Console: %s\n' "${minio_console_url}"
 printf '  MinIO API: %s\n' "${minio_api_url}"
@@ -67,17 +70,21 @@ printf '  Airflow metadata Postgres password: %s\n' "${AIRFLOW_METADATA_DB_PASSW
 printf '\n'
 
 printf 'Connection URLs And Paths\n'
-printf '  Git clone over SSH: %s\n' "${gitlab_ssh_clone_url}"
+printf '  SDP git clone over SSH: %s\n' "${sdp_gitlab_ssh_clone_url}"
+printf '  EDP git clone over SSH: %s\n' "${edp_gitlab_ssh_clone_url}"
 printf '  Source Postgres DSN: %s\n' "${source_postgres_dsn}"
 printf '  Airflow metadata DSN: %s\n' "${airflow_metadata_dsn}"
 printf '  MinIO internal endpoint: %s\n' "${MINIO_ENDPOINT}"
 printf '  Object store URI: %s\n' "${OBJECT_STORE_BUCKET}"
 printf '  Iceberg SQL catalog URI: %s\n' "${ICEBERG_SQL_URI}"
 printf '  dlt pipeline script: %s/dlt/pipeline.py\n' "${ROOT_DIR}"
-printf '  dbt project dir: %s/dbt\n' "${ROOT_DIR}"
+printf '  SDP dbt project dir: %s/dbt/projects/proj_sdp_orders\n' "${ROOT_DIR}"
+printf '  EDP dbt project dir: %s/dbt/projects/proj_edp_orders\n' "${ROOT_DIR}"
 printf '  dbt profiles dir: %s/dbt/profiles\n' "${ROOT_DIR}"
 printf '  Snowflake SQL dir: %s/snowflake/sql\n' "${ROOT_DIR}"
 printf '  Runner config path: %s/gitlab-runner/generated/config.toml\n' "${ROOT_DIR}"
+printf '  SDP generated GitLab repo: %s/gitlab-projects/generated/%s\n' "${ROOT_DIR}" "${GITLAB_SDP_PROJECT_PATH}"
+printf '  EDP generated GitLab repo: %s/gitlab-projects/generated/%s\n' "${ROOT_DIR}" "${GITLAB_EDP_PROJECT_PATH}"
 printf '\n'
 
 printf 'Runtime Services\n'
@@ -110,13 +117,15 @@ printf '  Open Catalog URI: %s\n' "${OPEN_CATALOG_URI:-<unset>}"
 printf '  Open Catalog name: %s\n' "${OPEN_CATALOG_NAME:-<unset>}"
 printf '\n'
 
-if [ -n "${GITLAB_BOOTSTRAP_PAT:-}" ] || [ -n "${GITLAB_PROJECT_ID:-}" ] || [ -n "${GITLAB_RUNNER_TOKEN:-}" ]; then
+if [ -n "${GITLAB_BOOTSTRAP_PAT:-}" ] || [ -n "${GITLAB_SDP_PROJECT_ID:-}" ] || [ -n "${GITLAB_EDP_PROJECT_ID:-}" ]; then
   printf 'Generated GitLab Bootstrap Details\n'
-  printf '  GitLab project id: %s\n' "${GITLAB_PROJECT_ID:-<unset>}"
+  printf '  GitLab SDP project id: %s\n' "${GITLAB_SDP_PROJECT_ID:-<unset>}"
+  printf '  GitLab EDP project id: %s\n' "${GITLAB_EDP_PROJECT_ID:-<unset>}"
   printf '  GitLab bootstrap PAT: %s\n' "${GITLAB_BOOTSTRAP_PAT:-<unset>}"
-  printf '  GitLab runner token: %s\n' "${GITLAB_RUNNER_TOKEN:-<unset>}"
+  printf '  GitLab SDP runner token: %s\n' "${GITLAB_SDP_RUNNER_TOKEN:-<unset>}"
+  printf '  GitLab EDP runner token: %s\n' "${GITLAB_EDP_RUNNER_TOKEN:-<unset>}"
   printf '  GitLab bootstrap env path: %s/gitlab-runner/generated/bootstrap.env\n' "${ROOT_DIR}"
-  printf '  GitLab generated project env path: %s/gitlab-runner/generated/project.env\n' "${ROOT_DIR}"
+  printf '  GitLab generated project env path: %s/gitlab-runner/generated/projects.env\n' "${ROOT_DIR}"
   printf '\n'
 fi
 

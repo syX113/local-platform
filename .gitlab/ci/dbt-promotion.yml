@@ -13,7 +13,8 @@ stages:
 build_dbt_runtimes:
   stage: build
   script:
-    - docker compose build airflow-metadata-db source-postgres-db dlt-extractor dbt-executor
+    - docker image inspect "${LOCAL_PLATFORM_PROJECT_NAME:-local-platform}/dlt-extractor:dev"
+    - docker image inspect "${LOCAL_PLATFORM_PROJECT_NAME:-local-platform}/dbt-executor:dev"
 
 validate_dbt_assets:
   stage: validate

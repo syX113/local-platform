@@ -36,7 +36,8 @@ def create_ingestion_child_pipeline(
         build_{slug}_ingestion_runtimes:
           stage: build
           script:
-            - docker compose build airflow-metadata-db source-postgres-db airflow-webserver dlt-extractor
+            - docker image inspect "${{LOCAL_PLATFORM_PROJECT_NAME:-local-platform}}/airflow:dev"
+            - docker image inspect "${{LOCAL_PLATFORM_PROJECT_NAME:-local-platform}}/dlt-extractor:dev"
 
         validate_{slug}_ingestion_assets:
           stage: validate
@@ -107,7 +108,8 @@ def create_dbt_child_pipeline(
         build_{slug}_dbt_runtimes:
           stage: build
           script:
-            - docker compose build airflow-metadata-db source-postgres-db dlt-extractor dbt-executor
+            - docker image inspect "${{LOCAL_PLATFORM_PROJECT_NAME:-local-platform}}/dlt-extractor:dev"
+            - docker image inspect "${{LOCAL_PLATFORM_PROJECT_NAME:-local-platform}}/dbt-executor:dev"
 
         validate_{slug}_dbt_assets:
           stage: validate

@@ -46,5 +46,5 @@ else
   echo "Skipping Open Catalog bootstrap because OPEN_CATALOG_* variables are incomplete"
 fi
 
-docker compose run --rm dbt-executor \
+docker compose run --rm --no-deps dbt-executor \
   python /opt/platform/dbt/scripts/apply_sql.py "${sql_files[@]}"

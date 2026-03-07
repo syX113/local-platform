@@ -13,7 +13,8 @@ stages:
 build_ingestion_runtimes:
   stage: build
   script:
-    - docker compose build airflow-metadata-db source-postgres-db airflow-webserver dlt-extractor
+    - docker image inspect "${LOCAL_PLATFORM_PROJECT_NAME:-local-platform}/airflow:dev"
+    - docker image inspect "${LOCAL_PLATFORM_PROJECT_NAME:-local-platform}/dlt-extractor:dev"
 
 validate_ingestion_assets:
   stage: validate

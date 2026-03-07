@@ -12,9 +12,18 @@ docker compose down -v --remove-orphans || true
 rm -rf artifacts
 rm -rf dbt/target
 rm -rf dbt/logs
+rm -f dbt/profiles/.user.yml
+rm -rf dlt/.dlt
+rm -rf gitlab-projects/generated
 rm -f gitlab-runner/generated/config.toml
 rm -f gitlab-runner/generated/bootstrap.env
 rm -f gitlab-runner/generated/project.env
+rm -f gitlab-runner/generated/projects.env
+find "${ROOT_DIR}" -type d \( -name __pycache__ -o -name logs -o -name target \) \
+  ! -path "${ROOT_DIR}/.git/*" \
+  ! -path "${ROOT_DIR}/gitlab-runner/generated/*" \
+  ! -path "${ROOT_DIR}/gitlab-projects/generated/*" \
+  -prune -exec rm -rf {} +
 
 echo "local platform stack and transient artifacts removed"
 echo "next:"

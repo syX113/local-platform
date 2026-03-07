@@ -233,7 +233,7 @@ def main() -> int:
             printf '%s\\n' "${{catalog_rows}}" | grep -q '^{namespace},raw_order_items,' || {{ echo "missing {namespace}.raw_order_items catalog entry" >&2; exit 1; }}
             printf '%s\\n' "${{catalog_rows}}" | grep -q '^{namespace},raw_orders,' || {{ echo "missing {namespace}.raw_orders catalog entry" >&2; exit 1; }}
 
-            docker compose run --rm dlt-extractor python - <<'PY' | tee "${{ARTIFACT_DIR}}/minio_iceberg_summary.txt"
+            docker compose run --rm --no-deps dlt-extractor python - <<'PY' | tee "${{ARTIFACT_DIR}}/minio_iceberg_summary.txt"
             from io import BytesIO
             import json
 

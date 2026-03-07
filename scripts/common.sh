@@ -35,3 +35,37 @@ ensure_platform_env() {
 
   load_env_preserving_existing .env
 }
+
+resolve_host_dbt_project_dir() {
+  local project_slug="${1:?dbt project slug is required}"
+
+  if [ -f "${ROOT_DIR}/dbt/projects/${project_slug}/dbt_project.yml" ]; then
+    printf '%s/dbt/projects/%s\n' "${ROOT_DIR}" "${project_slug}"
+    return 0
+  fi
+
+  if [ -f "${ROOT_DIR}/dbt/dbt_project.yml" ]; then
+    printf '%s/dbt\n' "${ROOT_DIR}"
+    return 0
+  fi
+
+  echo "unable to resolve dbt project dir for ${project_slug}" >&2
+  return 1
+}
+
+resolve_container_dbt_project_dir() {
+  local project_slug="${1:?dbt project slug is required}"
+
+  if [ -f "${ROOT_DIR}/dbt/projects/${project_slug}/dbt_project.yml" ]; then
+    printf '/opt/platform/dbt/projects/%s\n' "${project_slug}"
+    return 0
+  fi
+
+  if [ -f "${ROOT_DIR}/dbt/dbt_project.yml" ]; then
+    printf '/opt/platform/dbt\n'
+    return 0
+  fi
+
+  echo "unable to resolve container dbt project dir for ${project_slug}" >&2
+  return 1
+}

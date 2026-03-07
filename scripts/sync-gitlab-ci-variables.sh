@@ -7,20 +7,19 @@ cd "${ROOT_DIR}"
 source "${ROOT_DIR}/scripts/common.sh"
 ensure_platform_env
 
-if [ ! -f "${ROOT_DIR}/gitlab-runner/generated/bootstrap.env" ] || [ ! -f "${ROOT_DIR}/gitlab-runner/generated/project.env" ]; then
+if [ ! -f "${ROOT_DIR}/gitlab-runner/generated/bootstrap.env" ] || [ ! -f "${ROOT_DIR}/gitlab-runner/generated/projects.env" ]; then
   echo "GitLab bootstrap artifacts are missing; run ./scripts/bootstrap-gitlab.sh first" >&2
   exit 1
 fi
 
 load_env_preserving_existing "${ROOT_DIR}/gitlab-runner/generated/bootstrap.env"
-load_env_preserving_existing "${ROOT_DIR}/gitlab-runner/generated/project.env"
+load_env_preserving_existing "${ROOT_DIR}/gitlab-runner/generated/projects.env"
 
-if [ -z "${GITLAB_BOOTSTRAP_PAT:-}" ] || [ -z "${GITLAB_PROJECT_ID:-}" ]; then
-  echo "GitLab bootstrap token or project id is missing" >&2
+if [ -z "${GITLAB_BOOTSTRAP_PAT:-}" ] || { [ -z "${GITLAB_SDP_PROJECT_ID:-}" ] && [ -z "${GITLAB_EDP_PROJECT_ID:-}" ]; }; then
+  echo "GitLab bootstrap token or project ids are missing" >&2
   exit 1
 fi
 
-gitlab_api_url="http://localhost:${GITLAB_HTTP_PORT}/api/v4/projects/${GITLAB_PROJECT_ID}/variables"
 CURL_RETRY_ARGS=(
   --silent
   --show-error
@@ -33,6 +32,7 @@ CURL_RETRY_ARGS=(
 )
 
 ci_variable_keys=(
+  LOCAL_PLATFORM_PROJECT_NAME
   COMPOSE_PROJECT_NAME
   PLATFORM_DOCKER_NETWORK
   AIRFLOW_PORT
@@ -100,39 +100,52 @@ ci_variable_keys=(
   DBT_THREADS
 )
 
-for key in "${ci_variable_keys[@]}"; do
-  if [ -z "${!key+x}" ]; then
-    continue
-  fi
+sync_project_variables() {
+  local project_id="${1:?project id is required}"
+  local gitlab_api_url="http://localhost:${GITLAB_HTTP_PORT}/api/v4/projects/${project_id}/variables"
 
-  value="${!key}"
+  for key in "${ci_variable_keys[@]}"; do
+    if [ -z "${!key+x}" ]; then
+      continue
+    fi
 
-  status_code="$(
-    curl "${CURL_RETRY_ARGS[@]}" -o /dev/null -w "%{http_code}" \
-      --header "PRIVATE-TOKEN: ${GITLAB_BOOTSTRAP_PAT}" \
-      "${gitlab_api_url}/${key}"
-  )"
+    value="${!key}"
 
-  if [ "${status_code}" = "200" ]; then
-    curl --fail "${CURL_RETRY_ARGS[@]}" \
-      --request PUT \
-      --header "PRIVATE-TOKEN: ${GITLAB_BOOTSTRAP_PAT}" \
-      --data-urlencode "value=${value}" \
-      --data-urlencode "masked=false" \
-      --data-urlencode "protected=false" \
-      --data-urlencode "raw=true" \
-      "${gitlab_api_url}/${key}" >/dev/null
-  else
-    curl --fail "${CURL_RETRY_ARGS[@]}" \
-      --request POST \
-      --header "PRIVATE-TOKEN: ${GITLAB_BOOTSTRAP_PAT}" \
-      --data-urlencode "key=${key}" \
-      --data-urlencode "value=${value}" \
-      --data-urlencode "masked=false" \
-      --data-urlencode "protected=false" \
-      --data-urlencode "raw=true" \
-      "${gitlab_api_url}" >/dev/null
-  fi
-done
+    status_code="$(
+      curl "${CURL_RETRY_ARGS[@]}" -o /dev/null -w "%{http_code}" \
+        --header "PRIVATE-TOKEN: ${GITLAB_BOOTSTRAP_PAT}" \
+        "${gitlab_api_url}/${key}"
+    )"
 
-echo "Synced ${#ci_variable_keys[@]} GitLab CI/CD variables to project ${GITLAB_PROJECT_ID}"
+    if [ "${status_code}" = "200" ]; then
+      curl --fail "${CURL_RETRY_ARGS[@]}" \
+        --request PUT \
+        --header "PRIVATE-TOKEN: ${GITLAB_BOOTSTRAP_PAT}" \
+        --data-urlencode "value=${value}" \
+        --data-urlencode "masked=false" \
+        --data-urlencode "protected=false" \
+        --data-urlencode "raw=true" \
+        "${gitlab_api_url}/${key}" >/dev/null
+    else
+      curl --fail "${CURL_RETRY_ARGS[@]}" \
+        --request POST \
+        --header "PRIVATE-TOKEN: ${GITLAB_BOOTSTRAP_PAT}" \
+        --data-urlencode "key=${key}" \
+        --data-urlencode "value=${value}" \
+        --data-urlencode "masked=false" \
+        --data-urlencode "protected=false" \
+        --data-urlencode "raw=true" \
+        "${gitlab_api_url}" >/dev/null
+    fi
+  done
+}
+
+if [ -n "${GITLAB_SDP_PROJECT_ID:-}" ]; then
+  sync_project_variables "${GITLAB_SDP_PROJECT_ID}"
+  echo "Synced ${#ci_variable_keys[@]} GitLab CI/CD variables to SDP project ${GITLAB_SDP_PROJECT_ID}"
+fi
+
+if [ -n "${GITLAB_EDP_PROJECT_ID:-}" ]; then
+  sync_project_variables "${GITLAB_EDP_PROJECT_ID}"
+  echo "Synced ${#ci_variable_keys[@]} GitLab CI/CD variables to EDP project ${GITLAB_EDP_PROJECT_ID}"
+fi

@@ -59,7 +59,7 @@ catalog_count="$(printf '%s\n' "${catalog_rows}" | sed '/^$/d' | wc -l | tr -d '
 printf '%s\n' "${catalog_rows}" | grep -q '^landing,raw_order_items,' || { echo "missing landing.raw_order_items catalog entry" >&2; exit 1; }
 printf '%s\n' "${catalog_rows}" | grep -q '^landing,raw_orders,' || { echo "missing landing.raw_orders catalog entry" >&2; exit 1; }
 
-docker compose run --rm dlt-extractor python - <<'PY' | tee "${ARTIFACT_DIR}/minio_iceberg_summary.txt"
+docker compose run --rm --no-deps dlt-extractor python - <<'PY' | tee "${ARTIFACT_DIR}/minio_iceberg_summary.txt"
 from io import BytesIO
 import json
 import sys

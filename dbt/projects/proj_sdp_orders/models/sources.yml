@@ -1,0 +1,34 @@
+version: 2
+
+sources:
+  - name: source_sdp_orders_inbound
+    database: "{{ env_var('SNOWFLAKE_SDP_DATABASE') }}"
+    schema: "{{ env_var('SNOWFLAKE_SDP_IN_SCHEMA', 'INBOUND') }}"
+    tables:
+      - name: EXT_ORDERS_RAW
+      - name: EXT_ORDER_ITEMS_RAW
+
+models:
+  - name: model_sdp_orders_core_orders_clean
+    columns:
+      - name: order_id
+        tests:
+          - not_null
+          - unique
+      - name: order_total
+        tests:
+          - not_null
+  - name: model_sdp_orders_core_order_items_clean
+    columns:
+      - name: order_id
+        tests:
+          - not_null
+      - name: item_id
+        tests:
+          - not_null
+  - name: model_sdp_orders_core_customer_order_summary
+    columns:
+      - name: customer_id
+        tests:
+          - not_null
+          - unique

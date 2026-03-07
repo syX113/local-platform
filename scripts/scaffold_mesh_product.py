@@ -376,13 +376,13 @@ def main() -> int:
             export SNOWFLAKE_SDP_IN_SCHEMA="INBOUND"
             export SNOWFLAKE_LOCAL_RAW_SYNC="true"
 
-            docker compose run --rm dlt-extractor python /opt/platform/dlt/snowflake_raw_sync.py | tee "${{ARTIFACT_DIR}}/snowflake_raw_sync.log"
+            docker compose run --rm --no-deps dlt-extractor python /opt/platform/dlt/snowflake_raw_sync.py | tee "${{ARTIFACT_DIR}}/snowflake_raw_sync.log"
             docker compose run --rm --no-deps dbt-executor \\
               dbt parse --project-dir /opt/platform/dbt --profiles-dir /opt/platform/dbt/profiles | tee "${{ARTIFACT_DIR}}/dbt_parse.log"
-            docker compose run --rm dbt-executor \\
+            docker compose run --rm --no-deps dbt-executor \\
               dbt build --select path:models/products/{slug} --project-dir /opt/platform/dbt --profiles-dir /opt/platform/dbt/profiles | tee "${{ARTIFACT_DIR}}/dbt_build.log"
 
-            docker compose run --rm dbt-executor python - <<'PY' | tee "${{ARTIFACT_DIR}}/snowflake_validation.txt"
+            docker compose run --rm --no-deps dbt-executor python - <<'PY' | tee "${{ARTIFACT_DIR}}/snowflake_validation.txt"
             import os
 
             import snowflake.connector

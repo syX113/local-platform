@@ -1,0 +1,25 @@
+name: proj_edp_orders
+version: 1.0.0
+config-version: 2
+profile: local_platform
+
+model-paths: ["models"]
+macro-paths: ["macros"]
+clean-targets:
+  - target
+  - dbt_packages
+
+models:
+  proj_edp_orders:
+    inbound:
+      +database: "{{ env_var('SNOWFLAKE_EDP_DATABASE') }}"
+      +schema: "{{ env_var('SNOWFLAKE_EDP_IN_SCHEMA', 'INBOUND') }}"
+      +materialized: view
+    core:
+      +database: "{{ env_var('SNOWFLAKE_EDP_DATABASE') }}"
+      +schema: "{{ env_var('SNOWFLAKE_EDP_CORE_SCHEMA', 'CORE') }}"
+      +materialized: table
+    access:
+      +database: "{{ env_var('SNOWFLAKE_EDP_DATABASE') }}"
+      +schema: "{{ env_var('SNOWFLAKE_EDP_ACC_SCHEMA', 'ACCESS') }}"
+      +materialized: table

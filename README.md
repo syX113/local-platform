@@ -8,6 +8,11 @@ The default sample flow is:
 
 `dbt` and `dlt` always run in external containers. Locally those containers stand in for the real Fargate or EKS runtimes.
 
+The platform repo is the control plane. During GitLab bootstrap it renders and pushes two separate GitLab project repos:
+
+- `proj_sdp_orders`: owns the Airflow DAG, the dlt ingestion code, and the SDP dbt project
+- `proj_edp_orders`: owns the EDP dbt project
+
 ## Services
 
 - `gitlab-platform`: local GitLab UI and API
@@ -135,11 +140,20 @@ That is the intended full local restart flow.
 
 GitLab is the slowest service in the stack. After a full reset it can take a few minutes before `http://localhost:8080/users/sign_in` stops returning warm-up errors.
 
-6. Bootstrap the local GitLab project and runner:
+Recommended local host settings for stability:
+
+- Rancher Desktop or Docker should have at least `6` CPUs and `12 GB` RAM available to the VM.
+- If you use Rancher Desktop only for this Docker Compose stack, disable Kubernetes to free memory for GitLab and the CI runner.
+
+6. Bootstrap the local GitLab projects and runner:
 
 ```bash
 ./scripts/bootstrap-gitlab.sh
 ```
+
+The runner is intentionally started by `bootstrap-gitlab.sh`, not by the base bootstrap, so GitLab can finish warming up before CI job polling begins.
+
+Local GitLab CI runs against the already bootstrapped shared platform stack. It does not spin up a second isolated copy of GitLab, Airflow, MinIO, and PostgreSQL inside each pipeline run. That keeps local GitLab stable and makes the pipelines much cheaper to run on one machine.
 
 7. Print the current URLs, credentials, paths, and generated GitLab details at any time:
 
@@ -189,7 +203,19 @@ Validate the ingestion promotion flow:
 ./scripts/verify-ingestion-promotion.sh
 ```
 
-Validate the Snowflake and dbt promotion flow:
+Validate the SDP dbt promotion flow:
+
+```bash
+./scripts/verify-sdp-promotion.sh
+```
+
+Validate the EDP dbt promotion flow:
+
+```bash
+./scripts/verify-edp-promotion.sh
+```
+
+Run both promotion validations in sequence:
 
 ```bash
 ./scripts/verify-dbt-promotion.sh
@@ -201,16 +227,25 @@ Run the zero-copy clone check:
 docker compose run --rm dbt-executor python /opt/platform/dbt/scripts/zero_copy_clone_check.py
 ```
 
-## GitLab CI Layout
+## GitLab Project Split
 
-The root pipeline fans out into child pipelines through [.gitlab/ci/generated/root-pipeline.yml](/Users/taagiti2/Documents/01%20Projects/Valiant/repos/local-platform/.gitlab/ci/generated/root-pipeline.yml).
+The local platform bootstraps two GitLab projects and keeps their generated working trees under [gitlab-projects/generated/proj_sdp_orders](/Users/taagiti2/Documents/01%20Projects/Valiant/repos/local-platform/gitlab-projects/generated/proj_sdp_orders) and [gitlab-projects/generated/proj_edp_orders](/Users/taagiti2/Documents/01%20Projects/Valiant/repos/local-platform/gitlab-projects/generated/proj_edp_orders).
 
-Current shipped child pipelines:
+The ownership split is:
 
-- [.gitlab/ci/ingestion-promotion.yml](/Users/taagiti2/Documents/01%20Projects/Valiant/repos/local-platform/.gitlab/ci/ingestion-promotion.yml)
-- [.gitlab/ci/dbt-promotion.yml](/Users/taagiti2/Documents/01%20Projects/Valiant/repos/local-platform/.gitlab/ci/dbt-promotion.yml)
+- `proj_sdp_orders`: promotes the Airflow DAG, dlt ingestion runtime, and the SDP dbt models
+- `proj_edp_orders`: promotes only the EDP dbt models that consume the SDP access layer
 
-Each child pipeline ends with a mock CD step so the CI/CD structure can be tested locally without a second environment.
+Each generated project ships its own `.gitlab-ci.yml` and ends with a mock CD stage so the CI/CD shape can be tested locally without a second environment.
+
+The SDP project pipeline is intentionally split into two promotion steps so cold-start GitLab runs stay stable:
+
+- `promote_sdp_ingestion`: validates the Airflow DAG, dlt runtime, and Iceberg output
+- `promote_sdp_models`: validates and rebuilds the SDP dbt models in Snowflake after ingestion has succeeded
+
+Those generated CI pipelines assume the base local platform has already been started with `./scripts/bootstrap.sh` and `./scripts/bootstrap-gitlab.sh`. They reuse the shared local runtime images and services instead of rebuilding or destroying the full platform stack inside the runner.
+
+The generator for those repos is [render_gitlab_project_repos.py](/Users/taagiti2/Documents/01%20Projects/Valiant/repos/local-platform/scripts/render_gitlab_project_repos.py).
 
 ## Scaffolding New Assets
 
@@ -225,7 +260,7 @@ That creates:
 - a new Airflow DAG
 - a new dlt pipeline script
 - a verification script
-- a GitLab child pipeline and root-pipeline registration
+- local platform repo assets that will be copied into the generated SDP GitLab project the next time you run `python3 scripts/render_gitlab_project_repos.py`
 
 Create a new SDP/EDP dbt product scaffold:
 
@@ -238,15 +273,21 @@ That creates:
 - Snowflake foundation SQL for the new product databases
 - dbt model skeletons
 - a dbt verification script
-- a GitLab child pipeline and root-pipeline registration
+- local platform repo assets that can be published into the generated SDP or EDP GitLab project after you rerun `python3 scripts/render_gitlab_project_repos.py`
 
-Create a generic GitLab child pipeline scaffold:
+Create a generic platform-repo GitLab child pipeline scaffold:
 
 ```bash
 python3 scripts/scaffold_gitlab_pipeline.py smoke_checks --kind generic --verify-script ./scripts/print-setup-summary.sh
 ```
 
-If you edit the pipeline registry manually, regenerate the root fan-out file with:
+To regenerate the split SDP and EDP GitLab repos after changing shared assets, run:
+
+```bash
+python3 scripts/render_gitlab_project_repos.py
+```
+
+If you edit the platform repo child-pipeline registry manually, regenerate the root fan-out file with:
 
 ```bash
 python3 scripts/render_gitlab_root_pipeline.py

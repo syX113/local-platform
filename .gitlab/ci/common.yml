@@ -9,21 +9,10 @@ default:
     - docker compose version
     - cp .env.example .env
     - mkdir -p artifacts
+    - export LOCAL_PLATFORM_PROJECT_NAME="${LOCAL_PLATFORM_PROJECT_NAME:-local-platform}"
+    - export LOCAL_PLATFORM_SHARED_STACK="true"
     - export COMPOSE_FILE="compose.yaml:compose.ci.yaml"
-    - export COMPOSE_PROJECT_NAME="local-platform-ci-${CI_PIPELINE_ID:-0}"
-    - export PLATFORM_DOCKER_NETWORK="${COMPOSE_PROJECT_NAME}-net"
-    - export AIRFLOW_METADATA_DB_PORT=0
-    - export SOURCE_POSTGRES_EXPOSE_PORT=0
-    - export MINIO_API_PORT=0
-    - export MINIO_CONSOLE_PORT=0
-    - export AIRFLOW_PORT=0
+    - export COMPOSE_PROJECT_NAME="${LOCAL_PLATFORM_PROJECT_NAME}"
+    - export PLATFORM_DOCKER_NETWORK="${PLATFORM_DOCKER_NETWORK:-${LOCAL_PLATFORM_PROJECT_NAME}-net}"
   after_script:
-    - export COMPOSE_FILE="compose.yaml:compose.ci.yaml"
-    - export COMPOSE_PROJECT_NAME="local-platform-ci-${CI_PIPELINE_ID:-0}"
-    - export PLATFORM_DOCKER_NETWORK="${COMPOSE_PROJECT_NAME}-net"
-    - export AIRFLOW_METADATA_DB_PORT=0
-    - export SOURCE_POSTGRES_EXPOSE_PORT=0
-    - export MINIO_API_PORT=0
-    - export MINIO_CONSOLE_PORT=0
-    - export AIRFLOW_PORT=0
-    - docker compose down -v --remove-orphans || true
+    - docker compose ps || true
