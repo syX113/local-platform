@@ -4,14 +4,14 @@ services:
       context: .
       dockerfile: postgres/catalog/Dockerfile
     image: ${COMPOSE_PROJECT_NAME:-local-platform}/airflow-metadata-db:dev
-    volumes: []
+    volumes: !reset []
 
   source-postgres-db:
     build:
       context: .
       dockerfile: postgres/source/Dockerfile
     image: ${COMPOSE_PROJECT_NAME:-local-platform}/source-postgres-db:dev
-    volumes: []
+    volumes: !reset []
 
   lakehouse-bucket-init:
     entrypoint:
@@ -23,19 +23,19 @@ services:
           sleep 3
         done
         mc mb --ignore-existing "local/${MINIO_BUCKET}"
-    volumes: []
+    volumes: !reset []
 
   airflow-init:
-    volumes: []
+    volumes: !reset []
 
   airflow-webserver:
-    volumes: []
+    volumes: !reset []
 
   airflow-scheduler:
-    volumes: []
+    volumes: !reset []
 
   dlt-extractor:
-    volumes: []
+    volumes: !reset []
 
   dbt-executor:
-    volumes: []
+    volumes: !reset []
