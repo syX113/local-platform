@@ -5,7 +5,6 @@ import argparse
 from pathlib import Path
 from textwrap import dedent
 
-from scaffold_gitlab_pipeline import create_dbt_child_pipeline
 from scaffold_support import ROOT_DIR, ensure_new_file, require_slug, upper_identifier
 
 
@@ -28,7 +27,6 @@ def main() -> int:
 
     product_root = ROOT_DIR / "dbt" / "models" / "products" / slug
     verify_script = ROOT_DIR / "scripts" / f"verify-{slug}-dbt-promotion.sh"
-    child_pipeline = ROOT_DIR / ".gitlab" / "ci" / f"{slug}-dbt-promotion.yml"
     foundation_sql = ROOT_DIR / "snowflake" / "sql" / "products" / f"{slug}_foundation.sql.tpl"
     artifact_dir = f"artifacts/{slug}-dbt"
     source_name = f"{slug}_sdp_inbound"
@@ -465,18 +463,10 @@ def main() -> int:
     )
     verify_script.chmod(0o755)
 
-    create_dbt_child_pipeline(
-        slug=slug,
-        child_pipeline_path=child_pipeline,
-        verify_script_path=f"./scripts/{verify_script.name}",
-        artifact_dir=artifact_dir,
-        workflow_name=f"{slug.replace('_', ' ').title()} DBT Promotion",
-        registry_job_name=f"promote_{slug}_dbt_pipeline",
-    )
-
     print(f"created data product models: {product_root.relative_to(ROOT_DIR)}")
     print(f"created Snowflake foundation SQL: {foundation_sql.relative_to(ROOT_DIR)}")
-    print(f"created GitLab child pipeline: {child_pipeline.relative_to(ROOT_DIR)}")
+    print(f"created verification script: {verify_script.relative_to(ROOT_DIR)}")
+    print("next step: update scripts/render_gitlab_project_repos.py if this data product should be published to GitLab")
     return 0
 
 

@@ -5,7 +5,6 @@ import argparse
 from pathlib import Path
 from textwrap import dedent
 
-from scaffold_gitlab_pipeline import create_ingestion_child_pipeline
 from scaffold_support import ROOT_DIR, ensure_new_file, require_slug
 
 
@@ -28,7 +27,6 @@ def main() -> int:
     dlt_script = ROOT_DIR / "dlt" / f"{slug}_pipeline.py"
     dag_file = ROOT_DIR / "airflow" / "dags" / f"{slug}_pipeline.py"
     verify_script = ROOT_DIR / "scripts" / f"verify-{slug}-ingestion-promotion.sh"
-    child_pipeline = ROOT_DIR / ".gitlab" / "ci" / f"{slug}-ingestion-promotion.yml"
     sql_dir = ROOT_DIR / "dlt" / "sql" / slug
     artifact_dir = f"artifacts/{slug}-ingestion"
 
@@ -304,18 +302,10 @@ def main() -> int:
     )
     verify_script.chmod(0o755)
 
-    create_ingestion_child_pipeline(
-        slug=slug,
-        child_pipeline_path=child_pipeline,
-        verify_script_path=f"./scripts/{verify_script.name}",
-        artifact_dir=artifact_dir,
-        workflow_name=f"{slug.replace('_', ' ').title()} Ingestion Promotion",
-        registry_job_name=f"promote_{slug}_ingestion_pipeline",
-    )
-
     print(f"created airflow DAG: {dag_file.relative_to(ROOT_DIR)}")
     print(f"created dlt pipeline: {dlt_script.relative_to(ROOT_DIR)}")
-    print(f"created GitLab child pipeline: {child_pipeline.relative_to(ROOT_DIR)}")
+    print(f"created verification script: {verify_script.relative_to(ROOT_DIR)}")
+    print("next step: update scripts/render_gitlab_project_repos.py if this ingestion flow should be published to GitLab")
     return 0
 
 

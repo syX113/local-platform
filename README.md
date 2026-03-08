@@ -229,7 +229,12 @@ docker compose run --rm dbt-executor python /opt/platform/dbt/scripts/zero_copy_
 
 ## GitLab Project Split
 
-The local platform bootstraps two GitLab projects and keeps their generated working trees under [gitlab-projects/generated/proj_sdp_orders](/Users/taagiti2/Documents/01%20Projects/Valiant/repos/local-platform/gitlab-projects/generated/proj_sdp_orders) and [gitlab-projects/generated/proj_edp_orders](/Users/taagiti2/Documents/01%20Projects/Valiant/repos/local-platform/gitlab-projects/generated/proj_edp_orders).
+The local platform keeps a strict separation between the source repo and the hosted/platform GitLab repos.
+
+- source repo: this repository, with Docker assets, Airflow, dlt, dbt, bootstrap scripts, and render logic
+- platform repos: rendered working trees under [gitlab-projects/generated/proj_sdp_orders](/Users/taagiti2/Documents/01%20Projects/Valiant/repos/local-platform/gitlab-projects/generated/proj_sdp_orders) and [gitlab-projects/generated/proj_edp_orders](/Users/taagiti2/Documents/01%20Projects/Valiant/repos/local-platform/gitlab-projects/generated/proj_edp_orders)
+
+Only the rendered platform repos are pushed to the hosted GitLab instance. The source repo itself is not bootstrapped into GitLab and `bootstrap-gitlab.sh` or `publish-platform-repos.sh` do not add or change a remote on the source repo root.
 
 The ownership split is:
 
@@ -247,6 +252,12 @@ Those generated CI pipelines assume the base local platform has already been sta
 
 The generator for those repos is [render_gitlab_project_repos.py](/Users/taagiti2/Documents/01%20Projects/Valiant/repos/local-platform/scripts/render_gitlab_project_repos.py).
 
+To republish the rendered repos after source changes, run:
+
+```bash
+./scripts/publish-platform-repos.sh
+```
+
 ## Scaffolding New Assets
 
 Create a new ingestion pipeline scaffold:
@@ -260,7 +271,7 @@ That creates:
 - a new Airflow DAG
 - a new dlt pipeline script
 - a verification script
-- local platform repo assets that will be copied into the generated SDP GitLab project the next time you run `python3 scripts/render_gitlab_project_repos.py`
+- local source assets that can be transferred into the rendered SDP platform repo the next time you run `./scripts/publish-platform-repos.sh`
 
 Create a new SDP/EDP dbt product scaffold:
 
@@ -273,25 +284,7 @@ That creates:
 - Snowflake foundation SQL for the new product databases
 - dbt model skeletons
 - a dbt verification script
-- local platform repo assets that can be published into the generated SDP or EDP GitLab project after you rerun `python3 scripts/render_gitlab_project_repos.py`
-
-Create a generic platform-repo GitLab child pipeline scaffold:
-
-```bash
-python3 scripts/scaffold_gitlab_pipeline.py smoke_checks --kind generic --verify-script ./scripts/print-setup-summary.sh
-```
-
-To regenerate the split SDP and EDP GitLab repos after changing shared assets, run:
-
-```bash
-python3 scripts/render_gitlab_project_repos.py
-```
-
-If you edit the platform repo child-pipeline registry manually, regenerate the root fan-out file with:
-
-```bash
-python3 scripts/render_gitlab_root_pipeline.py
-```
+- local source assets that can be transferred into the rendered SDP or EDP platform repo after you rerun `./scripts/publish-platform-repos.sh`
 
 ## Local Constraints
 

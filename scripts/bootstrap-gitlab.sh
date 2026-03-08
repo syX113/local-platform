@@ -166,39 +166,6 @@ create_project_runner_token() {
   printf '%s\n' "${runner_token}"
 }
 
-ensure_git_repo() {
-  local repo_dir="${1:?repo dir is required}"
-
-  if [ ! -d "${repo_dir}/.git" ]; then
-    git -C "${repo_dir}" init -b main >/dev/null
-  fi
-
-  git -C "${repo_dir}" config user.name "Codex Local"
-  git -C "${repo_dir}" config user.email "codex-local@example.com"
-}
-
-sync_gitlab_repo() {
-  local repo_dir="${1:?repo dir is required}"
-  local remote_name="${2:?remote name is required}"
-  local remote_url="${3:?remote url is required}"
-  local commit_message="${4:?commit message is required}"
-
-  ensure_git_repo "${repo_dir}"
-
-  if git -C "${repo_dir}" remote get-url "${remote_name}" >/dev/null 2>&1; then
-    git -C "${repo_dir}" remote set-url "${remote_name}" "${remote_url}"
-  else
-    git -C "${repo_dir}" remote add "${remote_name}" "${remote_url}"
-  fi
-
-  git -C "${repo_dir}" add -A
-  if [ -n "$(git -C "${repo_dir}" status --short)" ]; then
-    git -C "${repo_dir}" commit -m "${commit_message}" >/dev/null
-  fi
-
-  git -C "${repo_dir}" push --set-upstream "${remote_name}" main
-}
-
 render_runner_config() {
   local sdp_runner_description="${1:?runner description is required}"
   local sdp_runner_token="${2:?runner token is required}"
@@ -254,16 +221,11 @@ fi
 
 echo "GITLAB_BOOTSTRAP_PAT=${BOOTSTRAP_PAT}" > gitlab-runner/generated/bootstrap.env
 
-python3 "${ROOT_DIR}/scripts/render_gitlab_project_repos.py"
-
 SDP_PROJECT_NAME="${GITLAB_SDP_PROJECT_NAME}"
 SDP_PROJECT_PATH="${GITLAB_SDP_PROJECT_PATH}"
 EDP_PROJECT_NAME="${GITLAB_EDP_PROJECT_NAME}"
 EDP_PROJECT_PATH="${GITLAB_EDP_PROJECT_PATH}"
 RUNNER_PREFIX="${GITLAB_RUNNER_DESCRIPTION_PREFIX:-local-fargate-runner}"
-
-SDP_PROJECT_DIR="${ROOT_DIR}/gitlab-projects/generated/${SDP_PROJECT_PATH}"
-EDP_PROJECT_DIR="${ROOT_DIR}/gitlab-projects/generated/${EDP_PROJECT_PATH}"
 SDP_RUNNER_DESCRIPTION="${RUNNER_PREFIX}-sdp"
 EDP_RUNNER_DESCRIPTION="${RUNNER_PREFIX}-edp"
 
@@ -296,25 +258,8 @@ render_runner_config \
   "${SDP_RUNNER_DESCRIPTION}" "${SDP_RUNNER_TOKEN}" \
   "${EDP_RUNNER_DESCRIPTION}" "${EDP_RUNNER_TOKEN}"
 
-platform_sha="$(git rev-parse --short HEAD 2>/dev/null || echo manual)"
-
-echo "pushing generated SDP repository"
-sync_gitlab_repo \
-  "${SDP_PROJECT_DIR}" \
-  local-gitlab-sdp \
-  "http://oauth2:${BOOTSTRAP_PAT}@localhost:${GITLAB_HTTP_PORT}/root/${SDP_PROJECT_PATH}.git" \
-  "Sync SDP project from local platform ${platform_sha}"
-
-echo "pushing generated EDP repository"
-sync_gitlab_repo \
-  "${EDP_PROJECT_DIR}" \
-  local-gitlab-edp \
-  "http://oauth2:${BOOTSTRAP_PAT}@localhost:${GITLAB_HTTP_PORT}/root/${EDP_PROJECT_PATH}.git" \
-  "Sync EDP project from local platform ${platform_sha}"
-
 docker compose up -d gitlab-fargate-runner
-echo "syncing GitLab CI variables"
-./scripts/sync-gitlab-ci-variables.sh
+./scripts/publish-platform-repos.sh
 
 echo "gitlab bootstrap complete"
 echo "SDP project id: ${SDP_PROJECT_ID}"
