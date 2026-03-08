@@ -1,10 +1,25 @@
 from __future__ import annotations
 
 import argparse
+import json
 import os
+import subprocess
 import sys
+from dataclasses import dataclass
+from pathlib import Path
 
 import snowflake.connector
+
+
+DEFAULT_PRODUCTS_PATH = Path("/opt/platform/snowflake/data_products.json")
+MAX_DATABASE_NAME_LENGTH = 120
+
+
+@dataclass(frozen=True)
+class ClonePair:
+    key: str
+    source_database: str
+    target_database: str
 
 
 def ident(name: str) -> str:
@@ -18,6 +33,10 @@ def env(name: str) -> str:
     return value
 
 
+def opt_env(name: str) -> str:
+    return os.environ.get(name, "").strip()
+
+
 def connect():
     return snowflake.connector.connect(
         account=env("SNOWFLAKE_ACCOUNT"),
@@ -26,6 +45,124 @@ def connect():
         role=env("SNOWFLAKE_ROLE"),
         warehouse=env("SNOWFLAKE_WAREHOUSE"),
         autocommit=False,
+    )
+
+
+def trim_identifier(value: str, max_len: int) -> str:
+    return value[:max_len]
+
+
+def stable_token(raw: str) -> str:
+    completed = subprocess.run(
+        ["cksum"],
+        input=f"{raw}\n",
+        text=True,
+        capture_output=True,
+        check=True,
+    )
+    return completed.stdout.split()[0]
+
+
+def build_clone_database_name(base_name: str, owner_token: str, branch_token_raw: str, max_len: int) -> str:
+    branch_upper = branch_token_raw.upper()
+    prefix = f"{base_name}_CI_CLO_{owner_token}_"
+
+    if len(prefix) >= max_len:
+        return trim_identifier(prefix, max_len)
+
+    remaining = max_len - len(prefix)
+    if len(branch_upper) <= remaining:
+        return f"{prefix}{branch_upper}"
+
+    hash_value = stable_token(f"{base_name}_{owner_token}_{branch_token_raw}")
+    suffix_len = 1 + len(hash_value)
+    trimmed_len = remaining - suffix_len
+    if trimmed_len < 1:
+        return f"{prefix}{trim_identifier(hash_value, remaining)}"
+
+    branch_trimmed = trim_identifier(branch_upper, trimmed_len)
+    return f"{prefix}{branch_trimmed}_{hash_value}"
+
+
+def load_product_registry() -> list[dict[str, str]]:
+    registry_path = Path(opt_env("SNOWFLAKE_DATA_PRODUCTS_PATH") or DEFAULT_PRODUCTS_PATH)
+    if not registry_path.exists():
+        return []
+
+    payload = json.loads(registry_path.read_text(encoding="utf-8"))
+    products = payload.get("data_products", [])
+    if not isinstance(products, list):
+        raise SystemExit(f"invalid data product registry: {registry_path}")
+    return [product for product in products if isinstance(product, dict)]
+
+
+def resolve_source_database(product: dict[str, str]) -> str:
+    source_env_var = str(product.get("source_env_var", "")).strip()
+    if source_env_var:
+        source_value = opt_env(source_env_var)
+        if source_value:
+            return source_value
+    return str(product.get("database", "")).strip()
+
+
+def resolve_runtime_target(product: dict[str, str], owner_token: str, branch_token: str) -> str:
+    runtime_env_var = str(product.get("runtime_env_var", "")).strip()
+    runtime_value = opt_env(runtime_env_var) if runtime_env_var else ""
+    if runtime_value:
+        return runtime_value
+    source_database = resolve_source_database(product)
+    return build_clone_database_name(source_database, owner_token, branch_token, MAX_DATABASE_NAME_LENGTH)
+
+
+def clone_pairs_from_registry() -> list[ClonePair]:
+    owner_token = opt_env("SNOWFLAKE_CLONE_OWNER_TOKEN")
+    branch_token = opt_env("SNOWFLAKE_CLONE_BRANCH_TOKEN")
+    if not owner_token or not branch_token:
+        return []
+
+    pairs: list[ClonePair] = []
+    seen_targets: set[str] = set()
+    for product in load_product_registry():
+        key = str(product.get("key") or product.get("database") or "product").strip()
+        source_database = resolve_source_database(product)
+        if not source_database:
+            continue
+        target_database = resolve_runtime_target(product, owner_token, branch_token)
+        if not target_database or target_database in seen_targets:
+            continue
+        seen_targets.add(target_database)
+        pairs.append(ClonePair(key=key, source_database=source_database, target_database=target_database))
+    return pairs
+
+
+def clone_pairs_from_legacy_env() -> list[ClonePair]:
+    pairs: list[ClonePair] = []
+
+    source_sdp = opt_env("SNOWFLAKE_SDP_DATABASE_BASE") or opt_env("SNOWFLAKE_SDP_DATABASE")
+    target_sdp = opt_env("SNOWFLAKE_SDP_DATABASE")
+    if source_sdp and target_sdp:
+        pairs.append(ClonePair(key="sdp", source_database=source_sdp, target_database=target_sdp))
+
+    source_edp = opt_env("SNOWFLAKE_EDP_DATABASE_BASE") or opt_env("SNOWFLAKE_EDP_DATABASE")
+    target_edp = opt_env("SNOWFLAKE_EDP_DATABASE")
+    if source_edp and target_edp:
+        pairs.append(ClonePair(key="edp", source_database=source_edp, target_database=target_edp))
+
+    return pairs
+
+
+def clone_pairs() -> list[ClonePair]:
+    pairs = clone_pairs_from_registry()
+    if pairs:
+        return pairs
+
+    pairs = clone_pairs_from_legacy_env()
+    if pairs:
+        return pairs
+
+    raise SystemExit(
+        "no clone targets resolved; set SNOWFLAKE_CLONE_OWNER_TOKEN/SNOWFLAKE_CLONE_BRANCH_TOKEN "
+        "or the legacy SNOWFLAKE_SDP_DATABASE/SNOWFLAKE_EDP_DATABASE variables"
     )
 
 
@@ -54,63 +191,56 @@ def drop_database(cursor, target_name: str) -> None:
 
 
 def apply_replace() -> None:
-    source_sdp = env("SNOWFLAKE_SDP_DATABASE_BASE")
-    target_sdp = env("SNOWFLAKE_SDP_DATABASE")
-    source_edp = env("SNOWFLAKE_EDP_DATABASE_BASE")
-    target_edp = env("SNOWFLAKE_EDP_DATABASE")
-
+    pairs = clone_pairs()
     connection = connect()
     try:
         with connection.cursor() as cursor:
-            clone_database(cursor, source_sdp, target_sdp)
-            clone_database(cursor, source_edp, target_edp)
+            for pair in pairs:
+                clone_database(cursor, pair.source_database, pair.target_database)
         connection.commit()
     finally:
         connection.close()
 
-    print(f"created clones sdp={target_sdp} edp={target_edp}")
+    print("created clones " + " ".join(f"{pair.key}={pair.target_database}" for pair in pairs))
 
 
 def apply_ensure() -> None:
-    source_sdp = env("SNOWFLAKE_SDP_DATABASE_BASE")
-    target_sdp = env("SNOWFLAKE_SDP_DATABASE")
-    source_edp = env("SNOWFLAKE_EDP_DATABASE_BASE")
-    target_edp = env("SNOWFLAKE_EDP_DATABASE")
+    pairs = clone_pairs()
+    created_pairs: list[tuple[ClonePair, bool]] = []
 
     connection = connect()
     try:
         with connection.cursor() as cursor:
-            created_sdp = ensure_database_clone(cursor, source_sdp, target_sdp)
-            created_edp = ensure_database_clone(cursor, source_edp, target_edp)
+            for pair in pairs:
+                created_pairs.append(
+                    (pair, ensure_database_clone(cursor, pair.source_database, pair.target_database))
+                )
         connection.commit()
     finally:
         connection.close()
 
     print(
         "ensured clones "
-        f"sdp={target_sdp}({'created' if created_sdp else 'reused'}) "
-        f"edp={target_edp}({'created' if created_edp else 'reused'})"
+        + " ".join(
+            f"{pair.key}={pair.target_database}({'created' if created else 'reused'})"
+            for pair, created in created_pairs
+        )
     )
 
 
 def apply_drop() -> None:
-    target_sdp = env("SNOWFLAKE_SDP_DATABASE")
-    target_edp = env("SNOWFLAKE_EDP_DATABASE")
-    source_sdp = os.environ.get("SNOWFLAKE_SDP_DATABASE_BASE", "").strip()
-    source_edp = os.environ.get("SNOWFLAKE_EDP_DATABASE_BASE", "").strip()
-
+    pairs = clone_pairs()
     connection = connect()
     try:
         with connection.cursor() as cursor:
-            if target_edp and target_edp != source_edp:
-                drop_database(cursor, target_edp)
-            if target_sdp and target_sdp != source_sdp:
-                drop_database(cursor, target_sdp)
+            for pair in pairs:
+                if pair.target_database != pair.source_database:
+                    drop_database(cursor, pair.target_database)
         connection.commit()
     finally:
         connection.close()
 
-    print(f"dropped clones sdp={target_sdp} edp={target_edp}")
+    print("dropped clones " + " ".join(f"{pair.key}={pair.target_database}" for pair in pairs))
 
 
 def parse_args() -> argparse.Namespace:

@@ -169,10 +169,15 @@ The platform now provisions developer sandboxes from GitLab branch events, not f
 - When a new branch appears in GitLab, the service provisions the associated isolated environment automatically.
 - SDP branches get Snowflake branch clones plus a branch-specific MinIO/S3 prefix and Iceberg namespace.
 - EDP branches get Snowflake branch clones.
+- The Snowflake clone scope is driven by [data_products.json](/Users/taagiti2/Documents/01%20Projects/Valiant/repos/local-platform/snowflake/data_products.json), so every registered data product database is cloned for branch isolation, not just the current sample SDP and EDP orders databases.
+- Branch clone databases are named from the original database plus the owning project and branch, for example `DB_EDP_ORDERS_CI_CLO_EDP_FEATURE_X`.
+- The owning project token stays in the clone name so the same branch name can exist in both GitLab projects without reusing the same Snowflake clone by accident.
 - The branch pipeline then reuses that pre-created sandbox instead of creating a second one.
 - When the branch is deleted in GitLab, the provisioner destroys the associated sandbox automatically.
 
 In practice this means a developer can create a new branch in GitLab and then work only against the isolated clone objects and temporary storage path for that branch. The sandbox creation is event-driven and does not depend on a periodic polling interval.
+
+If you scaffold an additional Snowflake data product with [scaffold_mesh_product.py](/Users/taagiti2/Documents/01%20Projects/Valiant/repos/local-platform/scripts/scaffold_mesh_product.py), its SDP and EDP databases are added to the clone registry automatically.
 
 You can watch the provisioner with:
 
@@ -212,6 +217,12 @@ Ensure Snowflake foundation only:
 
 ```bash
 bash ./scripts/ensure-snowflake-foundation.sh
+```
+
+Reset and rebuild only the Snowflake SDP and EDP products:
+
+```bash
+./scripts/bootstrap-snowflake-products.sh
 ```
 
 ## Validation Commands

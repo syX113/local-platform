@@ -12,39 +12,23 @@ dotenv_path="${2:-${ROOT_DIR}/artifacts/context/ci.env}"
 
 mkdir -p "$(dirname "${dotenv_path}")"
 
-trim_identifier() {
-  local value="${1:?value is required}"
-  local max_len="${2:?max length is required}"
-  printf '%s' "${value:0:${max_len}}"
-}
-
-stable_token() {
-  local raw="${1:?raw token is required}"
-  cksum <<<"${raw}" | awk '{print $1}'
-}
-
-sanitize_branch_token() {
-  local raw="${1:?raw token is required}"
-  raw="$(printf '%s' "${raw}" | tr '[:upper:]' '[:lower:]')"
-  raw="$(printf '%s' "${raw}" | tr -cs 'a-z0-9' '_')"
-  raw="${raw#_}"
-  raw="${raw%_}"
-  printf '%s' "${raw}"
-}
-
 project_token="$(sanitize_branch_token "${CI_PROJECT_PATH_SLUG:-${project_kind}}")"
 project_token="$(trim_identifier "${project_token}" 18)"
-branch_token="$(sanitize_branch_token "${CI_MERGE_REQUEST_SOURCE_BRANCH_NAME:-${CI_COMMIT_REF_SLUG:-local}}")"
+branch_name_raw="${CI_MERGE_REQUEST_SOURCE_BRANCH_NAME:-${CI_COMMIT_BRANCH:-${CI_COMMIT_REF_NAME:-${CI_COMMIT_REF_SLUG:-local}}}}"
+branch_token="$(sanitize_branch_token "${branch_name_raw}")"
 branch_token="${branch_token:-local}"
+clone_owner_token="$(printf '%s' "${project_kind}" | tr '[:lower:]' '[:upper:]')"
 
 if [ "${CI_COMMIT_BRANCH:-}" = "${CI_DEFAULT_BRANCH:-main}" ]; then
   sandbox_kind="merge"
   branch_seed="merge_${project_token}_${CI_PIPELINE_ID:-local}_${CI_COMMIT_SHORT_SHA:-head}"
+  clone_branch_token="merge_${CI_PIPELINE_ID:-local}_${CI_COMMIT_SHORT_SHA:-head}"
   clone_action="replace"
   cleanup_mode="destroy"
 else
   sandbox_kind="branch"
   branch_seed="branch_${project_token}_${branch_token}"
+  clone_branch_token="${branch_token}"
   clone_action="ensure"
   cleanup_mode="preserve"
 fi
@@ -62,8 +46,8 @@ object_store_bucket="s3://${MINIO_BUCKET}/${object_prefix}"
 
 base_sdp_database="${SNOWFLAKE_SDP_DATABASE}"
 base_edp_database="${SNOWFLAKE_EDP_DATABASE}"
-branch_sdp_database="$(trim_identifier "${base_sdp_database}_CI_${db_suffix}" 120)"
-branch_edp_database="$(trim_identifier "${base_edp_database}_CI_${db_suffix}" 120)"
+branch_sdp_database="$(build_clone_database_name "${base_sdp_database}" "${clone_owner_token}" "${clone_branch_token}" 120)"
+branch_edp_database="$(build_clone_database_name "${base_edp_database}" "${clone_owner_token}" "${clone_branch_token}" 120)"
 
 cat > "${dotenv_path}" <<EOF
 CI_SANDBOX_KIND=${sandbox_kind}
@@ -72,6 +56,8 @@ CI_SANDBOX_SLUG=${sandbox_slug}
 CI_SANDBOX_CLONE_ACTION=${clone_action}
 CI_SANDBOX_CLEANUP_MODE=${cleanup_mode}
 CI_SANDBOX_OBJECT_PREFIX=${object_prefix}
+SNOWFLAKE_CLONE_OWNER_TOKEN=${clone_owner_token}
+SNOWFLAKE_CLONE_BRANCH_TOKEN=${clone_branch_token}
 SNOWFLAKE_SDP_DATABASE_BASE=${base_sdp_database}
 SNOWFLAKE_EDP_DATABASE_BASE=${base_edp_database}
 SNOWFLAKE_SDP_DATABASE=${branch_sdp_database}
@@ -96,6 +82,8 @@ docker compose run --rm --no-deps \
   -e "SNOWFLAKE_PASSWORD=${SNOWFLAKE_PASSWORD}" \
   -e "SNOWFLAKE_ROLE=${SNOWFLAKE_ROLE}" \
   -e "SNOWFLAKE_WAREHOUSE=${SNOWFLAKE_WAREHOUSE}" \
+  -e "SNOWFLAKE_CLONE_OWNER_TOKEN=${SNOWFLAKE_CLONE_OWNER_TOKEN}" \
+  -e "SNOWFLAKE_CLONE_BRANCH_TOKEN=${SNOWFLAKE_CLONE_BRANCH_TOKEN}" \
   -e "SNOWFLAKE_SDP_DATABASE_BASE=${SNOWFLAKE_SDP_DATABASE_BASE}" \
   -e "SNOWFLAKE_EDP_DATABASE_BASE=${SNOWFLAKE_EDP_DATABASE_BASE}" \
   -e "SNOWFLAKE_SDP_DATABASE=${SNOWFLAKE_SDP_DATABASE}" \

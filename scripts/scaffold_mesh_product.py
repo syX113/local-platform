@@ -2,10 +2,14 @@
 from __future__ import annotations
 
 import argparse
+import json
 from pathlib import Path
 from textwrap import dedent
 
 from scaffold_support import ROOT_DIR, ensure_new_file, require_slug, upper_identifier
+
+
+REGISTRY_PATH = ROOT_DIR / "snowflake" / "data_products.json"
 
 
 def parse_args() -> argparse.Namespace:
@@ -16,6 +20,28 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--sdp-database", help="Snowflake database name for the source data product")
     parser.add_argument("--edp-database", help="Snowflake database name for the enterprise data product")
     return parser.parse_args()
+
+
+def register_data_product_database(key: str, kind: str, database: str) -> None:
+    if REGISTRY_PATH.exists():
+        payload = json.loads(REGISTRY_PATH.read_text(encoding="utf-8"))
+    else:
+        payload = {"data_products": []}
+
+    products = payload.setdefault("data_products", [])
+    if not isinstance(products, list):
+        raise SystemExit(f"invalid data product registry: {REGISTRY_PATH}")
+
+    filtered_products = [
+        product
+        for product in products
+        if not isinstance(product, dict) or product.get("key") != key
+    ]
+    filtered_products.append({"key": key, "kind": kind, "database": database})
+    filtered_products.sort(key=lambda product: str(product.get("key", "")))
+    payload["data_products"] = filtered_products
+    REGISTRY_PATH.parent.mkdir(parents=True, exist_ok=True)
+    REGISTRY_PATH.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
 
 
 def main() -> int:
@@ -463,9 +489,13 @@ def main() -> int:
     )
     verify_script.chmod(0o755)
 
+    register_data_product_database(f"sdp_{slug}", "sdp", sdp_database)
+    register_data_product_database(f"edp_{slug}", "edp", edp_database)
+
     print(f"created data product models: {product_root.relative_to(ROOT_DIR)}")
     print(f"created Snowflake foundation SQL: {foundation_sql.relative_to(ROOT_DIR)}")
     print(f"created verification script: {verify_script.relative_to(ROOT_DIR)}")
+    print(f"registered Snowflake clone scope in: {REGISTRY_PATH.relative_to(ROOT_DIR)}")
     print("next step: update scripts/render_gitlab_project_repos.py if this data product should be published to GitLab")
     return 0
 

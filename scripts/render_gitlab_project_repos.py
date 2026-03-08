@@ -482,6 +482,7 @@ def render_sdp_repo(project_path: str) -> None:
         "snowflake/sql/01_snowflake_foundation.sql.tpl",
         "snowflake/sql/02_open_catalog_integration.sql.tpl",
         "snowflake/sql/03_catalog_linked_database.sql.tpl",
+        "snowflake/data_products.json",
     ):
         copy_path(relative_path, repo_dir)
 
@@ -515,6 +516,8 @@ def render_sdp_repo(project_path: str) -> None:
 
                 - When a new non-default branch appears in GitLab, a GitLab webhook triggers the platform-side branch provisioner to create the branch sandbox automatically.
                 - Every non-default branch and merge request pipeline reuses one branch-scoped Snowflake zero-copy environment instead of replacing the shared DEV objects.
+                - The clone lifecycle is driven by `snowflake/data_products.json`, so every registered Snowflake data product database is cloned, not just the sample SDP and EDP orders databases.
+                - Branch clone databases are named from the original database plus `CI_CLO`, the owning project token, and the branch token, for example `DB_SDP_ORDERS_CI_CLO_SDP_FEATURE_X`.
                 - Every non-default branch and merge request pipeline writes ingestion output to a stable branch-scoped MinIO/S3 prefix and Iceberg namespace.
                 - Validation runs `dbt parse` and `sqlfluff lint` before promotion, and promotion runs `dbt run` plus `dbt test`.
                 - Default-branch pipelines create a fresh merge clone, run an additional CD verification stage on a second fresh clone, and then clean both up automatically.
@@ -561,6 +564,7 @@ def render_edp_repo(project_path: str) -> None:
         "snowflake/sql/01_snowflake_foundation.sql.tpl",
         "snowflake/sql/02_open_catalog_integration.sql.tpl",
         "snowflake/sql/03_catalog_linked_database.sql.tpl",
+        "snowflake/data_products.json",
     ):
         copy_path(relative_path, repo_dir)
 
@@ -597,6 +601,8 @@ def render_edp_repo(project_path: str) -> None:
 
                 - When a new non-default branch appears in GitLab, a GitLab webhook triggers the platform-side branch provisioner to create the branch sandbox automatically.
                 - Every non-default branch and merge request pipeline reuses one branch-scoped Snowflake zero-copy environment instead of replacing the shared DEV objects.
+                - The clone lifecycle is driven by `snowflake/data_products.json`, so every registered Snowflake data product database is cloned, not just the sample SDP and EDP orders databases.
+                - Branch clone databases are named from the original database plus `CI_CLO`, the owning project token, and the branch token, for example `DB_EDP_ORDERS_CI_CLO_EDP_FEATURE_X`.
                 - Validation runs `dbt parse` and `sqlfluff lint`, and promotion runs `dbt run` plus `dbt test`.
                 - Default-branch pipelines create a fresh merge clone, run an additional CD verification stage on a second fresh clone, and then clean both up automatically.
                 - Branch environments are preserved after the pipeline, can be destroyed explicitly with the manual `destroy_edp_branch_sandbox` job, and are also destroyed automatically when the GitLab branch is deleted.

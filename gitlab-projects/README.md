@@ -11,6 +11,9 @@ After the GitLab bootstrap, the platform-side `gitlab-branch-provisioner` servic
 
 - A new non-default branch in `proj_sdp_orders` triggers creation of a branch-scoped Snowflake clone set plus a branch-scoped MinIO/S3 and Iceberg sandbox.
 - A new non-default branch in `proj_edp_orders` triggers creation of a branch-scoped Snowflake clone set.
+- The Snowflake clone set is resolved from `snowflake/data_products.json`, so every registered data product database is included in the sandbox.
+- Clone databases follow the original database name plus `CI_CLO`, the owning project token, and the branch token, for example `DB_EDP_ORDERS_CI_CLO_EDP_FEATURE_X`.
+- The project token is part of the name so the same branch name can exist in both GitLab repos without sharing one Snowflake clone.
 - Deleting the branch in GitLab destroys the associated sandbox again.
 
 That separation is intentional:

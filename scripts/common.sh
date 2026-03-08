@@ -1,5 +1,60 @@
 #!/usr/bin/env bash
 
+trim_identifier() {
+  local value="${1:?value is required}"
+  local max_len="${2:?max length is required}"
+  printf '%s' "${value:0:${max_len}}"
+}
+
+stable_token() {
+  local raw="${1:?raw token is required}"
+  cksum <<<"${raw}" | awk '{print $1}'
+}
+
+sanitize_branch_token() {
+  local raw="${1:?raw token is required}"
+  raw="$(printf '%s' "${raw}" | tr '[:upper:]' '[:lower:]')"
+  raw="$(printf '%s' "${raw}" | tr -cs 'a-z0-9' '_')"
+  raw="${raw#_}"
+  raw="${raw%_}"
+  printf '%s' "${raw}"
+}
+
+build_clone_database_name() {
+  local base_name="${1:?base name is required}"
+  local owner_token="${2:?owner token is required}"
+  local branch_token_raw="${3:?branch token is required}"
+  local max_len="${4:?max length is required}"
+
+  local branch_upper prefix prefix_len remaining hash suffix_len trimmed_len branch_trimmed
+
+  branch_upper="$(printf '%s' "${branch_token_raw}" | tr '[:lower:]' '[:upper:]')"
+  prefix="${base_name}_CI_CLO_${owner_token}_"
+  prefix_len="${#prefix}"
+
+  if [ "${prefix_len}" -ge "${max_len}" ]; then
+    printf '%s' "$(trim_identifier "${prefix}" "${max_len}")"
+    return 0
+  fi
+
+  remaining=$((max_len - prefix_len))
+  if [ "${#branch_upper}" -le "${remaining}" ]; then
+    printf '%s%s' "${prefix}" "${branch_upper}"
+    return 0
+  fi
+
+  hash="$(stable_token "${base_name}_${owner_token}_${branch_token_raw}")"
+  suffix_len=$((1 + ${#hash}))
+  trimmed_len=$((remaining - suffix_len))
+  if [ "${trimmed_len}" -lt 1 ]; then
+    printf '%s%s' "${prefix}" "$(trim_identifier "${hash}" "${remaining}")"
+    return 0
+  fi
+
+  branch_trimmed="$(trim_identifier "${branch_upper}" "${trimmed_len}")"
+  printf '%s%s_%s' "${prefix}" "${branch_trimmed}" "${hash}"
+}
+
 load_env_preserving_existing() {
   local env_file="${1:?env file is required}"
 

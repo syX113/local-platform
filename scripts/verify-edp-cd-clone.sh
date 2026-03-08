@@ -13,12 +13,15 @@ mkdir -p "${ARTIFACT_DIR}"
 
 source_sdp_database="${SNOWFLAKE_SDP_DATABASE}"
 source_edp_database="${SNOWFLAKE_EDP_DATABASE}"
-suffix="$(printf '%s' "${CI_PIPELINE_ID:-local}" | tr -cs '[:alnum:]' '_' | tr '[:lower:]' '[:upper:]')"
+clone_owner_token="EDP_CD"
+clone_branch_token="merge_${CI_PIPELINE_ID:-local}_${CI_COMMIT_SHORT_SHA:-head}"
 
 export SNOWFLAKE_SDP_DATABASE_BASE="${source_sdp_database}"
 export SNOWFLAKE_EDP_DATABASE_BASE="${source_edp_database}"
-export SNOWFLAKE_SDP_DATABASE="${source_sdp_database}_CD_${suffix}"
-export SNOWFLAKE_EDP_DATABASE="${source_edp_database}_CD_${suffix}"
+export SNOWFLAKE_CLONE_OWNER_TOKEN="${clone_owner_token}"
+export SNOWFLAKE_CLONE_BRANCH_TOKEN="${clone_branch_token}"
+export SNOWFLAKE_SDP_DATABASE="$(build_clone_database_name "${source_sdp_database}" "${clone_owner_token}" "${clone_branch_token}" 120)"
+export SNOWFLAKE_EDP_DATABASE="$(build_clone_database_name "${source_edp_database}" "${clone_owner_token}" "${clone_branch_token}" 120)"
 
 cleanup() {
   ./scripts/cleanup-ci-sandbox.sh || true
@@ -32,6 +35,8 @@ docker compose run --rm --no-deps \
   -e "SNOWFLAKE_PASSWORD=${SNOWFLAKE_PASSWORD}" \
   -e "SNOWFLAKE_ROLE=${SNOWFLAKE_ROLE}" \
   -e "SNOWFLAKE_WAREHOUSE=${SNOWFLAKE_WAREHOUSE}" \
+  -e "SNOWFLAKE_CLONE_OWNER_TOKEN=${SNOWFLAKE_CLONE_OWNER_TOKEN}" \
+  -e "SNOWFLAKE_CLONE_BRANCH_TOKEN=${SNOWFLAKE_CLONE_BRANCH_TOKEN}" \
   -e "SNOWFLAKE_SDP_DATABASE_BASE=${SNOWFLAKE_SDP_DATABASE_BASE}" \
   -e "SNOWFLAKE_EDP_DATABASE_BASE=${SNOWFLAKE_EDP_DATABASE_BASE}" \
   -e "SNOWFLAKE_SDP_DATABASE=${SNOWFLAKE_SDP_DATABASE}" \

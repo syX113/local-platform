@@ -1,0 +1,18 @@
+{
+  "data_products": [
+    {
+      "key": "sdp_orders",
+      "kind": "sdp",
+      "database": "DB_SDP_ORDERS",
+      "runtime_env_var": "SNOWFLAKE_SDP_DATABASE",
+      "source_env_var": "SNOWFLAKE_SDP_DATABASE_BASE"
+    },
+    {
+      "key": "edp_orders",
+      "kind": "edp",
+      "database": "DB_EDP_ORDERS",
+      "runtime_env_var": "SNOWFLAKE_EDP_DATABASE",
+      "source_env_var": "SNOWFLAKE_EDP_DATABASE_BASE"
+    }
+  ]
+}
