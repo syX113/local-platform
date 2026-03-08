@@ -7,6 +7,12 @@ The actual hosted GitLab projects are rendered into `gitlab-projects/generated/`
 - `gitlab-projects/generated/proj_sdp_orders`
 - `gitlab-projects/generated/proj_edp_orders`
 
+After the GitLab bootstrap, the platform-side `gitlab-branch-provisioner` service receives branch events from those hosted projects through GitLab webhooks.
+
+- A new non-default branch in `proj_sdp_orders` triggers creation of a branch-scoped Snowflake clone set plus a branch-scoped MinIO/S3 and Iceberg sandbox.
+- A new non-default branch in `proj_edp_orders` triggers creation of a branch-scoped Snowflake clone set.
+- Deleting the branch in GitLab destroys the associated sandbox again.
+
 That separation is intentional:
 
 - source repo: owns templates, bootstrap scripts, Docker assets, Airflow, dlt, dbt, and render logic

@@ -34,6 +34,32 @@ ensure_platform_env() {
   fi
 
   load_env_preserving_existing .env
+
+  local root_dir="${ROOT_DIR:-$(pwd)}"
+  local platform_root="${LOCAL_PLATFORM_ROOT:-}"
+
+  if [ -z "${platform_root}" ]; then
+    platform_root="${root_dir}"
+    export LOCAL_PLATFORM_ROOT="${platform_root}"
+
+    local temp_env
+    temp_env="$(mktemp)"
+    awk -v root="${platform_root}" '
+      BEGIN { updated = 0 }
+      /^LOCAL_PLATFORM_ROOT=/ {
+        print "LOCAL_PLATFORM_ROOT=\"" root "\""
+        updated = 1
+        next
+      }
+      { print }
+      END {
+        if (!updated) {
+          print "LOCAL_PLATFORM_ROOT=\"" root "\""
+        }
+      }
+    ' .env > "${temp_env}"
+    mv "${temp_env}" .env
+  fi
 }
 
 resolve_host_dbt_project_dir() {

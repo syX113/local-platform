@@ -166,6 +166,68 @@ create_project_runner_token() {
   printf '%s\n' "${runner_token}"
 }
 
+enable_local_webhook_requests() {
+  docker compose exec -T gitlab-platform gitlab-rails runner "
+    settings = ApplicationSetting.current
+    settings.update!(allow_local_requests_from_web_hooks_and_services: true)
+    puts settings.allow_local_requests_from_web_hooks_and_services
+  " | tail -n 1
+}
+
+project_hook_id_by_url() {
+  local project_id="${1:?project id is required}"
+  local hook_url="${2:?hook url is required}"
+  local hooks_json
+
+  hooks_json="$(gitlab_api_request GET "/projects/${project_id}/hooks")"
+  HOOK_URL="${hook_url}" python3 -c '
+import json
+import os
+import sys
+
+hook_url = os.environ["HOOK_URL"]
+for hook in json.load(sys.stdin):
+    if hook.get("url") == hook_url:
+        print(hook["id"])
+        break
+' <<<"${hooks_json}"
+}
+
+ensure_project_branch_webhook() {
+  local project_id="${1:?project id is required}"
+  local hook_url="${2:?hook url is required}"
+  local hook_id
+
+  hook_id="$(project_hook_id_by_url "${project_id}" "${hook_url}")"
+
+  if [ -n "${hook_id}" ]; then
+    gitlab_api_request PUT "/projects/${project_id}/hooks/${hook_id}" \
+      --data-urlencode "url=${hook_url}" \
+      --data-urlencode "push_events=true" \
+      --data-urlencode "tag_push_events=false" \
+      --data-urlencode "issues_events=false" \
+      --data-urlencode "merge_requests_events=false" \
+      --data-urlencode "job_events=false" \
+      --data-urlencode "pipeline_events=false" \
+      --data-urlencode "wiki_page_events=false" \
+      --data-urlencode "enable_ssl_verification=false" \
+      --data-urlencode "token=${BRANCH_PROVISIONER_TOKEN}" >/dev/null
+    return 0
+  fi
+
+  gitlab_api_request POST "/projects/${project_id}/hooks" \
+    --data-urlencode "url=${hook_url}" \
+    --data-urlencode "push_events=true" \
+    --data-urlencode "tag_push_events=false" \
+    --data-urlencode "issues_events=false" \
+    --data-urlencode "merge_requests_events=false" \
+    --data-urlencode "job_events=false" \
+    --data-urlencode "pipeline_events=false" \
+    --data-urlencode "wiki_page_events=false" \
+    --data-urlencode "enable_ssl_verification=false" \
+    --data-urlencode "token=${BRANCH_PROVISIONER_TOKEN}" >/dev/null
+}
+
 render_runner_config() {
   local sdp_runner_description="${1:?runner description is required}"
   local sdp_runner_token="${2:?runner token is required}"
@@ -221,6 +283,12 @@ fi
 
 echo "GITLAB_BOOTSTRAP_PAT=${BOOTSTRAP_PAT}" > gitlab-runner/generated/bootstrap.env
 
+echo "enabling local webhook callbacks in GitLab"
+[ "$(enable_local_webhook_requests)" = "true" ] || {
+  echo "failed to enable local webhook callbacks in GitLab" >&2
+  exit 1
+}
+
 SDP_PROJECT_NAME="${GITLAB_SDP_PROJECT_NAME}"
 SDP_PROJECT_PATH="${GITLAB_SDP_PROJECT_PATH}"
 EDP_PROJECT_NAME="${GITLAB_EDP_PROJECT_NAME}"
@@ -228,6 +296,9 @@ EDP_PROJECT_PATH="${GITLAB_EDP_PROJECT_PATH}"
 RUNNER_PREFIX="${GITLAB_RUNNER_DESCRIPTION_PREFIX:-local-fargate-runner}"
 SDP_RUNNER_DESCRIPTION="${RUNNER_PREFIX}-sdp"
 EDP_RUNNER_DESCRIPTION="${RUNNER_PREFIX}-edp"
+BRANCH_PROVISIONER_PORT="${GITLAB_BRANCH_PROVISIONER_PORT:-8090}"
+BRANCH_PROVISIONER_TOKEN="${GITLAB_BRANCH_PROVISIONER_WEBHOOK_TOKEN:-local-platform-branch-provisioner}"
+BRANCH_PROVISIONER_HOST="${GITLAB_BRANCH_PROVISIONER_WEBHOOK_HOST:-gitlab-branch-provisioner.local}"
 
 echo "creating or resolving SDP GitLab project"
 SDP_PROJECT_ID="$(create_or_resolve_project "${SDP_PROJECT_NAME}" "${SDP_PROJECT_PATH}")"
@@ -257,6 +328,16 @@ EOF
 render_runner_config \
   "${SDP_RUNNER_DESCRIPTION}" "${SDP_RUNNER_TOKEN}" \
   "${EDP_RUNNER_DESCRIPTION}" "${EDP_RUNNER_TOKEN}"
+
+docker compose up -d gitlab-branch-provisioner
+
+branch_hook_url="http://${BRANCH_PROVISIONER_HOST}:${BRANCH_PROVISIONER_PORT}/gitlab/webhook"
+
+echo "configuring SDP GitLab branch webhook"
+ensure_project_branch_webhook "${SDP_PROJECT_ID}" "${branch_hook_url}"
+
+echo "configuring EDP GitLab branch webhook"
+ensure_project_branch_webhook "${EDP_PROJECT_ID}" "${branch_hook_url}"
 
 docker compose up -d gitlab-fargate-runner
 ./scripts/publish-platform-repos.sh

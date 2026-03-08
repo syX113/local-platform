@@ -57,6 +57,8 @@ ENV_KEYS = [
     "SNOWFLAKE_CLONE_SCHEMA",
     "SNOWFLAKE_LOCAL_RAW_SYNC",
     "DBT_THREADS",
+    "DLT_RUNNER_IMAGE",
+    "DBT_RUNNER_IMAGE",
 ]
 
 SOURCE_SQL_DIR = Path("/opt/platform/postgres/source-init")

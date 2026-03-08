@@ -39,7 +39,7 @@ fi
 
 container_dbt_project_dir="$(resolve_container_dbt_project_dir proj_sdp_orders)"
 
-./scripts/bootstrap-snowflake.sh | tee "${ARTIFACT_DIR}/snowflake_bootstrap.log"
+bash ./scripts/ensure-snowflake-foundation.sh | tee "${ARTIFACT_DIR}/snowflake_bootstrap.log"
 
 docker compose run --rm --no-deps dbt-executor python - <<'PY' | tee "${ARTIFACT_DIR}/sdp_inbound_contract.txt"
 import os
@@ -94,8 +94,12 @@ docker compose run --rm --no-deps dbt-executor \
   | tee "${ARTIFACT_DIR}/dbt_parse.log"
 
 docker compose run --rm --no-deps dbt-executor \
-  dbt build --project-dir "${container_dbt_project_dir}" --profiles-dir /opt/platform/dbt/profiles \
-  | tee "${ARTIFACT_DIR}/dbt_build.log"
+  dbt run --project-dir "${container_dbt_project_dir}" --profiles-dir /opt/platform/dbt/profiles \
+  | tee "${ARTIFACT_DIR}/dbt_run.log"
+
+docker compose run --rm --no-deps dbt-executor \
+  dbt test --project-dir "${container_dbt_project_dir}" --profiles-dir /opt/platform/dbt/profiles \
+  | tee "${ARTIFACT_DIR}/dbt_test.log"
 
 docker compose run --rm --no-deps dbt-executor python - <<'PY' | tee "${ARTIFACT_DIR}/snowflake_validation.txt"
 import os

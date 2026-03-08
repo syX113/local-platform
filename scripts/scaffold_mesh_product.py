@@ -368,7 +368,7 @@ def main() -> int:
             docker compose up -d airflow-metadata-db source-postgres-db lakehouse-object-store
             docker compose run --rm lakehouse-bucket-init | tee "${{ARTIFACT_DIR}}/bucket_init.log"
             ./scripts/load-source-sample-data.sh | tee "${{ARTIFACT_DIR}}/source_seed.log"
-            ./scripts/bootstrap-snowflake.sh | tee "${{ARTIFACT_DIR}}/snowflake_bootstrap.log"
+            bash ./scripts/ensure-snowflake-foundation.sh | tee "${{ARTIFACT_DIR}}/snowflake_bootstrap.log"
 
             export SNOWFLAKE_SDP_DATABASE="{sdp_database}"
             export SNOWFLAKE_SDP_IN_SCHEMA="INBOUND"

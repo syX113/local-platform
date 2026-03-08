@@ -16,7 +16,7 @@ docker compose run --rm lakehouse-bucket-init
 docker compose run --rm --no-deps dlt-extractor python /opt/platform/dlt/pipeline.py
 
 if [ -n "${SNOWFLAKE_ACCOUNT:-}" ] && [ -n "${SNOWFLAKE_USER:-}" ] && [ -n "${SNOWFLAKE_PASSWORD:-}" ]; then
-  ./scripts/bootstrap-snowflake.sh
+  bash ./scripts/ensure-snowflake-foundation.sh
   docker compose run --rm --no-deps dlt-extractor python /opt/platform/dlt/snowflake_raw_sync.py
   docker compose run --rm dbt-executor \
     dbt build --project-dir "${sdp_container_dbt_project_dir}" --profiles-dir /opt/platform/dbt/profiles

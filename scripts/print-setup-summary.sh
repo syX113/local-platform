@@ -83,6 +83,8 @@ printf '  EDP dbt project dir: %s/dbt/projects/proj_edp_orders\n' "${ROOT_DIR}"
 printf '  dbt profiles dir: %s/dbt/profiles\n' "${ROOT_DIR}"
 printf '  Snowflake SQL dir: %s/snowflake/sql\n' "${ROOT_DIR}"
 printf '  Runner config path: %s/gitlab-runner/generated/config.toml\n' "${ROOT_DIR}"
+printf '  Branch sandbox state dir: %s/gitlab-branch-provisioner/state\n' "${ROOT_DIR}"
+printf '  Branch webhook endpoint: http://%s:%s/gitlab/webhook\n' "${GITLAB_BRANCH_PROVISIONER_WEBHOOK_HOST:-gitlab-branch-provisioner.local}" "${GITLAB_BRANCH_PROVISIONER_PORT:-8090}"
 printf '  SDP rendered platform repo: %s/gitlab-projects/generated/%s\n' "${ROOT_DIR}" "${GITLAB_SDP_PROJECT_PATH}"
 printf '  EDP rendered platform repo: %s/gitlab-projects/generated/%s\n' "${ROOT_DIR}" "${GITLAB_EDP_PROJECT_PATH}"
 printf '\n'
@@ -92,6 +94,7 @@ printf '  dlt runtime service: dlt-extractor\n'
 printf '  dbt runtime service: dbt-executor\n'
 printf '  Airflow DAG id: local_platform_ingest\n'
 printf '  GitLab runner service: gitlab-fargate-runner\n'
+printf '  GitLab branch provisioner service: gitlab-branch-provisioner\n'
 printf '\n'
 
 printf 'Storage And Data Targets\n'
@@ -137,6 +140,7 @@ printf '  Bootstrap local platform: ./scripts/bootstrap.sh\n'
 printf '  Bootstrap GitLab runner/project: ./scripts/bootstrap-gitlab.sh\n'
 printf '  Publish rendered platform repos: ./scripts/publish-platform-repos.sh\n'
 printf '  Sync GitLab CI variables: ./scripts/sync-gitlab-ci-variables.sh\n'
+printf '  Watch branch sandbox provisioning: docker compose logs -f gitlab-branch-provisioner\n'
 printf '  Show this summary again: ./scripts/print-setup-summary.sh\n'
 printf '\n'
 

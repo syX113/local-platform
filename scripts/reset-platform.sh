@@ -19,6 +19,7 @@ rm -f gitlab-runner/generated/config.toml
 rm -f gitlab-runner/generated/bootstrap.env
 rm -f gitlab-runner/generated/project.env
 rm -f gitlab-runner/generated/projects.env
+rm -rf gitlab-branch-provisioner/state
 find "${ROOT_DIR}" -type d \( -name __pycache__ -o -name logs -o -name target \) \
   ! -path "${ROOT_DIR}/.git/*" \
   ! -path "${ROOT_DIR}/gitlab-runner/generated/*" \

@@ -79,8 +79,8 @@ x-airflow-env: &airflow-env
   AIRFLOW_ADMIN_EMAIL: ${AIRFLOW_ADMIN_EMAIL}
   AIRFLOW_UID: ${AIRFLOW_UID:-50000}
   DOCKER_URL: unix:///var/run/docker.sock
-  DLT_RUNNER_IMAGE: ${COMPOSE_PROJECT_NAME:-local-platform}/dlt-extractor:dev
-  DBT_RUNNER_IMAGE: ${COMPOSE_PROJECT_NAME:-local-platform}/dbt-executor:dev
+  DLT_RUNNER_IMAGE: ${RUNTIME_IMAGE_PREFIX:-${COMPOSE_PROJECT_NAME:-local-platform}}/dlt-extractor:dev
+  DBT_RUNNER_IMAGE: ${RUNTIME_IMAGE_PREFIX:-${COMPOSE_PROJECT_NAME:-local-platform}}/dbt-executor:dev
 
 services:
   airflow-metadata-db:
@@ -95,7 +95,9 @@ services:
       timeout: 5s
       retries: 10
     networks:
-      - platform
+      platform:
+        aliases:
+          - ${GITLAB_BRANCH_PROVISIONER_WEBHOOK_HOST:-gitlab-branch-provisioner.local}
     ports:
       - "${AIRFLOW_METADATA_DB_PORT:-5432}:5432"
     volumes:
@@ -179,11 +181,11 @@ services:
         postgres_exporter['enable'] = false
         gitlab_exporter['enable'] = false
         prometheus['enable'] = false
-        puma['worker_processes'] = 1
-        puma['min_threads'] = 1
-        puma['max_threads'] = 1
+        puma['worker_processes'] = 0
+        puma['min_threads'] = 4
+        puma['max_threads'] = 4
         puma['per_worker_max_memory_mb'] = 800
-        sidekiq['concurrency'] = 1
+        sidekiq['concurrency'] = 5
         gitlab_kas['enable'] = false
         registry['enable'] = false
         prometheus_monitoring['enable'] = false
@@ -213,9 +215,32 @@ services:
       - ./gitlab-runner/generated:/etc/gitlab-runner
       - /var/run/docker.sock:/var/run/docker.sock
 
+  gitlab-branch-provisioner:
+    build:
+      context: .
+      dockerfile: gitlab-branch-provisioner/Dockerfile
+    image: ${RUNTIME_IMAGE_PREFIX:-${COMPOSE_PROJECT_NAME:-local-platform}}/gitlab-branch-provisioner:dev
+    depends_on:
+      - gitlab-platform
+    environment:
+      GITLAB_URL_INTERNAL: http://gitlab
+      GITLAB_BRANCH_PROVISIONER_HOST: 0.0.0.0
+      GITLAB_BRANCH_PROVISIONER_PORT: ${GITLAB_BRANCH_PROVISIONER_PORT:-8090}
+      GITLAB_BRANCH_PROVISIONER_WEBHOOK_TOKEN: ${GITLAB_BRANCH_PROVISIONER_WEBHOOK_TOKEN:-local-platform-branch-provisioner}
+      GITLAB_BRANCH_PROVISIONER_STATE_DIR: /var/lib/local-platform/branch-provisioner
+      LOCAL_PLATFORM_ROOT: ${LOCAL_PLATFORM_ROOT}
+    networks:
+      - platform
+    restart: unless-stopped
+    working_dir: "${LOCAL_PLATFORM_ROOT}"
+    volumes:
+      - ".:${LOCAL_PLATFORM_ROOT}"
+      - ./gitlab-branch-provisioner/state:/var/lib/local-platform/branch-provisioner
+      - /var/run/docker.sock:/var/run/docker.sock
+
   airflow-init:
     build: *airflow-build
-    image: ${COMPOSE_PROJECT_NAME:-local-platform}/airflow:dev
+    image: ${RUNTIME_IMAGE_PREFIX:-${COMPOSE_PROJECT_NAME:-local-platform}}/airflow:dev
     depends_on:
       airflow-metadata-db:
         condition: service_healthy
@@ -232,7 +257,7 @@ services:
 
   airflow-webserver:
     build: *airflow-build
-    image: ${COMPOSE_PROJECT_NAME:-local-platform}/airflow:dev
+    image: ${RUNTIME_IMAGE_PREFIX:-${COMPOSE_PROJECT_NAME:-local-platform}}/airflow:dev
     depends_on:
       airflow-metadata-db:
         condition: service_healthy
@@ -261,7 +286,7 @@ services:
 
   airflow-scheduler:
     build: *airflow-build
-    image: ${COMPOSE_PROJECT_NAME:-local-platform}/airflow:dev
+    image: ${RUNTIME_IMAGE_PREFIX:-${COMPOSE_PROJECT_NAME:-local-platform}}/airflow:dev
     depends_on:
       airflow-metadata-db:
         condition: service_healthy
@@ -286,7 +311,7 @@ services:
     build:
       context: .
       dockerfile: dlt/Dockerfile
-    image: ${COMPOSE_PROJECT_NAME:-local-platform}/dlt-extractor:dev
+    image: ${RUNTIME_IMAGE_PREFIX:-${COMPOSE_PROJECT_NAME:-local-platform}}/dlt-extractor:dev
     command: ["sleep", "infinity"]
     depends_on:
       airflow-metadata-db:
@@ -306,7 +331,7 @@ services:
     build:
       context: .
       dockerfile: dbt/Dockerfile
-    image: ${COMPOSE_PROJECT_NAME:-local-platform}/dbt-executor:dev
+    image: ${RUNTIME_IMAGE_PREFIX:-${COMPOSE_PROJECT_NAME:-local-platform}}/dbt-executor:dev
     command: ["sleep", "infinity"]
     environment: *common-env
     networks:

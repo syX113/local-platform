@@ -11,6 +11,8 @@ ARTIFACT_DIR="${ROOT_DIR}/artifacts/ingestion"
 rm -rf "${ARTIFACT_DIR}"
 mkdir -p "${ARTIFACT_DIR}"
 
+iceberg_namespace="${ICEBERG_NAMESPACE:-landing}"
+
 # The ingestion promotion validates the PostgreSQL -> Airflow/dlt -> MinIO/Iceberg path only.
 export SNOWFLAKE_ACCOUNT=""
 export SNOWFLAKE_USER=""
@@ -49,6 +51,7 @@ catalog_rows="$(
     psql -U "${AIRFLOW_METADATA_DB_USER}" -d iceberg_catalog -At -F ',' -c "
       select table_namespace, table_name, metadata_location
       from iceberg_tables
+      where table_namespace = '${iceberg_namespace}'
       order by table_name;
     "
 )"
@@ -56,26 +59,34 @@ printf '%s\n' "${catalog_rows}" | tee "${ARTIFACT_DIR}/iceberg_catalog.csv"
 
 catalog_count="$(printf '%s\n' "${catalog_rows}" | sed '/^$/d' | wc -l | tr -d ' ')"
 [ "${catalog_count}" = "2" ] || { echo "expected 2 Iceberg catalog entries, got ${catalog_count}" >&2; exit 1; }
-printf '%s\n' "${catalog_rows}" | grep -q '^landing,raw_order_items,' || { echo "missing landing.raw_order_items catalog entry" >&2; exit 1; }
-printf '%s\n' "${catalog_rows}" | grep -q '^landing,raw_orders,' || { echo "missing landing.raw_orders catalog entry" >&2; exit 1; }
+printf '%s\n' "${catalog_rows}" | grep -q "^${iceberg_namespace},raw_order_items," || { echo "missing ${iceberg_namespace}.raw_order_items catalog entry" >&2; exit 1; }
+printf '%s\n' "${catalog_rows}" | grep -q "^${iceberg_namespace},raw_orders," || { echo "missing ${iceberg_namespace}.raw_orders catalog entry" >&2; exit 1; }
 
 docker compose run --rm --no-deps dlt-extractor python - <<'PY' | tee "${ARTIFACT_DIR}/minio_iceberg_summary.txt"
 from io import BytesIO
 import json
+import os
 import sys
+from urllib.parse import urlparse
 
 import boto3
 import pyarrow.parquet as pq
 
+bucket_uri = os.environ["OBJECT_STORE_BUCKET"]
+parsed = urlparse(bucket_uri)
+bucket = parsed.netloc
+prefix = parsed.path.lstrip("/")
+namespace = os.environ["ICEBERG_NAMESPACE"]
+
 s3 = boto3.client(
     "s3",
-    endpoint_url="http://lakehouse-object-store:9000",
-    aws_access_key_id="minioadmin",
-    aws_secret_access_key="minioadmin123",
-    region_name="us-east-1",
+    endpoint_url=os.environ["OBJECT_STORE_ENDPOINT_URL"],
+    aws_access_key_id=os.environ["OBJECT_STORE_ACCESS_KEY_ID"],
+    aws_secret_access_key=os.environ["OBJECT_STORE_SECRET_ACCESS_KEY"],
+    region_name=os.environ["OBJECT_STORE_REGION"],
 )
 
-response = s3.list_objects_v2(Bucket="lakehouse", Prefix="platform/landing/")
+response = s3.list_objects_v2(Bucket=bucket, Prefix=f"{prefix}/{namespace}/")
 keys = [obj["Key"] for obj in response.get("Contents", [])]
 metadata_keys = sorted(key for key in keys if "/metadata/" in key and key.endswith(".metadata.json"))
 parquet_keys = sorted(key for key in keys if key.endswith(".parquet"))
@@ -89,7 +100,7 @@ print(f"metadata_files={len(metadata_keys)}")
 print(f"parquet_files={len(parquet_keys)}")
 
 for key in metadata_keys:
-    body = s3.get_object(Bucket="lakehouse", Key=key)["Body"].read()
+    body = s3.get_object(Bucket=bucket, Key=key)["Body"].read()
     doc = json.loads(body)
     print(
         "metadata",
@@ -100,9 +111,14 @@ for key in metadata_keys:
 
 row_totals: dict[str, int] = {}
 for key in parquet_keys:
-    payload = s3.get_object(Bucket="lakehouse", Key=key)["Body"].read()
+    payload = s3.get_object(Bucket=bucket, Key=key)["Body"].read()
     row_count = pq.read_table(BytesIO(payload)).num_rows
-    table_name = key.split("/")[2]
+    parts = key.split("/")
+    try:
+        namespace_index = parts.index(namespace)
+        table_name = parts[namespace_index + 1]
+    except (ValueError, IndexError) as exc:
+        raise SystemExit(f"unable to resolve table name from object key: {key}") from exc
     row_totals[table_name] = row_totals.get(table_name, 0) + row_count
 
 expected = {"raw_orders": 30, "raw_order_items": 60}
@@ -113,6 +129,8 @@ for table_name, expected_rows in expected.items():
     print(f"parquet_rows {table_name}={actual_rows}")
 
 print("ingestion_promotion=passed")
+sys.stdout.flush()
+os._exit(0)
 PY
 
 cat > "${ARTIFACT_DIR}/summary.txt" <<EOF
@@ -123,4 +141,6 @@ source.order_items=${order_item_count}
 source.raw_orders_export=${raw_orders_count}
 source.raw_order_items_export=${raw_order_items_count}
 iceberg.catalog_entries=${catalog_count}
+iceberg.namespace=${iceberg_namespace}
+object_store.bucket=${OBJECT_STORE_BUCKET}
 EOF

@@ -43,7 +43,7 @@ if [ -n "${OPEN_CATALOG_URI:-}" ] && [ -n "${OPEN_CATALOG_NAME:-}" ] && [ -n "${
     /opt/platform/snowflake/sql/03_catalog_linked_database.sql.tpl
   )
 else
-  echo "Skipping Open Catalog bootstrap because OPEN_CATALOG_* variables are incomplete"
+  echo "Skipping Open Catalog foundation because OPEN_CATALOG_* variables are incomplete"
 fi
 
 docker compose run --rm --no-deps dbt-executor \

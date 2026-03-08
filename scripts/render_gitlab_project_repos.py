@@ -99,30 +99,65 @@ def sdp_ci_yaml() -> str:
 
         stages:
           - build
+          - prepare
           - validate
           - promote_ingestion
           - promote_sdp
-          - mock_cd
+          - cd_verify
+          - cleanup
 
         build_sdp_runtimes:
           stage: build
           script:
-            - docker image inspect "${LOCAL_PLATFORM_PROJECT_NAME:-local-platform}/airflow:dev"
-            - docker image inspect "${LOCAL_PLATFORM_PROJECT_NAME:-local-platform}/dlt-extractor:dev"
-            - docker image inspect "${LOCAL_PLATFORM_PROJECT_NAME:-local-platform}/dbt-executor:dev"
+            - export RUNTIME_IMAGE_PREFIX="${CI_PROJECT_PATH_SLUG}-${CI_PIPELINE_ID}"
+            - mkdir -p artifacts/context
+            - docker compose build airflow-webserver dlt-extractor dbt-executor
+            - printf 'RUNTIME_IMAGE_PREFIX=%s\\n' "${RUNTIME_IMAGE_PREFIX}" > artifacts/context/runtime.env
+            - printf 'DLT_RUNNER_IMAGE=%s/dlt-extractor:dev\\n' "${RUNTIME_IMAGE_PREFIX}" >> artifacts/context/runtime.env
+            - printf 'DBT_RUNNER_IMAGE=%s/dbt-executor:dev\\n' "${RUNTIME_IMAGE_PREFIX}" >> artifacts/context/runtime.env
+          artifacts:
+            when: always
+            reports:
+              dotenv: artifacts/context/runtime.env
+            paths:
+              - artifacts/context/
+
+        prepare_sdp_sandbox:
+          stage: prepare
+          script:
+            - ./scripts/prepare-ci-sandbox.sh sdp artifacts/context/sdp.env
+          artifacts:
+            when: always
+            reports:
+              dotenv: artifacts/context/sdp.env
+            paths:
+              - artifacts/context/
 
         validate_sdp_assets:
           stage: validate
+          needs:
+            - job: build_sdp_runtimes
+              artifacts: true
+            - job: prepare_sdp_sandbox
+              artifacts: true
           script:
+            - set -a; . artifacts/context/runtime.env; . artifacts/context/sdp.env; set +a
             - docker compose config -q
             - docker compose run --rm --no-deps --entrypoint python airflow-webserver -m compileall /opt/airflow/dags
             - docker compose run --rm --no-deps --entrypoint python dlt-extractor -m compileall /opt/platform/dlt
             - docker compose run --rm --no-deps --entrypoint python dbt-executor -m compileall /opt/platform/dbt
             - docker compose run --rm --no-deps dbt-executor dbt parse --project-dir /opt/platform/dbt --profiles-dir /opt/platform/dbt/profiles
+            - docker compose run --rm --no-deps dbt-executor sqlfluff lint --config /opt/platform/dbt/.sqlfluff /opt/platform/dbt/models
 
         promote_sdp_ingestion:
           stage: promote_ingestion
+          needs:
+            - job: build_sdp_runtimes
+              artifacts: true
+            - job: prepare_sdp_sandbox
+              artifacts: true
           script:
+            - set -a; . artifacts/context/runtime.env; . artifacts/context/sdp.env; set +a
             - ./scripts/verify-ingestion-promotion.sh
           artifacts:
             when: always
@@ -133,8 +168,14 @@ def sdp_ci_yaml() -> str:
         promote_sdp_models:
           stage: promote_sdp
           needs:
-            - promote_sdp_ingestion
+            - job: build_sdp_runtimes
+              artifacts: true
+            - job: prepare_sdp_sandbox
+              artifacts: true
+            - job: promote_sdp_ingestion
+              artifacts: true
           script:
+            - set -a; . artifacts/context/runtime.env; . artifacts/context/sdp.env; set +a
             - ./scripts/verify-sdp-promotion.sh
           artifacts:
             when: always
@@ -142,19 +183,53 @@ def sdp_ci_yaml() -> str:
             paths:
               - artifacts/sdp/
 
-        mock_cd_sdp:
-          stage: mock_cd
+        verify_sdp_cd_clone:
+          stage: cd_verify
           needs:
-            - promote_sdp_models
+            - job: build_sdp_runtimes
+              artifacts: true
+            - job: prepare_sdp_sandbox
+              artifacts: true
+            - job: promote_sdp_models
+              artifacts: true
+          rules:
+            - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
+            - when: never
           script:
-            - mkdir -p artifacts/sdp
-            - printf 'mock_cd=sdp\\nstatus=skipped_real_deploy\\nreason=no_second_environment\\n' > artifacts/sdp/mock_cd.txt
-            - cat artifacts/sdp/mock_cd.txt
+            - set -a; . artifacts/context/runtime.env; . artifacts/context/sdp.env; set +a
+            - ./scripts/verify-sdp-cd-clone.sh
           artifacts:
             when: always
             expire_in: 7 days
             paths:
-              - artifacts/sdp/mock_cd.txt
+              - artifacts/sdp-cd/
+
+        cleanup_sdp_sandbox:
+          stage: cleanup
+          when: always
+          needs:
+            - job: prepare_sdp_sandbox
+              artifacts: true
+          rules:
+            - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
+            - when: never
+          script:
+            - ./scripts/cleanup-ci-sandbox.sh artifacts/context/sdp.env
+
+        destroy_sdp_branch_sandbox:
+          stage: cleanup
+          needs:
+            - job: prepare_sdp_sandbox
+              artifacts: true
+          rules:
+            - if: '$CI_COMMIT_BRANCH != $CI_DEFAULT_BRANCH'
+              when: manual
+            - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+              when: manual
+            - when: never
+          allow_failure: true
+          script:
+            - ./scripts/cleanup-ci-sandbox.sh --destroy artifacts/context/sdp.env
         """
     )
 
@@ -192,25 +267,61 @@ def edp_ci_yaml() -> str:
 
         stages:
           - build
+          - prepare
           - validate
           - promote
-          - mock_cd
+          - cd_verify
+          - cleanup
 
         build_edp_runtime:
           stage: build
           script:
-            - docker image inspect "${LOCAL_PLATFORM_PROJECT_NAME:-local-platform}/dbt-executor:dev"
+            - export RUNTIME_IMAGE_PREFIX="${CI_PROJECT_PATH_SLUG}-${CI_PIPELINE_ID}"
+            - mkdir -p artifacts/context
+            - docker compose build dbt-executor
+            - printf 'RUNTIME_IMAGE_PREFIX=%s\\n' "${RUNTIME_IMAGE_PREFIX}" > artifacts/context/runtime.env
+            - printf 'DBT_RUNNER_IMAGE=%s/dbt-executor:dev\\n' "${RUNTIME_IMAGE_PREFIX}" >> artifacts/context/runtime.env
+          artifacts:
+            when: always
+            reports:
+              dotenv: artifacts/context/runtime.env
+            paths:
+              - artifacts/context/
+
+        prepare_edp_sandbox:
+          stage: prepare
+          script:
+            - ./scripts/prepare-ci-sandbox.sh edp artifacts/context/edp.env
+          artifacts:
+            when: always
+            reports:
+              dotenv: artifacts/context/edp.env
+            paths:
+              - artifacts/context/
 
         validate_edp_assets:
           stage: validate
+          needs:
+            - job: build_edp_runtime
+              artifacts: true
+            - job: prepare_edp_sandbox
+              artifacts: true
           script:
+            - set -a; . artifacts/context/runtime.env; . artifacts/context/edp.env; set +a
             - docker compose config -q
             - docker compose run --rm --no-deps --entrypoint python dbt-executor -m compileall /opt/platform/dbt
             - docker compose run --rm --no-deps dbt-executor dbt parse --project-dir /opt/platform/dbt --profiles-dir /opt/platform/dbt/profiles
+            - docker compose run --rm --no-deps dbt-executor sqlfluff lint --config /opt/platform/dbt/.sqlfluff /opt/platform/dbt/models
 
         promote_edp:
           stage: promote
+          needs:
+            - job: build_edp_runtime
+              artifacts: true
+            - job: prepare_edp_sandbox
+              artifacts: true
           script:
+            - set -a; . artifacts/context/runtime.env; . artifacts/context/edp.env; set +a
             - ./scripts/verify-edp-promotion.sh
           artifacts:
             when: always
@@ -218,19 +329,53 @@ def edp_ci_yaml() -> str:
             paths:
               - artifacts/edp/
 
-        mock_cd_edp:
-          stage: mock_cd
+        verify_edp_cd_clone:
+          stage: cd_verify
           needs:
-            - promote_edp
+            - job: build_edp_runtime
+              artifacts: true
+            - job: prepare_edp_sandbox
+              artifacts: true
+            - job: promote_edp
+              artifacts: true
+          rules:
+            - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
+            - when: never
           script:
-            - mkdir -p artifacts/edp
-            - printf 'mock_cd=edp\\nstatus=skipped_real_deploy\\nreason=no_second_environment\\n' > artifacts/edp/mock_cd.txt
-            - cat artifacts/edp/mock_cd.txt
+            - set -a; . artifacts/context/runtime.env; . artifacts/context/edp.env; set +a
+            - ./scripts/verify-edp-cd-clone.sh
           artifacts:
             when: always
             expire_in: 7 days
             paths:
-              - artifacts/edp/mock_cd.txt
+              - artifacts/edp-cd/
+
+        cleanup_edp_sandbox:
+          stage: cleanup
+          when: always
+          needs:
+            - job: prepare_edp_sandbox
+              artifacts: true
+          rules:
+            - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
+            - when: never
+          script:
+            - ./scripts/cleanup-ci-sandbox.sh artifacts/context/edp.env
+
+        destroy_edp_branch_sandbox:
+          stage: cleanup
+          needs:
+            - job: prepare_edp_sandbox
+              artifacts: true
+          rules:
+            - if: '$CI_COMMIT_BRANCH != $CI_DEFAULT_BRANCH'
+              when: manual
+            - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+              when: manual
+            - when: never
+          allow_failure: true
+          script:
+            - ./scripts/cleanup-ci-sandbox.sh --destroy artifacts/context/edp.env
         """
     )
 
@@ -245,7 +390,7 @@ def edp_compose_yaml() -> str:
             build:
               context: .
               dockerfile: dbt/Dockerfile
-            image: ${COMPOSE_PROJECT_NAME:-proj-edp-local}/dbt-executor:dev
+            image: ${RUNTIME_IMAGE_PREFIX:-${COMPOSE_PROJECT_NAME:-proj-edp-local}}/dbt-executor:dev
             environment:
               SNOWFLAKE_ACCOUNT: ${SNOWFLAKE_ACCOUNT}
               SNOWFLAKE_USER: ${SNOWFLAKE_USER}
@@ -286,6 +431,9 @@ def project_readme(project_name: str, body: str) -> str:
         "This repository is rendered from the local platform source repository for fast local testing in GitLab.\n\n"
         "Local CI in this repository assumes the shared `local-platform` stack is already bootstrapped on the Docker host. "
         "The GitLab jobs validate and promote against that running local platform instead of starting a second full copy of the stack inside the runner.\n\n"
+        "The shared platform also runs a `gitlab-branch-provisioner` service. GitLab project webhooks notify that service "
+        "when a non-default branch is created or deleted, so the branch sandbox is provisioned before the branch pipeline "
+        "needs to use it and destroyed again when the branch is removed.\n\n"
         f"{rendered_body}\n"
     )
 
@@ -303,26 +451,37 @@ def render_sdp_repo(project_path: str) -> None:
         "dlt",
         "postgres",
         "minio",
-        "snowflake",
     ):
         copy_path(relative_path, repo_dir)
 
     for relative_path in (
         "scripts/common.sh",
-        "scripts/bootstrap-snowflake.sh",
+        "scripts/ensure-snowflake-foundation.sh",
+        "scripts/prepare-ci-sandbox.sh",
+        "scripts/cleanup-ci-sandbox.sh",
         "scripts/load-source-sample-data.sh",
         "scripts/test-airflow-dag.sh",
         "scripts/verify-ingestion-promotion.sh",
         "scripts/verify-sdp-promotion.sh",
+        "scripts/verify-sdp-cd-clone.sh",
     ):
         copy_path(relative_path, repo_dir)
 
     for relative_path in (
+        "dbt/.sqlfluff",
         "dbt/Dockerfile",
         "dbt/requirements.txt",
         "dbt/macros",
         "dbt/profiles",
-        "dbt/scripts",
+        "dbt/scripts/apply_sql.py",
+        "dbt/scripts/manage_ci_clones.py",
+    ):
+        copy_path(relative_path, repo_dir)
+
+    for relative_path in (
+        "snowflake/sql/01_snowflake_foundation.sql.tpl",
+        "snowflake/sql/02_open_catalog_integration.sql.tpl",
+        "snowflake/sql/03_catalog_linked_database.sql.tpl",
     ):
         copy_path(relative_path, repo_dir)
 
@@ -347,8 +506,19 @@ def render_sdp_repo(project_path: str) -> None:
 
                 Main CI entrypoint:
 
+                - `./scripts/prepare-ci-sandbox.sh sdp artifacts/context/sdp.env`
                 - `./scripts/verify-ingestion-promotion.sh`
                 - `./scripts/verify-sdp-promotion.sh`
+                - `./scripts/verify-sdp-cd-clone.sh`
+
+                CI behaviour:
+
+                - When a new non-default branch appears in GitLab, a GitLab webhook triggers the platform-side branch provisioner to create the branch sandbox automatically.
+                - Every non-default branch and merge request pipeline reuses one branch-scoped Snowflake zero-copy environment instead of replacing the shared DEV objects.
+                - Every non-default branch and merge request pipeline writes ingestion output to a stable branch-scoped MinIO/S3 prefix and Iceberg namespace.
+                - Validation runs `dbt parse` and `sqlfluff lint` before promotion, and promotion runs `dbt run` plus `dbt test`.
+                - Default-branch pipelines create a fresh merge clone, run an additional CD verification stage on a second fresh clone, and then clean both up automatically.
+                - Branch environments are preserved after the pipeline, can be destroyed explicitly with the manual `destroy_sdp_branch_sandbox` job, and are also destroyed automatically when the GitLab branch is deleted.
                 """
             ),
         ),
@@ -362,23 +532,35 @@ def render_edp_repo(project_path: str) -> None:
     for relative_path in (
         ".dockerignore",
         ".env.example",
-        "snowflake",
     ):
         copy_path(relative_path, repo_dir)
 
     for relative_path in (
         "scripts/common.sh",
-        "scripts/bootstrap-snowflake.sh",
+        "scripts/ensure-snowflake-foundation.sh",
+        "scripts/prepare-ci-sandbox.sh",
+        "scripts/cleanup-ci-sandbox.sh",
         "scripts/verify-edp-promotion.sh",
+        "scripts/verify-edp-cd-clone.sh",
     ):
         copy_path(relative_path, repo_dir)
 
     for relative_path in (
+        "dbt/.sqlfluff",
         "dbt/Dockerfile",
         "dbt/requirements.txt",
         "dbt/macros",
         "dbt/profiles",
-        "dbt/scripts",
+        "dbt/scripts/apply_sql.py",
+        "dbt/scripts/manage_ci_clones.py",
+        "dbt/scripts/zero_copy_clone_check.py",
+    ):
+        copy_path(relative_path, repo_dir)
+
+    for relative_path in (
+        "snowflake/sql/01_snowflake_foundation.sql.tpl",
+        "snowflake/sql/02_open_catalog_integration.sql.tpl",
+        "snowflake/sql/03_catalog_linked_database.sql.tpl",
     ):
         copy_path(relative_path, repo_dir)
 
@@ -407,7 +589,17 @@ def render_edp_repo(project_path: str) -> None:
 
                 Main CI entrypoint:
 
+                - `./scripts/prepare-ci-sandbox.sh edp artifacts/context/edp.env`
                 - `./scripts/verify-edp-promotion.sh`
+                - `./scripts/verify-edp-cd-clone.sh`
+
+                CI behaviour:
+
+                - When a new non-default branch appears in GitLab, a GitLab webhook triggers the platform-side branch provisioner to create the branch sandbox automatically.
+                - Every non-default branch and merge request pipeline reuses one branch-scoped Snowflake zero-copy environment instead of replacing the shared DEV objects.
+                - Validation runs `dbt parse` and `sqlfluff lint`, and promotion runs `dbt run` plus `dbt test`.
+                - Default-branch pipelines create a fresh merge clone, run an additional CD verification stage on a second fresh clone, and then clean both up automatically.
+                - Branch environments are preserved after the pipeline, can be destroyed explicitly with the manual `destroy_edp_branch_sandbox` job, and are also destroyed automatically when the GitLab branch is deleted.
                 """
             ),
         ),

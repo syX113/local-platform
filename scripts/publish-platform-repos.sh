@@ -52,6 +52,7 @@ sync_rendered_repo() {
     git -C "${repo_dir}" remote add "${remote_name}" "${remote_url}"
   fi
 
+  git -C "${repo_dir}" checkout -B main >/dev/null
   git -C "${repo_dir}" add -A
   if [ -n "$(git -C "${repo_dir}" status --short)" ]; then
     git -C "${repo_dir}" commit -m "${commit_message}" >/dev/null

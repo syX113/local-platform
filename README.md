@@ -161,6 +161,25 @@ Local GitLab CI runs against the already bootstrapped shared platform stack. It 
 ./scripts/print-setup-summary.sh
 ```
 
+## Branch Isolation
+
+The platform now provisions developer sandboxes from GitLab branch events, not from a periodic branch scan.
+
+- A background service `gitlab-branch-provisioner` receives GitLab project webhooks for branch ref changes.
+- When a new branch appears in GitLab, the service provisions the associated isolated environment automatically.
+- SDP branches get Snowflake branch clones plus a branch-specific MinIO/S3 prefix and Iceberg namespace.
+- EDP branches get Snowflake branch clones.
+- The branch pipeline then reuses that pre-created sandbox instead of creating a second one.
+- When the branch is deleted in GitLab, the provisioner destroys the associated sandbox automatically.
+
+In practice this means a developer can create a new branch in GitLab and then work only against the isolated clone objects and temporary storage path for that branch. The sandbox creation is event-driven and does not depend on a periodic polling interval.
+
+You can watch the provisioner with:
+
+```bash
+docker compose logs -f gitlab-branch-provisioner
+```
+
 ## Useful Commands
 
 Reset and rebuild:
@@ -189,10 +208,10 @@ Test the Airflow DAG from the CLI:
 ./scripts/test-airflow-dag.sh
 ```
 
-Bootstrap Snowflake only:
+Ensure Snowflake foundation only:
 
 ```bash
-./scripts/bootstrap-snowflake.sh
+bash ./scripts/ensure-snowflake-foundation.sh
 ```
 
 ## Validation Commands
@@ -241,12 +260,25 @@ The ownership split is:
 - `proj_sdp_orders`: promotes the Airflow DAG, dlt ingestion runtime, and the SDP dbt models
 - `proj_edp_orders`: promotes only the EDP dbt models that consume the SDP access layer
 
-Each generated project ships its own `.gitlab-ci.yml` and ends with a mock CD stage so the CI/CD shape can be tested locally without a second environment.
+Each generated project ships its own `.gitlab-ci.yml` with isolated CI/CD verification:
+
+- the platform auto-provisions a branch sandbox from GitLab webhook events when a new non-default branch appears in GitLab
+- non-default branch and merge-request pipelines reuse one stable branch-scoped Snowflake zero-copy environment so developers do not touch the shared DEV databases
+- the SDP pipeline also reuses one stable branch-scoped MinIO/S3 prefix, dlt pipeline name, and Iceberg namespace
+- validation runs `dbt parse` plus `sqlfluff lint`
+- promotion runs `dbt run` plus `dbt test`
+- default-branch pipelines run an extra CD verification stage against a fresh clone before cleanup
+- non-default branch pipelines skip the CD verification stage and preserve the branch sandbox after the pipeline
+- branch sandboxes can be destroyed explicitly with the manual cleanup jobs in GitLab and are also destroyed automatically when the branch itself is deleted in GitLab
 
 The SDP project pipeline is intentionally split into two promotion steps so cold-start GitLab runs stay stable:
 
 - `promote_sdp_ingestion`: validates the Airflow DAG, dlt runtime, and Iceberg output
 - `promote_sdp_models`: validates and rebuilds the SDP dbt models in Snowflake after ingestion has succeeded
+
+The EDP project pipeline keeps a single promotion step because it only owns dbt:
+
+- `promote_edp`: validates and rebuilds the EDP dbt models in Snowflake against the isolated clone
 
 Those generated CI pipelines assume the base local platform has already been started with `./scripts/bootstrap.sh` and `./scripts/bootstrap-gitlab.sh`. They reuse the shared local runtime images and services instead of rebuilding or destroying the full platform stack inside the runner.
 

@@ -8,6 +8,7 @@ build/
 logs/
 artifacts/
 gitlab-runner/generated/
+gitlab-branch-provisioner/state/
 gitlab-projects/generated/
 dbt/target/
 dbt/dbt_packages/
