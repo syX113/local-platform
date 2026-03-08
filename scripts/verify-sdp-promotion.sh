@@ -1,10 +1,15 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [ "$(basename "$(dirname "${SCRIPT_DIR}")")" = "ci" ]; then
+  ROOT_DIR="$(cd "${SCRIPT_DIR}/../.." && pwd)"
+else
+  ROOT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
+fi
 cd "${ROOT_DIR}"
 
-source "${ROOT_DIR}/scripts/common.sh"
+source "${SCRIPT_DIR}/common.sh"
 ensure_platform_env
 
 ARTIFACT_DIR="${ROOT_DIR}/artifacts/sdp"
@@ -39,7 +44,12 @@ fi
 
 container_dbt_project_dir="$(resolve_container_dbt_project_dir proj_sdp_orders)"
 
-bash ./scripts/ensure-snowflake-foundation.sh | tee "${ARTIFACT_DIR}/snowflake_bootstrap.log"
+bash "${SCRIPT_DIR}/ensure-snowflake-foundation.sh" | tee "${ARTIFACT_DIR}/snowflake_bootstrap.log"
+
+if [ "${SNOWFLAKE_LOCAL_RAW_SYNC:-false}" = "true" ]; then
+  docker compose run --rm --no-deps dlt-extractor \
+    python /opt/platform/dlt/snowflake_raw_sync.py | tee "${ARTIFACT_DIR}/snowflake_raw_sync.log"
+fi
 
 docker compose run --rm --no-deps dbt-executor python - <<'PY' | tee "${ARTIFACT_DIR}/sdp_inbound_contract.txt"
 import os

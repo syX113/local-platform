@@ -181,10 +181,9 @@ services:
         postgres_exporter['enable'] = false
         gitlab_exporter['enable'] = false
         prometheus['enable'] = false
-        puma['worker_processes'] = 0
+        puma['worker_processes'] = 1
         puma['min_threads'] = 4
         puma['max_threads'] = 4
-        puma['per_worker_max_memory_mb'] = 800
         sidekiq['concurrency'] = 5
         gitlab_kas['enable'] = false
         registry['enable'] = false

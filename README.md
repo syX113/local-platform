@@ -225,6 +225,78 @@ Reset and rebuild only the Snowflake SDP and EDP products:
 ./scripts/bootstrap-snowflake-products.sh
 ```
 
+## Script Reference
+
+The scripts below are the important control-plane entrypoints for this repository. If you are operating the platform manually, start with the `Bootstrap And Reset`, `Daily Use`, and `GitLab Publishing` groups.
+
+### Bootstrap And Reset
+
+- `./scripts/reset-platform.sh`
+  Stops the local stack, removes containers, volumes, generated runtime clutter, and gives you a clean starting point.
+- `./scripts/bootstrap.sh`
+  Builds and starts the base local platform, seeds the sample source data, and prints the current access summary.
+- `./scripts/bootstrap-gitlab.sh`
+  Finishes the GitLab setup: creates or resolves the SDP and EDP projects, configures branch webhooks, registers runners, publishes the rendered repos, and syncs GitLab CI variables.
+- `./scripts/bootstrap-snowflake-products.sh`
+  Rebuilds only the Snowflake sample products on an already running platform without resetting GitLab, Airflow, or MinIO.
+- `./scripts/print-setup-summary.sh`
+  Prints the current URLs, credentials, paths, project ids, tokens, and important runtime locations.
+
+### Daily Use
+
+- `./scripts/load-source-sample-data.sh`
+  Reseeds the deterministic PostgreSQL sample data.
+- `./scripts/run-local-pipeline.sh`
+  Runs the default local sample flow end to end against the running platform.
+- `./scripts/test-airflow-dag.sh`
+  Runs the Airflow DAG from the CLI for fast orchestration validation without using the UI.
+- `./scripts/verify-ingestion-promotion.sh`
+  Validates the source ingestion path only: PostgreSQL -> Airflow -> dlt -> MinIO/Iceberg.
+- `./scripts/verify-sdp-promotion.sh`
+  Validates the SDP Snowflake/dbt promotion path.
+- `./scripts/verify-edp-promotion.sh`
+  Validates the EDP Snowflake/dbt promotion path.
+- `./scripts/verify-dbt-promotion.sh`
+  Runs the ingestion, SDP, and EDP validations in sequence as one local verification flow.
+
+### GitLab Publishing And Project Sync
+
+- `./scripts/publish-platform-repos.sh`
+  Renders the hosted SDP and EDP GitLab repos from this control repo and pushes only those rendered repos to local GitLab.
+- `python3 scripts/render_gitlab_project_repos.py`
+  Regenerates the rendered SDP and EDP working trees under `gitlab-projects/generated/` without publishing them.
+- `./scripts/sync-gitlab-ci-variables.sh`
+  Pushes the current CI/CD variables from the local platform into the two GitLab projects.
+
+### Branch Sandbox Lifecycle
+
+- `./scripts/manage-branch-sandbox.sh`
+  Manual helper to create or destroy a branch sandbox outside of the automatic GitLab webhook flow.
+- `./scripts/prepare-ci-sandbox.sh`
+  Internal CI helper that creates or reuses the Snowflake clone environment and, for SDP, the isolated MinIO/Iceberg namespace.
+- `./scripts/cleanup-ci-sandbox.sh`
+  Internal CI helper that preserves or destroys a sandbox depending on branch/default-branch rules.
+- `./scripts/verify-sdp-cd-clone.sh`
+  Internal CD-style verification for the SDP project against a fresh merge clone.
+- `./scripts/verify-edp-cd-clone.sh`
+  Internal CD-style verification for the EDP project against a fresh merge clone.
+
+### Scaffolding New Assets
+
+- `python3 scripts/scaffold_ingestion_pipeline.py <name>`
+  Creates a new ingestion scaffold such as a DAG, dlt pipeline, and validation helper.
+- `python3 scripts/scaffold_mesh_product.py <name>`
+  Creates a new Snowflake data-product scaffold, dbt model skeletons, and validation helpers.
+- `python3 scripts/scaffold_support.py`
+  Shared helper module used by the scaffolders. This is not an operator entrypoint.
+
+### Internal Shared Helpers
+
+- `./scripts/ensure-snowflake-foundation.sh`
+  Applies the base Snowflake foundation SQL. Safe to run manually, but usually called by the promotion scripts.
+- `./scripts/common.sh`
+  Shared shell helper library for env loading, path resolution, and clone naming. This is internal plumbing and normally not called directly.
+
 ## Validation Commands
 
 Validate the ingestion promotion flow:
@@ -294,6 +366,10 @@ The EDP project pipeline keeps a single promotion step because it only owns dbt:
 Those generated CI pipelines assume the base local platform has already been started with `./scripts/bootstrap.sh` and `./scripts/bootstrap-gitlab.sh`. They reuse the shared local runtime images and services instead of rebuilding or destroying the full platform stack inside the runner.
 
 The generator for those repos is [render_gitlab_project_repos.py](/Users/taagiti2/Documents/01%20Projects/Valiant/repos/local-platform/scripts/render_gitlab_project_repos.py).
+
+The rendered GitLab repos keep only product-owned code at the top level. Runner-only helpers live under `ci/`, so the hosted SDP and EDP repos stay focused on Airflow, dlt, dbt, and the CI/CD definitions that exercise them.
+
+The source-repo operational scripts are grouped in [scripts/README.md](/Users/taagiti2/Documents/01%20Projects/Valiant/repos/local-platform/scripts/README.md).
 
 To republish the rendered repos after source changes, run:
 

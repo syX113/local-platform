@@ -1,10 +1,15 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [ "$(basename "$(dirname "${SCRIPT_DIR}")")" = "ci" ]; then
+  ROOT_DIR="$(cd "${SCRIPT_DIR}/../.." && pwd)"
+else
+  ROOT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
+fi
 cd "${ROOT_DIR}"
 
-source "${ROOT_DIR}/scripts/common.sh"
+source "${SCRIPT_DIR}/common.sh"
 ensure_platform_env
 
 ARTIFACT_DIR="${ROOT_DIR}/artifacts/edp-cd"
@@ -24,7 +29,7 @@ export SNOWFLAKE_SDP_DATABASE="$(build_clone_database_name "${source_sdp_databas
 export SNOWFLAKE_EDP_DATABASE="$(build_clone_database_name "${source_edp_database}" "${clone_owner_token}" "${clone_branch_token}" 120)"
 
 cleanup() {
-  ./scripts/cleanup-ci-sandbox.sh || true
+  "${SCRIPT_DIR}/cleanup-ci-sandbox.sh" || true
 }
 
 trap cleanup EXIT
@@ -44,6 +49,6 @@ docker compose run --rm --no-deps \
   dbt-executor \
   python /opt/platform/dbt/scripts/manage_ci_clones.py replace | tee "${ARTIFACT_DIR}/cd_clone_create.log"
 
-./scripts/verify-edp-promotion.sh | tee "${ARTIFACT_DIR}/edp.log"
+"${SCRIPT_DIR}/verify-edp-promotion.sh" | tee "${ARTIFACT_DIR}/edp.log"
 
 printf 'edp_cd_clone=passed\n' | tee "${ARTIFACT_DIR}/summary.txt"

@@ -3,7 +3,11 @@
 .git
 .venv
 __pycache__
+artifacts
+logs
 dbt/target
 dbt/dbt_packages
+dbt/profiles/.user.yml
+dbt/projects/**/target
 gitlab-runner/generated
-
+gitlab-projects/generated

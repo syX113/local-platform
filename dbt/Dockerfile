@@ -13,8 +13,6 @@ RUN apt-get update \
     && pip install --upgrade pip \
     && pip install -r /tmp/requirements.txt
 
-COPY dbt /opt/platform/dbt
-COPY snowflake /opt/platform/snowflake
+COPY . /opt/platform
 
 CMD ["dbt", "--version"]
-

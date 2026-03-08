@@ -11,7 +11,10 @@ from pathlib import Path
 import snowflake.connector
 
 
-DEFAULT_PRODUCTS_PATH = Path("/opt/platform/snowflake/data_products.json")
+REGISTRY_PATH_CANDIDATES = (
+    Path("/opt/platform/snowflake/data_products.json"),
+    Path("/opt/platform/ci/snowflake/data_products.json"),
+)
 MAX_DATABASE_NAME_LENGTH = 120
 
 
@@ -85,7 +88,10 @@ def build_clone_database_name(base_name: str, owner_token: str, branch_token_raw
 
 
 def load_product_registry() -> list[dict[str, str]]:
-    registry_path = Path(opt_env("SNOWFLAKE_DATA_PRODUCTS_PATH") or DEFAULT_PRODUCTS_PATH)
+    configured_path = opt_env("SNOWFLAKE_DATA_PRODUCTS_PATH")
+    registry_path = Path(configured_path) if configured_path else None
+    if registry_path is None:
+        registry_path = next((path for path in REGISTRY_PATH_CANDIDATES if path.exists()), REGISTRY_PATH_CANDIDATES[0])
     if not registry_path.exists():
         return []
 

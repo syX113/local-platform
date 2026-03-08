@@ -1,10 +1,15 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [ "$(basename "$(dirname "${SCRIPT_DIR}")")" = "ci" ]; then
+  ROOT_DIR="$(cd "${SCRIPT_DIR}/../.." && pwd)"
+else
+  ROOT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
+fi
 cd "${ROOT_DIR}"
 
-source "${ROOT_DIR}/scripts/common.sh"
+source "${SCRIPT_DIR}/common.sh"
 ensure_platform_env
 
 execution_date="${1:-2026-03-07}"

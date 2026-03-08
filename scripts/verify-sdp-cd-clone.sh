@@ -1,10 +1,15 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [ "$(basename "$(dirname "${SCRIPT_DIR}")")" = "ci" ]; then
+  ROOT_DIR="$(cd "${SCRIPT_DIR}/../.." && pwd)"
+else
+  ROOT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
+fi
 cd "${ROOT_DIR}"
 
-source "${ROOT_DIR}/scripts/common.sh"
+source "${SCRIPT_DIR}/common.sh"
 ensure_platform_env
 
 ARTIFACT_DIR="${ROOT_DIR}/artifacts/sdp-cd"
@@ -44,7 +49,7 @@ export DLT_PIPELINE_NAME="sdp_cd_${cd_namespace}"
 export ICEBERG_NAMESPACE="landing_${cd_namespace}"
 
 cleanup() {
-  ./scripts/cleanup-ci-sandbox.sh || true
+  "${SCRIPT_DIR}/cleanup-ci-sandbox.sh" || true
   export MINIO_PREFIX="${orig_minio_prefix}"
   export OBJECT_STORE_BUCKET="${orig_object_store_bucket}"
   export DLT_PIPELINE_NAME="${orig_dlt_pipeline_name}"
@@ -68,7 +73,7 @@ docker compose run --rm --no-deps \
   dbt-executor \
   python /opt/platform/dbt/scripts/manage_ci_clones.py replace | tee "${ARTIFACT_DIR}/cd_clone_create.log"
 
-./scripts/verify-ingestion-promotion.sh | tee "${ARTIFACT_DIR}/ingestion.log"
-./scripts/verify-sdp-promotion.sh | tee "${ARTIFACT_DIR}/sdp.log"
+"${SCRIPT_DIR}/verify-ingestion-promotion.sh" | tee "${ARTIFACT_DIR}/ingestion.log"
+"${SCRIPT_DIR}/verify-sdp-promotion.sh" | tee "${ARTIFACT_DIR}/sdp.log"
 
 printf 'sdp_cd_clone=passed\n' | tee "${ARTIFACT_DIR}/summary.txt"

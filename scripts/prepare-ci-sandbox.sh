@@ -1,10 +1,15 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [ "$(basename "$(dirname "${SCRIPT_DIR}")")" = "ci" ]; then
+  ROOT_DIR="$(cd "${SCRIPT_DIR}/../.." && pwd)"
+else
+  ROOT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
+fi
 cd "${ROOT_DIR}"
 
-source "${ROOT_DIR}/scripts/common.sh"
+source "${SCRIPT_DIR}/common.sh"
 ensure_platform_env
 
 project_kind="${1:?project kind is required (sdp|edp)}"
@@ -69,7 +74,7 @@ DLT_PIPELINE_NAME=${project_kind}_${namespace_suffix}
 ICEBERG_NAMESPACE=landing_${namespace_suffix}
 EOF
 
-bash ./scripts/ensure-snowflake-foundation.sh | tee "$(dirname "${dotenv_path}")/snowflake_base_bootstrap.log"
+bash "${SCRIPT_DIR}/ensure-snowflake-foundation.sh" | tee "$(dirname "${dotenv_path}")/snowflake_base_bootstrap.log"
 
 set -a
 # shellcheck disable=SC1090

@@ -84,7 +84,14 @@ load_env_preserving_existing() {
 
 ensure_platform_env() {
   if [ ! -f .env ]; then
-    cp .env.example .env
+    if [ -f .env.example ]; then
+      cp .env.example .env
+    elif [ -f ci/.env.example ]; then
+      cp ci/.env.example .env
+    else
+      echo "unable to create .env: no .env.example or ci/.env.example found" >&2
+      return 1
+    fi
     echo "created .env from .env.example"
   fi
 
