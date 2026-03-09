@@ -27,11 +27,11 @@ done
 sdp_container_dbt_project_dir="$(resolve_container_dbt_project_dir proj_sdp_orders)"
 edp_container_dbt_project_dir="$(resolve_container_dbt_project_dir proj_edp_orders)"
 
-echo "starting local source dependencies"
-docker compose up -d source-postgres-db
-
 echo "reloading deterministic source sample data"
 ./scripts/load-source-sample-data.sh
+
+echo "dropping lingering Snowflake CI clone databases"
+bash ./scripts/cleanup-snowflake-ci-clones.sh
 
 echo "dropping Snowflake SDP and EDP databases for a clean rebuild"
 docker compose run --rm --no-deps dbt-executor python - <<'PY'

@@ -1,5 +1,19 @@
 #!/usr/bin/env bash
 
+docker_compose_run_stderr_filter() {
+  awk 'index($0, "No services to build") == 0 { print > "/dev/stderr" }'
+}
+
+docker() {
+  if [ "${1:-}" = "compose" ] && [ "${2:-}" = "run" ]; then
+    shift 2
+    command docker compose run "$@" 2> >(docker_compose_run_stderr_filter)
+    return $?
+  fi
+
+  command docker "$@"
+}
+
 trim_identifier() {
   local value="${1:?value is required}"
   local max_len="${2:?max length is required}"

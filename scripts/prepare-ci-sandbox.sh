@@ -24,7 +24,13 @@ branch_token="$(sanitize_branch_token "${branch_name_raw}")"
 branch_token="${branch_token:-local}"
 clone_owner_token="$(printf '%s' "${project_kind}" | tr '[:lower:]' '[:upper:]')"
 
-if [ "${CI_COMMIT_BRANCH:-}" = "${CI_DEFAULT_BRANCH:-main}" ]; then
+if [ "${CI_PIPELINE_SOURCE:-}" = "merge_request_event" ]; then
+  sandbox_kind="merge_request"
+  branch_seed="mr_${project_token}_${branch_token}_${CI_PIPELINE_ID:-local}"
+  clone_branch_token="mr_${branch_token}_${CI_PIPELINE_ID:-local}"
+  clone_action="replace"
+  cleanup_mode="destroy"
+elif [ "${CI_COMMIT_BRANCH:-}" = "${CI_DEFAULT_BRANCH:-main}" ]; then
   sandbox_kind="merge"
   branch_seed="merge_${project_token}_${CI_PIPELINE_ID:-local}_${CI_COMMIT_SHORT_SHA:-head}"
   clone_branch_token="merge_${CI_PIPELINE_ID:-local}_${CI_COMMIT_SHORT_SHA:-head}"

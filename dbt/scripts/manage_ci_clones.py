@@ -172,6 +172,42 @@ def clone_pairs() -> list[ClonePair]:
     )
 
 
+def base_databases_from_registry() -> list[str]:
+    names: list[str] = []
+    seen: set[str] = set()
+    for product in load_product_registry():
+        source_database = resolve_source_database(product) or str(product.get("database", "")).strip()
+        if not source_database or source_database in seen:
+            continue
+        seen.add(source_database)
+        names.append(source_database)
+    return names
+
+
+def base_databases_from_legacy_env() -> list[str]:
+    names: list[str] = []
+    for value in (
+        opt_env("SNOWFLAKE_SDP_DATABASE_BASE") or opt_env("SNOWFLAKE_SDP_DATABASE"),
+        opt_env("SNOWFLAKE_EDP_DATABASE_BASE") or opt_env("SNOWFLAKE_EDP_DATABASE"),
+    ):
+        if value and value not in names:
+            names.append(value)
+    return names
+
+
+def clone_base_databases() -> list[str]:
+    names = base_databases_from_registry()
+    if names:
+        return names
+    names = base_databases_from_legacy_env()
+    if names:
+        return names
+    raise SystemExit(
+        "no base data product databases resolved; configure snowflake/data_products.json "
+        "or the legacy SNOWFLAKE_SDP_DATABASE/SNOWFLAKE_EDP_DATABASE variables"
+    )
+
+
 def clone_database(cursor, source_name: str, target_name: str) -> None:
     if source_name == target_name:
         return
@@ -183,17 +219,45 @@ def database_exists(cursor, target_name: str) -> bool:
     return cursor.fetchone() is not None
 
 
+def is_already_exists_error(error: snowflake.connector.errors.ProgrammingError) -> bool:
+    errno = getattr(error, "errno", None)
+    sqlstate = getattr(error, "sqlstate", "")
+    message = str(error).lower()
+    return errno == 2002 or sqlstate == "42710" or "already exists" in message
+
+
 def ensure_database_clone(cursor, source_name: str, target_name: str) -> bool:
     if source_name == target_name:
         return False
     if database_exists(cursor, target_name):
         return False
-    cursor.execute(f"create transient database {ident(target_name)} clone {ident(source_name)}")
+    try:
+        cursor.execute(f"create transient database {ident(target_name)} clone {ident(source_name)}")
+    except snowflake.connector.errors.ProgrammingError as error:
+        if is_already_exists_error(error):
+            return False
+        raise
     return True
 
 
 def drop_database(cursor, target_name: str) -> None:
     cursor.execute(f"drop database if exists {ident(target_name)}")
+
+
+def list_ci_clone_databases(cursor) -> list[str]:
+    prefixes = tuple(f"{name.upper()}_CI_CLO_" for name in clone_base_databases())
+    cursor.execute("show databases")
+    columns = [description[0].lower() for description in cursor.description or []]
+    name_index = columns.index("name") if "name" in columns else 1
+
+    matches: set[str] = set()
+    for row in cursor.fetchall():
+        database_name = str(row[name_index]).strip()
+        database_upper = database_name.upper()
+        if any(database_upper.startswith(prefix) for prefix in prefixes):
+            matches.add(database_name)
+
+    return sorted(matches)
 
 
 def apply_replace() -> None:
@@ -249,9 +313,26 @@ def apply_drop() -> None:
     print("dropped clones " + " ".join(f"{pair.key}={pair.target_database}" for pair in pairs))
 
 
+def apply_purge_ci() -> None:
+    connection = connect()
+    try:
+        with connection.cursor() as cursor:
+            matches = list_ci_clone_databases(cursor)
+            for database_name in matches:
+                drop_database(cursor, database_name)
+        connection.commit()
+    finally:
+        connection.close()
+
+    if matches:
+        print("purged ci clones " + " ".join(matches))
+    else:
+        print("purged ci clones none")
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Manage branch-scoped Snowflake zero-copy clones.")
-    parser.add_argument("action", choices=("ensure", "replace", "drop"))
+    parser.add_argument("action", choices=("ensure", "replace", "drop", "purge-ci"))
     return parser.parse_args()
 
 
@@ -263,6 +344,8 @@ def main() -> int:
         apply_replace()
     elif args.action == "drop":
         apply_drop()
+    elif args.action == "purge-ci":
+        apply_purge_ci()
     else:  # pragma: no cover
         print(f"unsupported action: {args.action}", file=sys.stderr)
         return 1

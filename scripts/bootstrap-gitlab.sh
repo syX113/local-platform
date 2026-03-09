@@ -123,7 +123,7 @@ create_or_resolve_project() {
   project_json="$(printf '%s\n' "${create_response}" | sed '/^HTTP_STATUS=/d')"
 
   if [ "${create_status}" = "200" ] || [ "${create_status}" = "201" ]; then
-    printf '%s\n' "$(printf '%s' "${project_json}" | json_field id)"
+    printf '%s %s\n' "$(printf '%s' "${project_json}" | json_field id)" "created"
     return 0
   fi
 
@@ -142,7 +142,7 @@ for project in json.load(sys.stdin):
 ' <<<"${search_json}"
   )"
 
-  printf '%s\n' "${project_id}"
+  printf '%s %s\n' "${project_id}" "existing"
 }
 
 create_project_runner_token() {
@@ -301,11 +301,11 @@ BRANCH_PROVISIONER_TOKEN="${GITLAB_BRANCH_PROVISIONER_WEBHOOK_TOKEN:-local-platf
 BRANCH_PROVISIONER_HOST="${GITLAB_BRANCH_PROVISIONER_WEBHOOK_HOST:-gitlab-branch-provisioner.local}"
 
 echo "creating or resolving SDP GitLab project"
-SDP_PROJECT_ID="$(create_or_resolve_project "${SDP_PROJECT_NAME}" "${SDP_PROJECT_PATH}")"
+read -r SDP_PROJECT_ID SDP_PROJECT_STATUS <<<"$(create_or_resolve_project "${SDP_PROJECT_NAME}" "${SDP_PROJECT_PATH}")"
 [ -n "${SDP_PROJECT_ID}" ] || { echo "failed to resolve SDP GitLab project id" >&2; exit 1; }
 
 echo "creating or resolving EDP GitLab project"
-EDP_PROJECT_ID="$(create_or_resolve_project "${EDP_PROJECT_NAME}" "${EDP_PROJECT_PATH}")"
+read -r EDP_PROJECT_ID EDP_PROJECT_STATUS <<<"$(create_or_resolve_project "${EDP_PROJECT_NAME}" "${EDP_PROJECT_PATH}")"
 [ -n "${EDP_PROJECT_ID}" ] || { echo "failed to resolve EDP GitLab project id" >&2; exit 1; }
 
 echo "creating SDP project runner token"
@@ -340,7 +340,16 @@ echo "configuring EDP GitLab branch webhook"
 ensure_project_branch_webhook "${EDP_PROJECT_ID}" "${branch_hook_url}"
 
 docker compose up -d gitlab-fargate-runner
-./scripts/publish-platform-repos.sh
+
+publish_args=()
+if [ "${SDP_PROJECT_STATUS:-existing}" = "created" ]; then
+  publish_args+=(--init-sdp-history)
+fi
+if [ "${EDP_PROJECT_STATUS:-existing}" = "created" ]; then
+  publish_args+=(--init-edp-history)
+fi
+
+./scripts/publish-platform-repos.sh "${publish_args[@]}"
 
 echo "gitlab bootstrap complete"
 echo "SDP project id: ${SDP_PROJECT_ID}"

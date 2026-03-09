@@ -12,7 +12,7 @@ cd "${ROOT_DIR}"
 source "${SCRIPT_DIR}/common.sh"
 ensure_platform_env
 
-docker compose up -d source-postgres-db
+docker compose up --no-build -d source-postgres-db
 
 until docker compose exec -T source-postgres-db \
   pg_isready -U "${SOURCE_POSTGRES_USER}" -d "${SOURCE_POSTGRES_DB}" >/dev/null 2>&1; do

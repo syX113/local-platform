@@ -7,6 +7,10 @@ cd "${ROOT_DIR}"
 source "${ROOT_DIR}/scripts/common.sh"
 ensure_platform_env
 
+if [ -f "${ROOT_DIR}/scripts/cleanup-snowflake-ci-clones.sh" ]; then
+  bash "${ROOT_DIR}/scripts/cleanup-snowflake-ci-clones.sh" || true
+fi
+
 docker compose down -v --remove-orphans || true
 
 rm -rf artifacts

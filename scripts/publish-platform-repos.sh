@@ -8,9 +8,31 @@ source "${ROOT_DIR}/scripts/common.sh"
 ensure_platform_env
 
 SKIP_VARIABLE_SYNC="false"
-if [ "${1:-}" = "--skip-variable-sync" ]; then
-  SKIP_VARIABLE_SYNC="true"
-fi
+INIT_SDP_HISTORY="false"
+INIT_EDP_HISTORY="false"
+
+while [ $# -gt 0 ]; do
+  case "${1}" in
+    --skip-variable-sync)
+      SKIP_VARIABLE_SYNC="true"
+      ;;
+    --init-history)
+      INIT_SDP_HISTORY="true"
+      INIT_EDP_HISTORY="true"
+      ;;
+    --init-sdp-history)
+      INIT_SDP_HISTORY="true"
+      ;;
+    --init-edp-history)
+      INIT_EDP_HISTORY="true"
+      ;;
+    *)
+      echo "unsupported argument: ${1}" >&2
+      exit 1
+      ;;
+  esac
+  shift
+done
 
 if [ ! -f "${ROOT_DIR}/gitlab-runner/generated/bootstrap.env" ] || [ ! -f "${ROOT_DIR}/gitlab-runner/generated/projects.env" ]; then
   echo "missing GitLab bootstrap metadata. Run ./scripts/bootstrap-gitlab.sh first." >&2
@@ -26,6 +48,35 @@ if [ -z "${GITLAB_BOOTSTRAP_PAT:-}" ] || [ -z "${GITLAB_SDP_PROJECT_PATH:-}" ] |
   echo "bootstrap metadata is incomplete. Re-run ./scripts/bootstrap-gitlab.sh." >&2
   exit 1
 fi
+
+gitlab_api_request() {
+  local method="${1:?method is required}"
+  local path="${2:?path is required}"
+  shift 2
+
+  curl --silent --show-error --location \
+    --request "${method}" \
+    --header "PRIVATE-TOKEN: ${GITLAB_BOOTSTRAP_PAT}" \
+    "$@" \
+    "http://localhost:${GITLAB_HTTP_PORT}/api/v4${path}"
+}
+
+unprotect_main_branch() {
+  local project_id="${1:?project id is required}"
+  curl --silent --show-error --location \
+    --request DELETE \
+    --header "PRIVATE-TOKEN: ${GITLAB_BOOTSTRAP_PAT}" \
+    "http://localhost:${GITLAB_HTTP_PORT}/api/v4/projects/${project_id}/protected_branches/main" >/dev/null || true
+}
+
+protect_main_branch() {
+  local project_id="${1:?project id is required}"
+  gitlab_api_request POST "/projects/${project_id}/protected_branches" \
+    --data-urlencode "name=main" \
+    --data-urlencode "push_access_level=40" \
+    --data-urlencode "merge_access_level=40" \
+    --data-urlencode "allow_force_push=false" >/dev/null || true
+}
 
 ensure_git_repo() {
   local repo_dir="${1:?repo dir is required}"
@@ -43,6 +94,8 @@ sync_rendered_repo() {
   local remote_name="${2:?remote name is required}"
   local remote_url="${3:?remote url is required}"
   local commit_message="${4:?commit message is required}"
+  local init_history="${5:-false}"
+  local project_id="${6:-}"
 
   ensure_git_repo "${repo_dir}"
 
@@ -50,6 +103,26 @@ sync_rendered_repo() {
     git -C "${repo_dir}" remote set-url "${remote_name}" "${remote_url}"
   else
     git -C "${repo_dir}" remote add "${remote_name}" "${remote_url}"
+  fi
+
+  if [ "${init_history}" = "true" ]; then
+    if [ -n "${project_id}" ]; then
+      unprotect_main_branch "${project_id}"
+    fi
+    git -C "${repo_dir}" checkout --orphan __init_artifacts__ >/dev/null 2>&1
+    git -C "${repo_dir}" add -A
+    git -C "${repo_dir}" commit --allow-empty -m "init-artifacts" >/dev/null
+    git -C "${repo_dir}" branch -M __init_artifacts__ main >/dev/null
+    if ! git -C "${repo_dir}" push --force --set-upstream "${remote_name}" main; then
+      if [ -n "${project_id}" ]; then
+        protect_main_branch "${project_id}"
+      fi
+      return 1
+    fi
+    if [ -n "${project_id}" ]; then
+      protect_main_branch "${project_id}"
+    fi
+    return 0
   fi
 
   git -C "${repo_dir}" checkout -B main >/dev/null
@@ -72,14 +145,18 @@ sync_rendered_repo \
   "${sdp_repo_dir}" \
   local-gitlab-sdp \
   "http://oauth2:${GITLAB_BOOTSTRAP_PAT}@localhost:${GITLAB_HTTP_PORT}/root/${GITLAB_SDP_PROJECT_PATH}.git" \
-  "Sync SDP project from local platform ${platform_sha}"
+  "Sync SDP project from local platform ${platform_sha}" \
+  "${INIT_SDP_HISTORY}" \
+  "${GITLAB_SDP_PROJECT_ID}"
 
 echo "publishing rendered EDP platform repo"
 sync_rendered_repo \
   "${edp_repo_dir}" \
   local-gitlab-edp \
   "http://oauth2:${GITLAB_BOOTSTRAP_PAT}@localhost:${GITLAB_HTTP_PORT}/root/${GITLAB_EDP_PROJECT_PATH}.git" \
-  "Sync EDP project from local platform ${platform_sha}"
+  "Sync EDP project from local platform ${platform_sha}" \
+  "${INIT_EDP_HISTORY}" \
+  "${GITLAB_EDP_PROJECT_ID}"
 
 if [ "${SKIP_VARIABLE_SYNC}" != "true" ]; then
   echo "syncing GitLab CI variables"

@@ -232,13 +232,17 @@ The scripts below are the important control-plane entrypoints for this repositor
 ### Bootstrap And Reset
 
 - `./scripts/reset-platform.sh`
-  Stops the local stack, removes containers, volumes, generated runtime clutter, and gives you a clean starting point.
+  Stops the local stack, removes containers, volumes, generated runtime clutter, drops registered Snowflake CI clone databases when credentials and the local `dbt-executor` image are available, and gives you a clean starting point.
 - `./scripts/bootstrap.sh`
   Builds and starts the base local platform, seeds the sample source data, and prints the current access summary.
 - `./scripts/bootstrap-gitlab.sh`
   Finishes the GitLab setup: creates or resolves the SDP and EDP projects, configures branch webhooks, registers runners, publishes the rendered repos, and syncs GitLab CI variables.
+  On a fresh bootstrap where the GitLab projects are newly created, each hosted repo is initialized with a single `main` commit named `init-artifacts` so users start from a clean history.
 - `./scripts/bootstrap-snowflake-products.sh`
-  Rebuilds only the Snowflake sample products on an already running platform without resetting GitLab, Airflow, or MinIO.
+  Drops lingering Snowflake CI clone databases, recreates the sample SDP and EDP databases from scratch, reloads the raw inbound data, rebuilds both dbt products, and validates them.
+
+- `./scripts/cleanup-snowflake-ci-clones.sh`
+  Drops all Snowflake CI clone databases for the registered data products, for example `DB_SDP_ORDERS_CI_CLO_*` and `DB_EDP_ORDERS_CI_CLO_*`.
 - `./scripts/print-setup-summary.sh`
   Prints the current URLs, credentials, paths, project ids, tokens, and important runtime locations.
 

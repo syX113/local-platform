@@ -72,6 +72,8 @@ def sdp_ci_yaml() -> str:
         workflow:
           name: SDP Promotion
           rules:
+            - if: '$CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH != $CI_DEFAULT_BRANCH && $CI_COMMIT_BEFORE_SHA == "0000000000000000000000000000000000000000"'
+              when: never
             - if: '$CI_PIPELINE_SOURCE == "push"'
             - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
             - if: '$CI_PIPELINE_SOURCE == "web"'
@@ -85,6 +87,15 @@ def sdp_ci_yaml() -> str:
             - fargate
           before_script:
             - apk add --no-cache bash curl
+            - |
+              docker() {
+                if [ "${1:-}" = "compose" ] && [ "${2:-}" = "run" ]; then
+                  shift 2
+                  command docker compose run "$@" 2> >(awk 'index($0, "No services to build") == 0 { print > "/dev/stderr" }')
+                else
+                  command docker "$@"
+                fi
+              }
             - docker version
             - docker compose version
             - cp ci/.env.example .env
@@ -211,6 +222,7 @@ def sdp_ci_yaml() -> str:
             - job: prepare_sdp_sandbox
               artifacts: true
           rules:
+            - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
             - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
             - when: never
           script:
@@ -222,9 +234,9 @@ def sdp_ci_yaml() -> str:
             - job: prepare_sdp_sandbox
               artifacts: true
           rules:
-            - if: '$CI_COMMIT_BRANCH != $CI_DEFAULT_BRANCH'
-              when: manual
             - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+              when: never
+            - if: '$CI_COMMIT_BRANCH != $CI_DEFAULT_BRANCH'
               when: manual
             - when: never
           allow_failure: true
@@ -240,6 +252,8 @@ def edp_ci_yaml() -> str:
         workflow:
           name: EDP Promotion
           rules:
+            - if: '$CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH != $CI_DEFAULT_BRANCH && $CI_COMMIT_BEFORE_SHA == "0000000000000000000000000000000000000000"'
+              when: never
             - if: '$CI_PIPELINE_SOURCE == "push"'
             - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
             - if: '$CI_PIPELINE_SOURCE == "web"'
@@ -253,6 +267,15 @@ def edp_ci_yaml() -> str:
             - fargate
           before_script:
             - apk add --no-cache bash curl
+            - |
+              docker() {
+                if [ "${1:-}" = "compose" ] && [ "${2:-}" = "run" ]; then
+                  shift 2
+                  command docker compose run "$@" 2> >(awk 'index($0, "No services to build") == 0 { print > "/dev/stderr" }')
+                else
+                  command docker "$@"
+                fi
+              }
             - docker version
             - docker compose version
             - cp ci/.env.example .env
@@ -357,6 +380,7 @@ def edp_ci_yaml() -> str:
             - job: prepare_edp_sandbox
               artifacts: true
           rules:
+            - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
             - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
             - when: never
           script:
@@ -368,9 +392,9 @@ def edp_ci_yaml() -> str:
             - job: prepare_edp_sandbox
               artifacts: true
           rules:
-            - if: '$CI_COMMIT_BRANCH != $CI_DEFAULT_BRANCH'
-              when: manual
             - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+              when: never
+            - if: '$CI_COMMIT_BRANCH != $CI_DEFAULT_BRANCH'
               when: manual
             - when: never
           allow_failure: true
@@ -801,10 +825,12 @@ def render_sdp_repo(project_path: str) -> None:
                 CI behaviour:
 
                 - When a new non-default branch appears in GitLab, a GitLab webhook triggers the platform-side branch provisioner to create the branch sandbox automatically.
-                - Every non-default branch and merge request pipeline reuses one branch-scoped Snowflake zero-copy environment instead of replacing the shared DEV objects.
+                - The initial branch-creation push event does not run the heavy CI validation pipeline; it exists only to provision the isolated developer sandbox.
+                - Later branch push pipelines reuse one branch-scoped Snowflake zero-copy environment instead of replacing the shared DEV objects.
                 - The clone lifecycle is driven by `ci/snowflake/data_products.json`, so every registered Snowflake data product database is cloned, not just the sample SDP and EDP orders databases.
                 - Branch clone databases are named from the original database plus `CI_CLO`, the owning project token, and the branch token, for example `DB_SDP_ORDERS_CI_CLO_SDP_FEATURE_X`.
-                - Every non-default branch and merge request pipeline writes ingestion output to a stable branch-scoped MinIO/S3 prefix and Iceberg namespace.
+                - Later non-default branch push pipelines write ingestion output to a stable branch-scoped MinIO/S3 prefix and Iceberg namespace.
+                - Merge request pipelines create a fresh disposable clone and isolated MinIO/Iceberg namespace, validate the change there, and destroy that merge sandbox automatically afterward.
                 - Validation runs `dbt parse` and `sqlfluff lint` before promotion, and promotion runs `dbt run` plus `dbt test`.
                 - Default-branch pipelines create a fresh merge clone, run an additional CD verification stage on a second fresh clone, and then clean both up automatically.
                 - Branch environments are preserved after the pipeline, can be destroyed explicitly with the manual `destroy_sdp_branch_sandbox` job, and are also destroyed automatically when the GitLab branch is deleted.
@@ -880,9 +906,11 @@ def render_edp_repo(project_path: str) -> None:
                 CI behaviour:
 
                 - When a new non-default branch appears in GitLab, a GitLab webhook triggers the platform-side branch provisioner to create the branch sandbox automatically.
-                - Every non-default branch and merge request pipeline reuses one branch-scoped Snowflake zero-copy environment instead of replacing the shared DEV objects.
+                - The initial branch-creation push event does not run the heavy CI validation pipeline; it exists only to provision the isolated developer sandbox.
+                - Later branch push pipelines reuse one branch-scoped Snowflake zero-copy environment instead of replacing the shared DEV objects.
                 - The clone lifecycle is driven by `ci/snowflake/data_products.json`, so every registered Snowflake data product database is cloned, not just the sample SDP and EDP orders databases.
                 - Branch clone databases are named from the original database plus `CI_CLO`, the owning project token, and the branch token, for example `DB_EDP_ORDERS_CI_CLO_EDP_FEATURE_X`.
+                - Merge request pipelines create a fresh disposable clone, validate the change there, and destroy that merge sandbox automatically afterward.
                 - Validation runs `dbt parse` and `sqlfluff lint`, and promotion runs `dbt run` plus `dbt test`.
                 - Default-branch pipelines create a fresh merge clone, run an additional CD verification stage on a second fresh clone, and then clean both up automatically.
                 - Branch environments are preserved after the pipeline, can be destroyed explicitly with the manual `destroy_edp_branch_sandbox` job, and are also destroyed automatically when the GitLab branch is deleted.
