@@ -111,11 +111,13 @@ def sdp_ci_yaml() -> str:
         stages:
           - build
           - prepare
-          - validate
-          - promote_ingestion
-          - promote_sdp
-          - cd_verify
-          - deploy
+          - ci_validate
+          - dev_verify
+          - approve_dev
+          - deploy_dev
+          - prd_verify
+          - approve_prd
+          - deploy_prd
           - cleanup
 
         build_sdp_runtimes:
@@ -136,6 +138,10 @@ def sdp_ci_yaml() -> str:
 
         prepare_sdp_sandbox:
           stage: prepare
+          rules:
+            - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+            - if: '$CI_COMMIT_BRANCH != $CI_DEFAULT_BRANCH && $RELEASE_TO_PRD != "true"'
+            - when: never
           script:
             - ./ci/scripts/prepare-ci-sandbox.sh sdp artifacts/context/sdp.env
           artifacts:
@@ -145,13 +151,17 @@ def sdp_ci_yaml() -> str:
             paths:
               - artifacts/context/
 
-        validate_sdp_assets:
-          stage: validate
+        ci_validate_sdp_assets:
+          stage: ci_validate
           needs:
             - job: build_sdp_runtimes
               artifacts: true
             - job: prepare_sdp_sandbox
               artifacts: true
+          rules:
+            - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+            - if: '$CI_COMMIT_BRANCH != $CI_DEFAULT_BRANCH && $RELEASE_TO_PRD != "true"'
+            - when: never
           script:
             - set -a; . artifacts/context/runtime.env; . artifacts/context/sdp.env; set +a
             - docker compose config -q
@@ -161,13 +171,19 @@ def sdp_ci_yaml() -> str:
             - docker compose run --rm --no-deps dbt-executor dbt parse --project-dir /opt/platform/dbt --profiles-dir /opt/platform/dbt/profiles
             - docker compose run --rm --no-deps dbt-executor sqlfluff lint --config /opt/platform/dbt/.sqlfluff /opt/platform/dbt/models
 
-        promote_sdp_ingestion:
-          stage: promote_ingestion
+        ci_validate_sdp_ingestion:
+          stage: ci_validate
           needs:
             - job: build_sdp_runtimes
               artifacts: true
             - job: prepare_sdp_sandbox
               artifacts: true
+            - job: ci_validate_sdp_assets
+              artifacts: true
+          rules:
+            - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+            - if: '$CI_COMMIT_BRANCH != $CI_DEFAULT_BRANCH && $RELEASE_TO_PRD != "true"'
+            - when: never
           script:
             - set -a; . artifacts/context/runtime.env; . artifacts/context/sdp.env; set +a
             - ./ci/scripts/verify-ingestion-promotion.sh
@@ -177,15 +193,19 @@ def sdp_ci_yaml() -> str:
             paths:
               - artifacts/ingestion/
 
-        promote_sdp_models:
-          stage: promote_sdp
+        ci_validate_sdp_models:
+          stage: ci_validate
           needs:
             - job: build_sdp_runtimes
               artifacts: true
             - job: prepare_sdp_sandbox
               artifacts: true
-            - job: promote_sdp_ingestion
+            - job: ci_validate_sdp_ingestion
               artifacts: true
+          rules:
+            - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+            - if: '$CI_COMMIT_BRANCH != $CI_DEFAULT_BRANCH && $RELEASE_TO_PRD != "true"'
+            - when: never
           script:
             - set -a; . artifacts/context/runtime.env; . artifacts/context/sdp.env; set +a
             - ./ci/scripts/verify-sdp-promotion.sh
@@ -195,20 +215,18 @@ def sdp_ci_yaml() -> str:
             paths:
               - artifacts/sdp/
 
-        verify_sdp_cd_clone:
-          stage: cd_verify
+        verify_sdp_merge_request_candidate:
+          stage: dev_verify
           needs:
             - job: build_sdp_runtimes
               artifacts: true
-            - job: prepare_sdp_sandbox
-              artifacts: true
-            - job: promote_sdp_models
+            - job: ci_validate_sdp_models
               artifacts: true
           rules:
-            - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
+            - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
             - when: never
           script:
-            - set -a; . artifacts/context/runtime.env; . artifacts/context/sdp.env; set +a
+            - set -a; . artifacts/context/runtime.env; set +a
             - ./ci/scripts/verify-sdp-cd-clone.sh
           artifacts:
             when: always
@@ -216,16 +234,103 @@ def sdp_ci_yaml() -> str:
             paths:
               - artifacts/sdp-cd/
 
-        deploy_sdp_prd:
-          stage: deploy
+        verify_sdp_dev_candidate:
+          stage: dev_verify
           needs:
             - job: build_sdp_runtimes
               artifacts: true
-            - job: verify_sdp_cd_clone
+          rules:
+            - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH && $RELEASE_TO_PRD != "true"'
+            - when: never
+          script:
+            - set -a; . artifacts/context/runtime.env; set +a
+            - ./ci/scripts/verify-sdp-cd-clone.sh
+          artifacts:
+            when: always
+            expire_in: 7 days
+            paths:
+              - artifacts/sdp-cd/
+
+        approve_dev_deploy_by_committer:
+          stage: approve_dev
+          needs:
+            - job: verify_sdp_dev_candidate
               artifacts: true
           rules:
-            - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
+            - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH && $RELEASE_TO_PRD != "true"'
+              when: manual
             - when: never
+          allow_failure: false
+          manual_confirmation: Only the committer should approve DEV deployment.
+          script:
+            - ./ci/scripts/require-approver-match-commit.sh
+
+        deploy_sdp_dev:
+          stage: deploy_dev
+          needs:
+            - job: build_sdp_runtimes
+              artifacts: true
+            - job: approve_dev_deploy_by_committer
+              artifacts: true
+          rules:
+            - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH && $RELEASE_TO_PRD != "true"'
+            - when: never
+          environment:
+            name: DEV/SDP
+          resource_group: sdp-dev
+          script:
+            - set -a; . artifacts/context/runtime.env; set +a
+            - ./ci/scripts/deploy-sdp-dev.sh
+          artifacts:
+            when: always
+            expire_in: 7 days
+            paths:
+              - artifacts/deploy-sdp-dev/
+
+        verify_sdp_prd_candidate:
+          stage: prd_verify
+          needs:
+            - job: build_sdp_runtimes
+              artifacts: true
+          rules:
+            - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH && $RELEASE_TO_PRD == "true"'
+            - when: never
+          script:
+            - set -a; . artifacts/context/runtime.env; set +a
+            - ./ci/scripts/verify-sdp-prd-clone.sh
+          artifacts:
+            when: always
+            expire_in: 7 days
+            paths:
+              - artifacts/sdp-prd-cd/
+
+        approve_prd_deploy_by_committer:
+          stage: approve_prd
+          needs:
+            - job: verify_sdp_prd_candidate
+              artifacts: true
+          rules:
+            - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH && $RELEASE_TO_PRD == "true"'
+              when: manual
+            - when: never
+          allow_failure: false
+          manual_confirmation: Only the committer should approve PRD deployment.
+          script:
+            - ./ci/scripts/require-approver-match-commit.sh
+
+        deploy_sdp_prd:
+          stage: deploy_prd
+          needs:
+            - job: build_sdp_runtimes
+              artifacts: true
+            - job: approve_prd_deploy_by_committer
+              artifacts: true
+          rules:
+            - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH && $RELEASE_TO_PRD == "true"'
+            - when: never
+          environment:
+            name: PRD/SDP
+          resource_group: sdp-prd
           script:
             - set -a; . artifacts/context/runtime.env; set +a
             - ./ci/scripts/deploy-sdp-prd.sh
@@ -243,7 +348,7 @@ def sdp_ci_yaml() -> str:
               artifacts: true
           rules:
             - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
-            - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
+            - if: '$CI_COMMIT_BRANCH != $CI_DEFAULT_BRANCH && $RELEASE_TO_PRD != "true"'
             - when: never
           script:
             - ./ci/scripts/cleanup-ci-sandbox.sh artifacts/context/sdp.env
@@ -256,7 +361,7 @@ def sdp_ci_yaml() -> str:
           rules:
             - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
               when: never
-            - if: '$CI_COMMIT_BRANCH != $CI_DEFAULT_BRANCH'
+            - if: '$CI_COMMIT_BRANCH != $CI_DEFAULT_BRANCH && $RELEASE_TO_PRD != "true"'
               when: manual
             - when: never
           allow_failure: true
@@ -311,10 +416,13 @@ def edp_ci_yaml() -> str:
         stages:
           - build
           - prepare
-          - validate
-          - promote
-          - cd_verify
-          - deploy
+          - ci_validate
+          - dev_verify
+          - approve_dev
+          - deploy_dev
+          - prd_verify
+          - approve_prd
+          - deploy_prd
           - cleanup
 
         build_edp_runtime:
@@ -334,6 +442,10 @@ def edp_ci_yaml() -> str:
 
         prepare_edp_sandbox:
           stage: prepare
+          rules:
+            - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+            - if: '$CI_COMMIT_BRANCH != $CI_DEFAULT_BRANCH && $RELEASE_TO_PRD != "true"'
+            - when: never
           script:
             - ./ci/scripts/prepare-ci-sandbox.sh edp artifacts/context/edp.env
           artifacts:
@@ -343,13 +455,17 @@ def edp_ci_yaml() -> str:
             paths:
               - artifacts/context/
 
-        validate_edp_assets:
-          stage: validate
+        ci_validate_edp_assets:
+          stage: ci_validate
           needs:
             - job: build_edp_runtime
               artifacts: true
             - job: prepare_edp_sandbox
               artifacts: true
+          rules:
+            - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+            - if: '$CI_COMMIT_BRANCH != $CI_DEFAULT_BRANCH && $RELEASE_TO_PRD != "true"'
+            - when: never
           script:
             - set -a; . artifacts/context/runtime.env; . artifacts/context/edp.env; set +a
             - docker compose config -q
@@ -357,13 +473,19 @@ def edp_ci_yaml() -> str:
             - docker compose run --rm --no-deps dbt-executor dbt parse --project-dir /opt/platform/dbt --profiles-dir /opt/platform/dbt/profiles
             - docker compose run --rm --no-deps dbt-executor sqlfluff lint --config /opt/platform/dbt/.sqlfluff /opt/platform/dbt/models
 
-        promote_edp:
-          stage: promote
+        ci_validate_edp_models:
+          stage: ci_validate
           needs:
             - job: build_edp_runtime
               artifacts: true
             - job: prepare_edp_sandbox
               artifacts: true
+            - job: ci_validate_edp_assets
+              artifacts: true
+          rules:
+            - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+            - if: '$CI_COMMIT_BRANCH != $CI_DEFAULT_BRANCH && $RELEASE_TO_PRD != "true"'
+            - when: never
           script:
             - set -a; . artifacts/context/runtime.env; . artifacts/context/edp.env; set +a
             - ./ci/scripts/verify-edp-promotion.sh
@@ -373,20 +495,18 @@ def edp_ci_yaml() -> str:
             paths:
               - artifacts/edp/
 
-        verify_edp_cd_clone:
-          stage: cd_verify
+        verify_edp_merge_request_candidate:
+          stage: dev_verify
           needs:
             - job: build_edp_runtime
               artifacts: true
-            - job: prepare_edp_sandbox
-              artifacts: true
-            - job: promote_edp
+            - job: ci_validate_edp_models
               artifacts: true
           rules:
-            - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
+            - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
             - when: never
           script:
-            - set -a; . artifacts/context/runtime.env; . artifacts/context/edp.env; set +a
+            - set -a; . artifacts/context/runtime.env; set +a
             - ./ci/scripts/verify-edp-cd-clone.sh
           artifacts:
             when: always
@@ -394,16 +514,103 @@ def edp_ci_yaml() -> str:
             paths:
               - artifacts/edp-cd/
 
-        deploy_edp_prd:
-          stage: deploy
+        verify_edp_dev_candidate:
+          stage: dev_verify
           needs:
             - job: build_edp_runtime
               artifacts: true
-            - job: verify_edp_cd_clone
+          rules:
+            - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH && $RELEASE_TO_PRD != "true"'
+            - when: never
+          script:
+            - set -a; . artifacts/context/runtime.env; set +a
+            - ./ci/scripts/verify-edp-cd-clone.sh
+          artifacts:
+            when: always
+            expire_in: 7 days
+            paths:
+              - artifacts/edp-cd/
+
+        approve_dev_deploy_by_committer:
+          stage: approve_dev
+          needs:
+            - job: verify_edp_dev_candidate
               artifacts: true
           rules:
-            - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
+            - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH && $RELEASE_TO_PRD != "true"'
+              when: manual
             - when: never
+          allow_failure: false
+          manual_confirmation: Only the committer should approve DEV deployment.
+          script:
+            - ./ci/scripts/require-approver-match-commit.sh
+
+        deploy_edp_dev:
+          stage: deploy_dev
+          needs:
+            - job: build_edp_runtime
+              artifacts: true
+            - job: approve_dev_deploy_by_committer
+              artifacts: true
+          rules:
+            - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH && $RELEASE_TO_PRD != "true"'
+            - when: never
+          environment:
+            name: DEV/EDP
+          resource_group: edp-dev
+          script:
+            - set -a; . artifacts/context/runtime.env; set +a
+            - ./ci/scripts/deploy-edp-dev.sh
+          artifacts:
+            when: always
+            expire_in: 7 days
+            paths:
+              - artifacts/deploy-edp-dev/
+
+        verify_edp_prd_candidate:
+          stage: prd_verify
+          needs:
+            - job: build_edp_runtime
+              artifacts: true
+          rules:
+            - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH && $RELEASE_TO_PRD == "true"'
+            - when: never
+          script:
+            - set -a; . artifacts/context/runtime.env; set +a
+            - ./ci/scripts/verify-edp-prd-clone.sh
+          artifacts:
+            when: always
+            expire_in: 7 days
+            paths:
+              - artifacts/edp-prd-cd/
+
+        approve_prd_deploy_by_committer:
+          stage: approve_prd
+          needs:
+            - job: verify_edp_prd_candidate
+              artifacts: true
+          rules:
+            - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH && $RELEASE_TO_PRD == "true"'
+              when: manual
+            - when: never
+          allow_failure: false
+          manual_confirmation: Only the committer should approve PRD deployment.
+          script:
+            - ./ci/scripts/require-approver-match-commit.sh
+
+        deploy_edp_prd:
+          stage: deploy_prd
+          needs:
+            - job: build_edp_runtime
+              artifacts: true
+            - job: approve_prd_deploy_by_committer
+              artifacts: true
+          rules:
+            - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH && $RELEASE_TO_PRD == "true"'
+            - when: never
+          environment:
+            name: PRD/EDP
+          resource_group: edp-prd
           script:
             - set -a; . artifacts/context/runtime.env; set +a
             - ./ci/scripts/deploy-edp-prd.sh
@@ -421,7 +628,7 @@ def edp_ci_yaml() -> str:
               artifacts: true
           rules:
             - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
-            - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
+            - if: '$CI_COMMIT_BRANCH != $CI_DEFAULT_BRANCH && $RELEASE_TO_PRD != "true"'
             - when: never
           script:
             - ./ci/scripts/cleanup-ci-sandbox.sh artifacts/context/edp.env
@@ -434,7 +641,7 @@ def edp_ci_yaml() -> str:
           rules:
             - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
               when: never
-            - if: '$CI_COMMIT_BRANCH != $CI_DEFAULT_BRANCH'
+            - if: '$CI_COMMIT_BRANCH != $CI_DEFAULT_BRANCH && $RELEASE_TO_PRD != "true"'
               when: manual
             - when: never
           allow_failure: true
@@ -545,6 +752,8 @@ def sdp_compose_yaml() -> str:
               retries: 10
             networks:
               - platform
+            ports:
+              - "${AIRFLOW_METADATA_DB_PORT:-5432}:5432"
             volumes:
               - airflow-metadata-db-data:/var/lib/postgresql/data
               - ./postgres/catalog-init:/docker-entrypoint-initdb.d:ro
@@ -562,6 +771,8 @@ def sdp_compose_yaml() -> str:
               retries: 10
             networks:
               - platform
+            ports:
+              - "${SOURCE_POSTGRES_EXPOSE_PORT:-5433}:5432"
             volumes:
               - source-postgres-db-data:/var/lib/postgresql/data
               - ./postgres/source-init:/docker-entrypoint-initdb.d:ro
@@ -575,6 +786,9 @@ def sdp_compose_yaml() -> str:
               MINIO_REGION_NAME: ${MINIO_REGION}
             networks:
               - platform
+            ports:
+              - "${MINIO_API_PORT:-9000}:9000"
+              - "${MINIO_CONSOLE_PORT:-9001}:9001"
             volumes:
               - lakehouse-object-store-data:/data
 
@@ -633,6 +847,8 @@ def sdp_compose_yaml() -> str:
               retries: 10
             networks:
               - platform
+            ports:
+              - "${AIRFLOW_PORT:-8088}:8080"
             user: "${AIRFLOW_UID:-50000}:0"
             volumes:
               - airflow-logs:/opt/airflow/logs
@@ -810,13 +1026,16 @@ def render_sdp_repo(project_path: str) -> None:
         "scripts/ensure-snowflake-foundation.sh",
         "scripts/prepare-ci-sandbox.sh",
         "scripts/cleanup-ci-sandbox.sh",
+        "scripts/require-approver-match-commit.sh",
         "scripts/load-source-sample-data.sh",
         "scripts/test-airflow-dag.sh",
         "scripts/deploy-airflow-prd-dag.sh",
+        "scripts/deploy-sdp-dev.sh",
         "scripts/deploy-sdp-prd.sh",
         "scripts/verify-ingestion-promotion.sh",
         "scripts/verify-sdp-promotion.sh",
         "scripts/verify-sdp-cd-clone.sh",
+        "scripts/verify-sdp-prd-clone.sh",
     ):
         copy_path(relative_path, repo_dir, f"ci/{relative_path}")
 
@@ -863,6 +1082,8 @@ def render_sdp_repo(project_path: str) -> None:
                 - `./ci/scripts/verify-ingestion-promotion.sh`
                 - `./ci/scripts/verify-sdp-promotion.sh`
                 - `./ci/scripts/verify-sdp-cd-clone.sh`
+                - `./ci/scripts/deploy-sdp-dev.sh`
+                - `./ci/scripts/verify-sdp-prd-clone.sh`
                 - `./ci/scripts/deploy-sdp-prd.sh`
 
                 CI behaviour:
@@ -872,11 +1093,10 @@ def render_sdp_repo(project_path: str) -> None:
                 - Later branch push pipelines reuse one branch-scoped Snowflake zero-copy environment instead of replacing the shared DEV objects.
                 - The clone lifecycle is driven by `ci/snowflake/data_products.json`, so every registered Snowflake data product database is cloned, not just the sample SDP and EDP orders databases.
                 - Branch clone databases are named from the original database plus `CI_CLO`, the owning project token, and the branch token, for example `DB_SDP_ORDERS_CI_CLO_SDP_FEATURE_X`.
-                - Later non-default branch push pipelines write ingestion output to a stable branch-scoped MinIO/S3 prefix and Iceberg namespace.
+                - Later non-default branch push pipelines write ingestion output to a stable branch-scoped MinIO/S3 prefix and Iceberg namespace and run repeatable CI validation there with `sqlfluff lint`, `dbt parse`, ingestion checks, `dbt run`, and `dbt test`.
                 - Merge request pipelines create a fresh disposable clone and isolated MinIO/Iceberg namespace, validate the change there, and destroy that merge sandbox automatically afterward.
-                - Validation runs `dbt parse` and `sqlfluff lint` before promotion, and promotion runs `dbt run` plus `dbt test`.
-                - Default-branch pipelines create a fresh merge clone, run an additional CD verification stage on a second fresh clone, and then clean both up automatically.
-                - After the default-branch CD verification succeeds, the pipeline deploys the Airflow DAG, dlt runtime image, SDP dbt runtime image, and Snowflake artifacts into the shared local services using `PRD_`-marked targets such as `PRD_local_platform_ingest` and `PRD_DB_SDP_ORDERS`.
+                - Default-branch pipelines validate the merged candidate again on a fresh disposable DEV clone, then wait for a manual approval by the commit identity, and only then deploy to the shared DEV services.
+                - PRD deployment is a separate manual default-branch pipeline run with `RELEASE_TO_PRD=true`. That pipeline first validates on a fresh disposable PRD clone, then waits for a manual approval by the commit identity, and only then deploys to the shared local services using `PRD_`-marked targets such as `PRD_local_platform_ingest` and `PRD_DB_SDP_ORDERS`.
                 - Branch environments are preserved after the pipeline, can be destroyed explicitly with the manual `destroy_sdp_branch_sandbox` job, and are also destroyed automatically when the GitLab branch is deleted.
                 """
             ),
@@ -896,9 +1116,12 @@ def render_edp_repo(project_path: str) -> None:
         "scripts/ensure-snowflake-foundation.sh",
         "scripts/prepare-ci-sandbox.sh",
         "scripts/cleanup-ci-sandbox.sh",
+        "scripts/require-approver-match-commit.sh",
+        "scripts/deploy-edp-dev.sh",
         "scripts/deploy-edp-prd.sh",
         "scripts/verify-edp-promotion.sh",
         "scripts/verify-edp-cd-clone.sh",
+        "scripts/verify-edp-prd-clone.sh",
     ):
         copy_path(relative_path, repo_dir, f"ci/{relative_path}")
 
@@ -947,6 +1170,8 @@ def render_edp_repo(project_path: str) -> None:
                 - `./ci/scripts/prepare-ci-sandbox.sh edp artifacts/context/edp.env`
                 - `./ci/scripts/verify-edp-promotion.sh`
                 - `./ci/scripts/verify-edp-cd-clone.sh`
+                - `./ci/scripts/deploy-edp-dev.sh`
+                - `./ci/scripts/verify-edp-prd-clone.sh`
                 - `./ci/scripts/deploy-edp-prd.sh`
 
                 CI behaviour:
@@ -956,10 +1181,10 @@ def render_edp_repo(project_path: str) -> None:
                 - Later branch push pipelines reuse one branch-scoped Snowflake zero-copy environment instead of replacing the shared DEV objects.
                 - The clone lifecycle is driven by `ci/snowflake/data_products.json`, so every registered Snowflake data product database is cloned, not just the sample SDP and EDP orders databases.
                 - Branch clone databases are named from the original database plus `CI_CLO`, the owning project token, and the branch token, for example `DB_EDP_ORDERS_CI_CLO_EDP_FEATURE_X`.
+                - Later non-default branch push pipelines run repeatable CI validation in the branch clone with `sqlfluff lint`, `dbt parse`, `dbt run`, and `dbt test`.
                 - Merge request pipelines create a fresh disposable clone, validate the change there, and destroy that merge sandbox automatically afterward.
-                - Validation runs `dbt parse` and `sqlfluff lint`, and promotion runs `dbt run` plus `dbt test`.
-                - Default-branch pipelines create a fresh merge clone, run an additional CD verification stage on a second fresh clone, and then clean both up automatically.
-                - After the default-branch CD verification succeeds, the pipeline deploys the EDP dbt runtime image and Snowflake artifacts into the shared local services using `PRD_`-marked targets such as `PRD_DB_EDP_ORDERS`.
+                - Default-branch pipelines validate the merged candidate again on a fresh disposable DEV clone, then wait for a manual approval by the commit identity, and only then deploy to the shared DEV services.
+                - PRD deployment is a separate manual default-branch pipeline run with `RELEASE_TO_PRD=true`. That pipeline first validates on a fresh disposable PRD clone, then waits for a manual approval by the commit identity, and only then deploys to the shared local services using `PRD_`-marked targets such as `PRD_DB_EDP_ORDERS`.
                 - Branch environments are preserved after the pipeline, can be destroyed explicitly with the manual `destroy_edp_branch_sandbox` job, and are also destroyed automatically when the GitLab branch is deleted.
                 """
             ),

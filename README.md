@@ -367,6 +367,8 @@ pwsh ./scripts/windows/bootstrap-snowflake-products.ps1
 Deploy the sample PRD artifacts into the shared running platform:
 
 ```bash
+./scripts/deploy-sdp-dev.sh
+./scripts/deploy-edp-dev.sh
 ./scripts/deploy-sdp-prd.sh
 ./scripts/deploy-edp-prd.sh
 ```
@@ -425,6 +427,10 @@ The Unix/macOS commands are the `.sh` entrypoints under `scripts/`. Windows host
   Runs the ingestion, SDP, and EDP validations in sequence as one local verification flow.
 - `./scripts/deploy-airflow-prd-dag.sh`
   Deploys the PRD Airflow DAG wrapper into the shared Airflow service so the deployed ingestion pipeline is available as `PRD_local_platform_ingest`.
+- `./scripts/deploy-sdp-dev.sh`
+  Deploys the owned SDP artifacts into the shared DEV target after the DEV approval step: refreshes the shared Airflow services in place, reuses the shared runtime image tags, validates ingestion again, and rebuilds the SDP product in the shared DEV Snowflake databases.
+- `./scripts/deploy-edp-dev.sh`
+  Deploys the owned EDP artifacts into the shared DEV target after the DEV approval step by reusing the shared dbt runtime image tag and rebuilding the EDP product in the shared DEV Snowflake databases.
 - `./scripts/deploy-sdp-prd.sh`
   Retags the shared runtime images to stable PRD refs, deploys the PRD Airflow ingestion DAG, validates the PRD ingestion path, and rebuilds the SDP product in `PRD_DB_SDP_ORDERS`.
 - `./scripts/deploy-edp-prd.sh`
@@ -452,9 +458,15 @@ The Unix/macOS commands are the `.sh` entrypoints under `scripts/`. Windows host
 - `./scripts/cleanup-ci-sandbox.sh`
   Internal CI helper that preserves or destroys a sandbox depending on branch/default-branch rules.
 - `./scripts/verify-sdp-cd-clone.sh`
-  Internal CD-style verification for the SDP project against a fresh merge clone.
+  Internal DEV-candidate verification for the SDP project against a fresh disposable clone of the shared DEV objects.
 - `./scripts/verify-edp-cd-clone.sh`
-  Internal CD-style verification for the EDP project against a fresh merge clone.
+  Internal DEV-candidate verification for the EDP project against a fresh disposable clone of the shared DEV objects.
+- `./scripts/verify-sdp-prd-clone.sh`
+  Internal PRD-candidate verification for the SDP project against a fresh disposable clone of the current PRD objects plus a temporary PRD-scoped MinIO/Iceberg namespace.
+- `./scripts/verify-edp-prd-clone.sh`
+  Internal PRD-candidate verification for the EDP project against a fresh disposable clone of the current PRD objects.
+- `./scripts/require-approver-match-commit.sh`
+  Internal approval guard used by GitLab manual jobs. It checks that the GitLab user who played the approval step matches the checked-out commit identity before DEV or PRD deployment is allowed to continue.
 
 ### Scaffolding New Assets
 
@@ -528,28 +540,40 @@ The ownership split is:
 Each generated project ships its own `.gitlab-ci.yml` with isolated CI/CD verification:
 
 - the platform auto-provisions a branch sandbox from GitLab webhook events when a new non-default branch appears in GitLab
-- non-default branch and merge-request pipelines reuse one stable branch-scoped Snowflake zero-copy environment so developers do not touch the shared DEV databases
+- branch-creation pushes do not run the heavy validation pipeline; they only create the isolated developer sandbox
+- later non-default branch push pipelines reuse one stable branch-scoped Snowflake zero-copy environment so developers do not touch the shared DEV databases
 - the SDP pipeline also reuses one stable branch-scoped MinIO/S3 prefix, dlt pipeline name, and Iceberg namespace
-- validation runs `dbt parse` plus `sqlfluff lint`
-- promotion runs `dbt run` plus `dbt test`
-- default-branch pipelines run an extra CD verification stage against a fresh clone before cleanup
-- after CD verification, default-branch pipelines deploy into the shared PRD targets instead of spinning up a second long-lived platform stack
-- non-default branch pipelines skip the CD verification stage and preserve the branch sandbox after the pipeline
+- branch CI runs `sqlfluff lint`, `dbt parse`, and the owned runtime validations repeatedly against that preserved sandbox
+- merge request pipelines validate again against a fresh disposable DEV-style zero-copy clone
+- default-branch pipelines validate again against a fresh disposable DEV-style zero-copy clone, then stop at a manual approval gate that must be played by the commit identity, then deploy into the shared DEV target
+- PRD deployment is a separate manual default-branch pipeline run with `RELEASE_TO_PRD=true`; it validates against a fresh disposable PRD-style zero-copy clone, then stops at another manual approval gate, then deploys into the shared PRD target
+- non-default branch pipelines preserve the branch sandbox after the pipeline
 - branch sandboxes can be destroyed explicitly with the manual cleanup jobs in GitLab and are also destroyed automatically when the branch itself is deleted in GitLab
 
-The SDP project pipeline is intentionally split into two promotion steps so cold-start GitLab runs stay stable:
+The SDP project pipeline is intentionally split into two CI validation steps so cold-start GitLab runs stay stable:
 
-- `promote_sdp_ingestion`: validates the Airflow DAG, dlt runtime, and Iceberg output
-- `promote_sdp_models`: validates and rebuilds the SDP dbt models in Snowflake after ingestion has succeeded
+- `ci_validate_sdp_ingestion`: validates the Airflow DAG, dlt runtime, and Iceberg output in the isolated branch sandbox
+- `ci_validate_sdp_models`: validates and rebuilds the SDP dbt models in Snowflake after ingestion has succeeded
 
-The EDP project pipeline keeps a single promotion step because it only owns dbt:
+The EDP project pipeline keeps a single CI validation step because it only owns dbt:
 
-- `promote_edp`: validates and rebuilds the EDP dbt models in Snowflake against the isolated clone
+- `ci_validate_edp_models`: validates and rebuilds the EDP dbt models in Snowflake against the isolated clone
 
-Default-branch pipelines now also include real deployment jobs:
+Default-branch and PRD pipelines now include real deployment jobs:
 
+- `deploy_sdp_dev`: deploys the shared DEV Airflow DAG, dlt runtime, and SDP Snowflake artifacts after the DEV approval step
+- `deploy_edp_dev`: deploys the shared DEV EDP Snowflake artifacts after the DEV approval step
 - `deploy_sdp_prd`: deploys the PRD Airflow DAG plus the PRD SDP Snowflake artifacts
 - `deploy_edp_prd`: deploys the PRD EDP Snowflake artifacts
+
+The expected GitLab operator flow is:
+
+1. Create a new branch in `proj_sdp_orders` or `proj_edp_orders`.
+2. Wait for the platform webhook handler to create the isolated branch sandbox automatically.
+3. Push commits to that branch and rerun the branch CI pipeline as often as needed.
+4. Open a merge request and let the MR pipeline validate again on a fresh disposable clone.
+5. Merge to `main`, let the default-branch pipeline validate again on a fresh disposable DEV clone, then manually approve the DEV deployment.
+6. When you want to deploy to PRD, run a manual `main` pipeline with `RELEASE_TO_PRD=true`, wait for the PRD clone verification to pass, then manually approve the PRD deployment.
 
 Those generated CI pipelines assume the base local platform has already been started with `./scripts/bootstrap.sh` and `./scripts/bootstrap-gitlab.sh`. They reuse the shared local runtime images and services instead of rebuilding or destroying the full platform stack inside the runner.
 

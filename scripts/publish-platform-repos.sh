@@ -80,13 +80,43 @@ protect_main_branch() {
 
 ensure_git_repo() {
   local repo_dir="${1:?repo dir is required}"
+  local publish_name publish_email
 
   if [ ! -d "${repo_dir}/.git" ]; then
     git -C "${repo_dir}" init -b main >/dev/null
   fi
 
-  git -C "${repo_dir}" config user.name "Codex Local"
-  git -C "${repo_dir}" config user.email "codex-local@example.com"
+  publish_name="${GITLAB_PUBLISH_GIT_NAME:-root}"
+  publish_email="${GITLAB_PUBLISH_GIT_EMAIL:-${GITLAB_ROOT_EMAIL:-root@example.com}}"
+
+  git -C "${repo_dir}" config user.name "${publish_name}"
+  git -C "${repo_dir}" config user.email "${publish_email}"
+}
+
+prime_rendered_repo() {
+  local repo_dir="${1:?repo dir is required}"
+  local remote_name="${2:?remote name is required}"
+  local remote_url="${3:?remote url is required}"
+
+  ensure_git_repo "${repo_dir}"
+
+  if git -C "${repo_dir}" remote get-url "${remote_name}" >/dev/null 2>&1; then
+    git -C "${repo_dir}" remote set-url "${remote_name}" "${remote_url}"
+  else
+    git -C "${repo_dir}" remote add "${remote_name}" "${remote_url}"
+  fi
+
+  if remote_repo_is_empty "${remote_url}"; then
+    git -C "${repo_dir}" checkout -B main >/dev/null 2>&1 || true
+    return 0
+  fi
+
+  git -C "${repo_dir}" fetch "${remote_name}" main >/dev/null 2>&1 || true
+  if git -C "${repo_dir}" rev-parse --verify "${remote_name}/main" >/dev/null 2>&1; then
+    git -C "${repo_dir}" checkout -B main "${remote_name}/main" >/dev/null
+  else
+    git -C "${repo_dir}" checkout -B main >/dev/null
+  fi
 }
 
 remote_repo_is_empty() {
@@ -146,11 +176,21 @@ sync_rendered_repo() {
   git -C "${repo_dir}" push --set-upstream "${remote_name}" main
 }
 
-python3 "${ROOT_DIR}/scripts/render_gitlab_project_repos.py"
-
 platform_sha="$(git rev-parse --short HEAD 2>/dev/null || echo manual)"
 sdp_repo_dir="${ROOT_DIR}/gitlab-projects/generated/${GITLAB_SDP_PROJECT_PATH}"
 edp_repo_dir="${ROOT_DIR}/gitlab-projects/generated/${GITLAB_EDP_PROJECT_PATH}"
+
+prime_rendered_repo \
+  "${sdp_repo_dir}" \
+  local-gitlab-sdp \
+  "http://oauth2:${GITLAB_BOOTSTRAP_PAT}@localhost:${GITLAB_HTTP_PORT}/root/${GITLAB_SDP_PROJECT_PATH}.git"
+
+prime_rendered_repo \
+  "${edp_repo_dir}" \
+  local-gitlab-edp \
+  "http://oauth2:${GITLAB_BOOTSTRAP_PAT}@localhost:${GITLAB_HTTP_PORT}/root/${GITLAB_EDP_PROJECT_PATH}.git"
+
+python3 "${ROOT_DIR}/scripts/render_gitlab_project_repos.py"
 
 echo "publishing rendered SDP platform repo"
 sync_rendered_repo \
