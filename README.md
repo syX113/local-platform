@@ -101,7 +101,7 @@ Examples:
 
 ## Full Reset And Bootstrap
 
-To kill everything and start again from a clean local state:
+Unix/macOS:
 
 ```bash
 ./scripts/reset-platform.sh
@@ -114,7 +114,15 @@ After GitLab is reachable on `http://localhost:8080`, finish the GitLab bootstra
 ./scripts/bootstrap-gitlab.sh
 ```
 
-That is the intended full local restart flow.
+Windows PowerShell:
+
+```powershell
+pwsh ./scripts/windows/reset-platform.ps1
+pwsh ./scripts/windows/bootstrap.ps1
+pwsh ./scripts/windows/bootstrap-gitlab.ps1
+```
+
+Those are the intended full local restart flows.
 
 ## Quick Start
 
@@ -122,14 +130,30 @@ That is the intended full local restart flow.
 2. Fill the Snowflake variables if you want Snowflake connectivity.
 3. Reset if you want a clean rebuild:
 
+Unix/macOS:
+
 ```bash
 ./scripts/reset-platform.sh
 ```
 
+Windows:
+
+```powershell
+pwsh ./scripts/windows/reset-platform.ps1
+```
+
 4. Bootstrap the platform:
+
+Unix/macOS:
 
 ```bash
 ./scripts/bootstrap.sh
+```
+
+Windows:
+
+```powershell
+pwsh ./scripts/windows/bootstrap.ps1
 ```
 
 5. Wait for the web UIs:
@@ -147,8 +171,16 @@ Recommended local host settings for stability:
 
 6. Bootstrap the local GitLab projects and runner:
 
+Unix/macOS:
+
 ```bash
 ./scripts/bootstrap-gitlab.sh
+```
+
+Windows:
+
+```powershell
+pwsh ./scripts/windows/bootstrap-gitlab.ps1
 ```
 
 The runner is intentionally started by `bootstrap-gitlab.sh`, not by the base bootstrap, so GitLab can finish warming up before CI job polling begins.
@@ -157,9 +189,70 @@ Local GitLab CI runs against the already bootstrapped shared platform stack. It 
 
 7. Print the current URLs, credentials, paths, and generated GitLab details at any time:
 
+Unix/macOS:
+
 ```bash
 ./scripts/print-setup-summary.sh
 ```
+
+Windows:
+
+```powershell
+pwsh ./scripts/windows/print-setup-summary.ps1
+```
+
+## Host Script Layout
+
+- `scripts/*.sh`: Unix/macOS operator scripts and Linux-oriented internal helpers
+- `scripts/windows/*.ps1`: Windows host operator scripts for reset, bootstrap, GitLab bootstrap, Snowflake-only rebuild, repo publish, and daily-use entrypoints
+- Internal CI helpers remain Linux-oriented because GitLab jobs and the runtime containers execute inside Linux containers, even when the host machine is Windows
+
+## Windows Usage
+
+The platform can be operated from Windows, but the runtime model stays the same:
+
+- Windows runs the host/operator commands through `pwsh`
+- `GitLab`, `Airflow`, `dbt`, `dlt`, `PostgreSQL`, and `MinIO` still run inside Linux containers
+- the same `.env` file is used on Windows, Unix, and macOS
+
+Recommended Windows prerequisites:
+
+- PowerShell 7 available as `pwsh`
+- Docker Desktop or Rancher Desktop configured for Linux containers
+- at least `6` CPUs and `12 GB` RAM assigned to the Docker VM for GitLab stability
+- run all commands from the repository root
+
+If your Windows execution policy blocks local PowerShell scripts, run them explicitly with:
+
+```powershell
+pwsh -ExecutionPolicy Bypass ./scripts/windows/bootstrap.ps1
+```
+
+The normal Windows operator flow is:
+
+```powershell
+pwsh ./scripts/windows/reset-platform.ps1
+pwsh ./scripts/windows/bootstrap.ps1
+pwsh ./scripts/windows/bootstrap-gitlab.ps1
+```
+
+For a Snowflake-only rebuild on Windows:
+
+```powershell
+pwsh ./scripts/windows/bootstrap-snowflake-products.ps1
+```
+
+For a one-command sample run on Windows:
+
+```powershell
+pwsh ./scripts/windows/run-local-pipeline.ps1
+```
+
+Important scope note:
+
+- the main operator entrypoints have Windows PowerShell equivalents
+- many lower-level validation and CI helper scripts remain `.sh` because the CI system and runtime containers are Linux-based
+- if you want to run those lower-level `.sh` helpers directly from a Windows host, use Git Bash or WSL
 
 ## Branch Isolation
 
@@ -195,16 +288,30 @@ Reset and rebuild:
 ./scripts/bootstrap-gitlab.sh
 ```
 
+```powershell
+pwsh ./scripts/windows/reset-platform.ps1
+pwsh ./scripts/windows/bootstrap.ps1
+pwsh ./scripts/windows/bootstrap-gitlab.ps1
+```
+
 Reload only the sample source data:
 
 ```bash
 ./scripts/load-source-sample-data.sh
 ```
 
+```powershell
+pwsh ./scripts/windows/load-source-sample-data.ps1
+```
+
 Run the default local pipeline:
 
 ```bash
 ./scripts/run-local-pipeline.sh
+```
+
+```powershell
+pwsh ./scripts/windows/run-local-pipeline.ps1
 ```
 
 Test the Airflow DAG from the CLI:
@@ -219,15 +326,25 @@ Ensure Snowflake foundation only:
 bash ./scripts/ensure-snowflake-foundation.sh
 ```
 
+```powershell
+pwsh ./scripts/windows/ensure-snowflake-foundation.ps1
+```
+
 Reset and rebuild only the Snowflake SDP and EDP products:
 
 ```bash
 ./scripts/bootstrap-snowflake-products.sh
 ```
 
+```powershell
+pwsh ./scripts/windows/bootstrap-snowflake-products.ps1
+```
+
 ## Script Reference
 
 The scripts below are the important control-plane entrypoints for this repository. If you are operating the platform manually, start with the `Bootstrap And Reset`, `Daily Use`, and `GitLab Publishing` groups.
+
+The Unix/macOS commands are the `.sh` entrypoints under `scripts/`. Windows host equivalents live under `scripts/windows/` as PowerShell scripts.
 
 ### Bootstrap And Reset
 
@@ -239,12 +356,22 @@ The scripts below are the important control-plane entrypoints for this repositor
   Finishes the GitLab setup: creates or resolves the SDP and EDP projects, configures branch webhooks, registers runners, publishes the rendered repos, and syncs GitLab CI variables.
   On a fresh bootstrap where the GitLab projects are newly created, each hosted repo is initialized with a single `main` commit named `init-artifacts` so users start from a clean history.
 - `./scripts/bootstrap-snowflake-products.sh`
-  Drops lingering Snowflake CI clone databases, recreates the sample SDP and EDP databases from scratch, reloads the raw inbound data, rebuilds both dbt products, and validates them.
+  Drops lingering Snowflake CI clone databases, recreates the sample SDP and EDP databases from scratch, reloads the raw inbound data, rebuilds both dbt products once, and then runs targeted post-build verification without repeating the same dbt work.
 
 - `./scripts/cleanup-snowflake-ci-clones.sh`
   Drops all Snowflake CI clone databases for the registered data products, for example `DB_SDP_ORDERS_CI_CLO_*` and `DB_EDP_ORDERS_CI_CLO_*`.
 - `./scripts/print-setup-summary.sh`
   Prints the current URLs, credentials, paths, project ids, tokens, and important runtime locations.
+- `pwsh ./scripts/windows/reset-platform.ps1`
+  Windows host equivalent of the full reset flow.
+- `pwsh ./scripts/windows/bootstrap.ps1`
+  Windows host equivalent of the base platform bootstrap.
+- `pwsh ./scripts/windows/bootstrap-gitlab.ps1`
+  Windows host equivalent of the GitLab bootstrap and repo publish flow.
+- `pwsh ./scripts/windows/bootstrap-snowflake-products.ps1`
+  Windows host equivalent of the Snowflake-only SDP/EDP rebuild flow.
+- `pwsh ./scripts/windows/print-setup-summary.ps1`
+  Windows host equivalent of the access summary output.
 
 ### Daily Use
 
@@ -252,14 +379,18 @@ The scripts below are the important control-plane entrypoints for this repositor
   Reseeds the deterministic PostgreSQL sample data.
 - `./scripts/run-local-pipeline.sh`
   Runs the default local sample flow end to end against the running platform.
+- `pwsh ./scripts/windows/load-source-sample-data.ps1`
+  Windows host equivalent of the PostgreSQL sample-data reload.
+- `pwsh ./scripts/windows/run-local-pipeline.ps1`
+  Windows host equivalent of the one-command local sample flow.
 - `./scripts/test-airflow-dag.sh`
   Runs the Airflow DAG from the CLI for fast orchestration validation without using the UI.
 - `./scripts/verify-ingestion-promotion.sh`
   Validates the source ingestion path only: PostgreSQL -> Airflow -> dlt -> MinIO/Iceberg.
 - `./scripts/verify-sdp-promotion.sh`
-  Validates the SDP Snowflake/dbt promotion path.
+  Validates the SDP Snowflake/dbt promotion path. Internal `--skip-foundation`, `--skip-raw-sync`, and `--skip-dbt` flags exist for bootstrap and CI reuse.
 - `./scripts/verify-edp-promotion.sh`
-  Validates the EDP Snowflake/dbt promotion path.
+  Validates the EDP Snowflake/dbt promotion path. Internal `--skip-foundation` and `--skip-dbt` flags exist for bootstrap and CI reuse.
 - `./scripts/verify-dbt-promotion.sh`
   Runs the ingestion, SDP, and EDP validations in sequence as one local verification flow.
 
@@ -271,6 +402,10 @@ The scripts below are the important control-plane entrypoints for this repositor
   Regenerates the rendered SDP and EDP working trees under `gitlab-projects/generated/` without publishing them.
 - `./scripts/sync-gitlab-ci-variables.sh`
   Pushes the current CI/CD variables from the local platform into the two GitLab projects.
+- `pwsh ./scripts/windows/publish-platform-repos.ps1`
+  Windows host equivalent of the rendered-repo publish flow.
+- `pwsh ./scripts/windows/sync-gitlab-ci-variables.ps1`
+  Windows host equivalent of the GitLab CI/CD variable sync.
 
 ### Branch Sandbox Lifecycle
 
@@ -298,10 +433,17 @@ The scripts below are the important control-plane entrypoints for this repositor
 
 - `./scripts/ensure-snowflake-foundation.sh`
   Applies the base Snowflake foundation SQL. Safe to run manually, but usually called by the promotion scripts.
+- `pwsh ./scripts/windows/ensure-snowflake-foundation.ps1`
+  Windows host equivalent of the Snowflake foundation helper.
 - `./scripts/common.sh`
   Shared shell helper library for env loading, path resolution, and clone naming. This is internal plumbing and normally not called directly.
+- `./scripts/windows/common.ps1`
+  Shared PowerShell helper library for the Windows host operator scripts. This is internal plumbing and normally not called directly.
 
 ## Validation Commands
+
+These validation helpers are Linux-oriented shell entrypoints because they mirror the GitLab CI/runtime environment.
+On Unix/macOS, run them directly. On Windows, use Git Bash or WSL if you want to run these low-level helpers manually.
 
 Validate the ingestion promotion flow:
 
@@ -372,8 +514,6 @@ Those generated CI pipelines assume the base local platform has already been sta
 The generator for those repos is [render_gitlab_project_repos.py](/Users/taagiti2/Documents/01%20Projects/Valiant/repos/local-platform/scripts/render_gitlab_project_repos.py).
 
 The rendered GitLab repos keep only product-owned code at the top level. Runner-only helpers live under `ci/`, so the hosted SDP and EDP repos stay focused on Airflow, dlt, dbt, and the CI/CD definitions that exercise them.
-
-The source-repo operational scripts are grouped in [scripts/README.md](/Users/taagiti2/Documents/01%20Projects/Valiant/repos/local-platform/scripts/README.md).
 
 To republish the rendered repos after source changes, run:
 

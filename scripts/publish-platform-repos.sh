@@ -89,6 +89,14 @@ ensure_git_repo() {
   git -C "${repo_dir}" config user.email "codex-local@example.com"
 }
 
+remote_repo_is_empty() {
+  local remote_url="${1:?remote url is required}"
+  local heads
+
+  heads="$(git ls-remote --heads "${remote_url}" 2>/dev/null || true)"
+  [ -z "${heads}" ]
+}
+
 sync_rendered_repo() {
   local repo_dir="${1:?repo dir is required}"
   local remote_name="${2:?remote name is required}"
@@ -103,6 +111,10 @@ sync_rendered_repo() {
     git -C "${repo_dir}" remote set-url "${remote_name}" "${remote_url}"
   else
     git -C "${repo_dir}" remote add "${remote_name}" "${remote_url}"
+  fi
+
+  if [ "${init_history}" != "true" ] && remote_repo_is_empty "${remote_url}"; then
+    init_history="true"
   fi
 
   if [ "${init_history}" = "true" ]; then

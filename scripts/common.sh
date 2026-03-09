@@ -4,6 +4,15 @@ docker_compose_run_stderr_filter() {
   awk 'index($0, "No services to build") == 0 { print > "/dev/stderr" }'
 }
 
+runtime_image_prefix() {
+  printf '%s' "${RUNTIME_IMAGE_PREFIX:-${COMPOSE_PROJECT_NAME:-local-platform}}"
+}
+
+runtime_image_ref() {
+  local service_name="${1:?service name is required}"
+  printf '%s/%s:dev' "$(runtime_image_prefix)" "${service_name}"
+}
+
 docker() {
   if [ "${1:-}" = "compose" ] && [ "${2:-}" = "run" ]; then
     shift 2

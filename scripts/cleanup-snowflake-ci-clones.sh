@@ -8,6 +8,8 @@ cd "${ROOT_DIR}"
 source "${ROOT_DIR}/scripts/common.sh"
 ensure_platform_env
 
+dbt_executor_image="$(runtime_image_ref dbt-executor)"
+
 required_vars=(
   SNOWFLAKE_ACCOUNT
   SNOWFLAKE_USER
@@ -21,10 +23,10 @@ for key in "${required_vars[@]}"; do
     echo "skipping Snowflake CI clone cleanup because ${key} is not set"
     exit 0
   fi
-done
+  done
 
-if ! docker image inspect local-platform/dbt-executor:dev >/dev/null 2>&1; then
-  echo "skipping Snowflake CI clone cleanup because dbt-executor image is not available yet"
+if ! docker image inspect "${dbt_executor_image}" >/dev/null 2>&1; then
+  echo "skipping Snowflake CI clone cleanup because ${dbt_executor_image} is not available yet"
   exit 0
 fi
 

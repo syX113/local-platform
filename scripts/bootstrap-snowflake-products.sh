@@ -84,10 +84,10 @@ echo "building EDP data product"
 docker compose run --rm --no-deps dbt-executor \
   dbt build --project-dir "${edp_container_dbt_project_dir}" --profiles-dir /opt/platform/dbt/profiles
 
-echo "validating rebuilt SDP"
-./scripts/verify-sdp-promotion.sh
+echo "verifying rebuilt SDP without rerunning dbt"
+./scripts/verify-sdp-promotion.sh --skip-foundation --skip-raw-sync --skip-dbt
 
-echo "validating rebuilt EDP"
-./scripts/verify-edp-promotion.sh
+echo "verifying rebuilt EDP without rerunning dbt"
+./scripts/verify-edp-promotion.sh --skip-foundation --skip-dbt
 
 echo "snowflake-only bootstrap complete"

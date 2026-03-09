@@ -12,6 +12,29 @@ cd "${ROOT_DIR}"
 source "${SCRIPT_DIR}/common.sh"
 ensure_platform_env
 
+skip_foundation="false"
+skip_raw_sync="false"
+skip_dbt="false"
+
+while [ $# -gt 0 ]; do
+  case "${1}" in
+    --skip-foundation)
+      skip_foundation="true"
+      ;;
+    --skip-raw-sync)
+      skip_raw_sync="true"
+      ;;
+    --skip-dbt)
+      skip_dbt="true"
+      ;;
+    *)
+      echo "unsupported argument: ${1}" >&2
+      exit 1
+      ;;
+  esac
+  shift
+done
+
 ARTIFACT_DIR="${ROOT_DIR}/artifacts/sdp"
 rm -rf "${ARTIFACT_DIR}"
 mkdir -p "${ARTIFACT_DIR}"
@@ -44,9 +67,11 @@ fi
 
 container_dbt_project_dir="$(resolve_container_dbt_project_dir proj_sdp_orders)"
 
-bash "${SCRIPT_DIR}/ensure-snowflake-foundation.sh" | tee "${ARTIFACT_DIR}/snowflake_bootstrap.log"
+if [ "${skip_foundation}" != "true" ]; then
+  bash "${SCRIPT_DIR}/ensure-snowflake-foundation.sh" | tee "${ARTIFACT_DIR}/snowflake_bootstrap.log"
+fi
 
-if [ "${SNOWFLAKE_LOCAL_RAW_SYNC:-false}" = "true" ]; then
+if [ "${skip_raw_sync}" != "true" ] && [ "${SNOWFLAKE_LOCAL_RAW_SYNC:-false}" = "true" ]; then
   docker compose run --rm --no-deps dlt-extractor \
     python /opt/platform/dlt/snowflake_raw_sync.py | tee "${ARTIFACT_DIR}/snowflake_raw_sync.log"
 fi
@@ -99,17 +124,19 @@ finally:
 print("sdp_inbound_contract=passed")
 PY
 
-docker compose run --rm --no-deps dbt-executor \
-  dbt parse --project-dir "${container_dbt_project_dir}" --profiles-dir /opt/platform/dbt/profiles \
-  | tee "${ARTIFACT_DIR}/dbt_parse.log"
+if [ "${skip_dbt}" != "true" ]; then
+  docker compose run --rm --no-deps dbt-executor \
+    dbt parse --project-dir "${container_dbt_project_dir}" --profiles-dir /opt/platform/dbt/profiles \
+    | tee "${ARTIFACT_DIR}/dbt_parse.log"
 
-docker compose run --rm --no-deps dbt-executor \
-  dbt run --project-dir "${container_dbt_project_dir}" --profiles-dir /opt/platform/dbt/profiles \
-  | tee "${ARTIFACT_DIR}/dbt_run.log"
+  docker compose run --rm --no-deps dbt-executor \
+    dbt run --project-dir "${container_dbt_project_dir}" --profiles-dir /opt/platform/dbt/profiles \
+    | tee "${ARTIFACT_DIR}/dbt_run.log"
 
-docker compose run --rm --no-deps dbt-executor \
-  dbt test --project-dir "${container_dbt_project_dir}" --profiles-dir /opt/platform/dbt/profiles \
-  | tee "${ARTIFACT_DIR}/dbt_test.log"
+  docker compose run --rm --no-deps dbt-executor \
+    dbt test --project-dir "${container_dbt_project_dir}" --profiles-dir /opt/platform/dbt/profiles \
+    | tee "${ARTIFACT_DIR}/dbt_test.log"
+fi
 
 docker compose run --rm --no-deps dbt-executor python - <<'PY' | tee "${ARTIFACT_DIR}/snowflake_validation.txt"
 import os

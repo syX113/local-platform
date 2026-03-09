@@ -12,7 +12,7 @@ rm -rf "${ARTIFACT_DIR}"
 mkdir -p "${ARTIFACT_DIR}"
 
 ./scripts/verify-ingestion-promotion.sh "${1:-2026-03-07}"
-./scripts/verify-sdp-promotion.sh "${1:-2026-03-07}"
+./scripts/verify-sdp-promotion.sh
 ./scripts/verify-edp-promotion.sh
 
 cp -R "${ROOT_DIR}/artifacts/ingestion" "${ARTIFACT_DIR}/ingestion"

@@ -12,6 +12,25 @@ cd "${ROOT_DIR}"
 source "${SCRIPT_DIR}/common.sh"
 ensure_platform_env
 
+skip_foundation="false"
+skip_dbt="false"
+
+while [ $# -gt 0 ]; do
+  case "${1}" in
+    --skip-foundation)
+      skip_foundation="true"
+      ;;
+    --skip-dbt)
+      skip_dbt="true"
+      ;;
+    *)
+      echo "unsupported argument: ${1}" >&2
+      exit 1
+      ;;
+  esac
+  shift
+done
+
 ARTIFACT_DIR="${ROOT_DIR}/artifacts/edp"
 rm -rf "${ARTIFACT_DIR}"
 mkdir -p "${ARTIFACT_DIR}"
@@ -39,7 +58,9 @@ done
 
 container_dbt_project_dir="$(resolve_container_dbt_project_dir proj_edp_orders)"
 
-bash "${SCRIPT_DIR}/ensure-snowflake-foundation.sh" | tee "${ARTIFACT_DIR}/snowflake_bootstrap.log"
+if [ "${skip_foundation}" != "true" ]; then
+  bash "${SCRIPT_DIR}/ensure-snowflake-foundation.sh" | tee "${ARTIFACT_DIR}/snowflake_bootstrap.log"
+fi
 
 docker compose run --rm --no-deps dbt-executor python - <<'PY' | tee "${ARTIFACT_DIR}/sdp_contract_check.txt"
 import os
@@ -87,17 +108,19 @@ finally:
 print("sdp_contract=passed")
 PY
 
-docker compose run --rm --no-deps dbt-executor \
-  dbt parse --project-dir "${container_dbt_project_dir}" --profiles-dir /opt/platform/dbt/profiles \
-  | tee "${ARTIFACT_DIR}/dbt_parse.log"
+if [ "${skip_dbt}" != "true" ]; then
+  docker compose run --rm --no-deps dbt-executor \
+    dbt parse --project-dir "${container_dbt_project_dir}" --profiles-dir /opt/platform/dbt/profiles \
+    | tee "${ARTIFACT_DIR}/dbt_parse.log"
 
-docker compose run --rm --no-deps dbt-executor \
-  dbt run --project-dir "${container_dbt_project_dir}" --profiles-dir /opt/platform/dbt/profiles \
-  | tee "${ARTIFACT_DIR}/dbt_run.log"
+  docker compose run --rm --no-deps dbt-executor \
+    dbt run --project-dir "${container_dbt_project_dir}" --profiles-dir /opt/platform/dbt/profiles \
+    | tee "${ARTIFACT_DIR}/dbt_run.log"
 
-docker compose run --rm --no-deps dbt-executor \
-  dbt test --project-dir "${container_dbt_project_dir}" --profiles-dir /opt/platform/dbt/profiles \
-  | tee "${ARTIFACT_DIR}/dbt_test.log"
+  docker compose run --rm --no-deps dbt-executor \
+    dbt test --project-dir "${container_dbt_project_dir}" --profiles-dir /opt/platform/dbt/profiles \
+    | tee "${ARTIFACT_DIR}/dbt_test.log"
+fi
 
 docker compose run --rm --no-deps dbt-executor \
   python /opt/platform/dbt/scripts/zero_copy_clone_check.py | tee "${ARTIFACT_DIR}/zero_copy_clone.log"
