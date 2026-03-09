@@ -84,8 +84,10 @@ for key in "${env_keys[@]}"; do
   fi
 done
 
-docker compose exec -T "${exec_env_args[@]}" airflow-scheduler airflow dags list-import-errors
-docker compose exec -T "${exec_env_args[@]}" airflow-scheduler \
+docker compose run --rm --no-deps "${exec_env_args[@]}" airflow-scheduler \
+  airflow dags list-import-errors
+
+docker compose run --rm --no-deps "${exec_env_args[@]}" airflow-scheduler \
   airflow dags test \
   --subdir "${dag_subdir}" \
   "${dag_id}" \

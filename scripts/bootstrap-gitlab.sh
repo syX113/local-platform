@@ -341,7 +341,7 @@ ensure_project_branch_webhook "${EDP_PROJECT_ID}" "${branch_hook_url}"
 
 docker compose up -d gitlab-fargate-runner
 
-publish_args=()
+declare -a publish_args=()
 if [ "${SDP_PROJECT_STATUS:-existing}" = "created" ]; then
   publish_args+=(--init-sdp-history)
 fi
@@ -349,7 +349,11 @@ if [ "${EDP_PROJECT_STATUS:-existing}" = "created" ]; then
   publish_args+=(--init-edp-history)
 fi
 
-./scripts/publish-platform-repos.sh "${publish_args[@]}"
+if [ "${#publish_args[@]}" -gt 0 ]; then
+  ./scripts/publish-platform-repos.sh "${publish_args[@]}"
+else
+  ./scripts/publish-platform-repos.sh
+fi
 
 echo "gitlab bootstrap complete"
 echo "SDP project id: ${SDP_PROJECT_ID}"

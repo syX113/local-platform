@@ -82,6 +82,8 @@ ensure_git_repo() {
   local repo_dir="${1:?repo dir is required}"
   local publish_name publish_email
 
+  mkdir -p "${repo_dir}"
+
   if [ ! -d "${repo_dir}/.git" ]; then
     git -C "${repo_dir}" init -b main >/dev/null
   fi

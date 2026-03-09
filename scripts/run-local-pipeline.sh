@@ -10,7 +10,7 @@ ensure_platform_env
 sdp_container_dbt_project_dir="$(resolve_container_dbt_project_dir proj_sdp_orders)"
 edp_container_dbt_project_dir="$(resolve_container_dbt_project_dir proj_edp_orders)"
 
-docker compose up -d airflow-metadata-db source-postgres-db lakehouse-object-store
+docker compose up -d --no-build airflow-metadata-db source-postgres-db lakehouse-object-store
 docker compose run --rm --no-deps lakehouse-bucket-init
 ./scripts/load-source-sample-data.sh
 docker compose run --rm --no-deps dlt-extractor python /opt/platform/dlt/pipeline.py

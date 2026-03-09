@@ -20,6 +20,7 @@ if [ "${1:-}" = "--destroy" ]; then
 fi
 
 dotenv_path="${1:-${ROOT_DIR}/artifacts/context/ci.env}"
+log_prefix="${dotenv_path%.env}"
 
 if [ -f "${dotenv_path}" ]; then
   set -a
@@ -120,5 +121,9 @@ if [ -n "${SNOWFLAKE_ACCOUNT:-}" ] && [ -n "${SNOWFLAKE_USER:-}" ] && [ -n "${SN
     dbt-executor \
     python /opt/platform/dbt/scripts/manage_ci_clones.py drop
 fi
+
+rm -f \
+  "${log_prefix}.snowflake_base_bootstrap.log" \
+  "${log_prefix}.snowflake_clone_create.log"
 
 printf 'cleaned ci sandbox %s\n' "${CI_SANDBOX_SLUG:-<unset>}"

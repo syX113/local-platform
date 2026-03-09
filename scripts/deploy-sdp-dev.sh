@@ -37,7 +37,7 @@ export DBT_RUNNER_IMAGE="${shared_runtime_prefix}/dbt-executor:dev"
 
 # Recreate the shared Airflow services from the base compose file so CI overrides
 # never strip the host port binding from the operator-facing web UI.
-COMPOSE_FILE=compose.yaml docker compose up -d --no-deps airflow-webserver airflow-scheduler >/dev/null
+COMPOSE_FILE=compose.yaml docker compose up -d --no-build --no-deps airflow-webserver airflow-scheduler >/dev/null
 
 bash "${SCRIPT_DIR}/verify-ingestion-promotion.sh" "${1:-2026-03-07}" \
   | tee "${ARTIFACT_DIR}/verify_ingestion_dev.log"

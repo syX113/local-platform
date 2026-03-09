@@ -14,8 +14,13 @@ ensure_platform_env
 
 project_kind="${1:?project kind is required (sdp|edp)}"
 dotenv_path="${2:-${ROOT_DIR}/artifacts/context/ci.env}"
+tmp_dotenv_path="${dotenv_path}.tmp.$$"
+log_prefix="${dotenv_path%.env}"
+base_bootstrap_log="${log_prefix}.snowflake_base_bootstrap.log"
+clone_create_log="${log_prefix}.snowflake_clone_create.log"
 
 mkdir -p "$(dirname "${dotenv_path}")"
+trap 'rm -f "${tmp_dotenv_path}"' EXIT
 
 project_token="$(sanitize_branch_token "${CI_PROJECT_PATH_SLUG:-${project_kind}}")"
 project_token="$(trim_identifier "${project_token}" 18)"
@@ -60,7 +65,7 @@ base_edp_database="${SNOWFLAKE_EDP_DATABASE}"
 branch_sdp_database="$(build_clone_database_name "${base_sdp_database}" "${clone_owner_token}" "${clone_branch_token}" 120)"
 branch_edp_database="$(build_clone_database_name "${base_edp_database}" "${clone_owner_token}" "${clone_branch_token}" 120)"
 
-cat > "${dotenv_path}" <<EOF
+cat > "${tmp_dotenv_path}" <<EOF
 CI_SANDBOX_KIND=${sandbox_kind}
 CI_SANDBOX_PROJECT_KIND=${project_kind}
 CI_SANDBOX_SLUG=${sandbox_slug}
@@ -80,11 +85,11 @@ DLT_PIPELINE_NAME=${project_kind}_${namespace_suffix}
 ICEBERG_NAMESPACE=landing_${namespace_suffix}
 EOF
 
-bash "${SCRIPT_DIR}/ensure-snowflake-foundation.sh" | tee "$(dirname "${dotenv_path}")/snowflake_base_bootstrap.log"
+bash "${SCRIPT_DIR}/ensure-snowflake-foundation.sh" | tee "${base_bootstrap_log}"
 
 set -a
 # shellcheck disable=SC1090
-source "${dotenv_path}"
+source "${tmp_dotenv_path}"
 set +a
 
 docker compose run --rm --no-deps \
@@ -101,6 +106,9 @@ docker compose run --rm --no-deps \
   -e "SNOWFLAKE_EDP_DATABASE=${SNOWFLAKE_EDP_DATABASE}" \
   dbt-executor \
   python /opt/platform/dbt/scripts/manage_ci_clones.py "${CI_SANDBOX_CLONE_ACTION}" \
-  | tee "$(dirname "${dotenv_path}")/snowflake_clone_create.log"
+  | tee "${clone_create_log}"
+
+mv "${tmp_dotenv_path}" "${dotenv_path}"
+trap - EXIT
 
 printf 'prepared ci sandbox %s for %s\n' "${sandbox_slug}" "${project_kind}"
