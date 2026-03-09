@@ -278,6 +278,30 @@ You can watch the provisioner with:
 docker compose logs -f gitlab-branch-provisioner
 ```
 
+## PRD Deployment Model
+
+The platform now supports a real deployment step for the sample products without launching duplicate long-lived services.
+
+- deployment always targets the already running shared local services
+- deployed artifacts are marked with a `PRD_` prefix or a dedicated PRD image prefix
+- the deployment target is stable, so repeated default-branch runs update the same PRD objects instead of creating more ephemeral services
+
+Current PRD targets:
+
+- Airflow DAG: `PRD_local_platform_ingest`
+- dlt pipeline name: `PRD_local_platform_ingest`
+- Iceberg namespace: `prd_landing`
+- MinIO/S3 prefix: `platform/PRD/local_platform_ingest`
+- Snowflake SDP database: `PRD_DB_SDP_ORDERS`
+- Snowflake EDP database: `PRD_DB_EDP_ORDERS`
+- PRD SDP runtime image prefix: `local-platform-prd-sdp`
+- PRD EDP runtime image prefix: `local-platform-prd-edp`
+
+This gives you a clear distinction between:
+
+- branch sandboxes: isolated, temporary, branch-associated
+- PRD deployment: stable shared target for final deployment testing
+
 ## Useful Commands
 
 Reset and rebuild:
@@ -340,6 +364,13 @@ Reset and rebuild only the Snowflake SDP and EDP products:
 pwsh ./scripts/windows/bootstrap-snowflake-products.ps1
 ```
 
+Deploy the sample PRD artifacts into the shared running platform:
+
+```bash
+./scripts/deploy-sdp-prd.sh
+./scripts/deploy-edp-prd.sh
+```
+
 ## Script Reference
 
 The scripts below are the important control-plane entrypoints for this repository. If you are operating the platform manually, start with the `Bootstrap And Reset`, `Daily Use`, and `GitLab Publishing` groups.
@@ -357,7 +388,6 @@ The Unix/macOS commands are the `.sh` entrypoints under `scripts/`. Windows host
   On a fresh bootstrap where the GitLab projects are newly created, each hosted repo is initialized with a single `main` commit named `init-artifacts` so users start from a clean history.
 - `./scripts/bootstrap-snowflake-products.sh`
   Drops lingering Snowflake CI clone databases, recreates the sample SDP and EDP databases from scratch, reloads the raw inbound data, rebuilds both dbt products once, and then runs targeted post-build verification without repeating the same dbt work.
-
 - `./scripts/cleanup-snowflake-ci-clones.sh`
   Drops all Snowflake CI clone databases for the registered data products, for example `DB_SDP_ORDERS_CI_CLO_*` and `DB_EDP_ORDERS_CI_CLO_*`.
 - `./scripts/print-setup-summary.sh`
@@ -393,6 +423,12 @@ The Unix/macOS commands are the `.sh` entrypoints under `scripts/`. Windows host
   Validates the EDP Snowflake/dbt promotion path. Internal `--skip-foundation` and `--skip-dbt` flags exist for bootstrap and CI reuse.
 - `./scripts/verify-dbt-promotion.sh`
   Runs the ingestion, SDP, and EDP validations in sequence as one local verification flow.
+- `./scripts/deploy-airflow-prd-dag.sh`
+  Deploys the PRD Airflow DAG wrapper into the shared Airflow service so the deployed ingestion pipeline is available as `PRD_local_platform_ingest`.
+- `./scripts/deploy-sdp-prd.sh`
+  Retags the shared runtime images to stable PRD refs, deploys the PRD Airflow ingestion DAG, validates the PRD ingestion path, and rebuilds the SDP product in `PRD_DB_SDP_ORDERS`.
+- `./scripts/deploy-edp-prd.sh`
+  Retags the shared dbt runtime image to a stable PRD ref and rebuilds the EDP product in `PRD_DB_EDP_ORDERS`.
 
 ### GitLab Publishing And Project Sync
 
@@ -497,6 +533,7 @@ Each generated project ships its own `.gitlab-ci.yml` with isolated CI/CD verifi
 - validation runs `dbt parse` plus `sqlfluff lint`
 - promotion runs `dbt run` plus `dbt test`
 - default-branch pipelines run an extra CD verification stage against a fresh clone before cleanup
+- after CD verification, default-branch pipelines deploy into the shared PRD targets instead of spinning up a second long-lived platform stack
 - non-default branch pipelines skip the CD verification stage and preserve the branch sandbox after the pipeline
 - branch sandboxes can be destroyed explicitly with the manual cleanup jobs in GitLab and are also destroyed automatically when the branch itself is deleted in GitLab
 
@@ -508,6 +545,11 @@ The SDP project pipeline is intentionally split into two promotion steps so cold
 The EDP project pipeline keeps a single promotion step because it only owns dbt:
 
 - `promote_edp`: validates and rebuilds the EDP dbt models in Snowflake against the isolated clone
+
+Default-branch pipelines now also include real deployment jobs:
+
+- `deploy_sdp_prd`: deploys the PRD Airflow DAG plus the PRD SDP Snowflake artifacts
+- `deploy_edp_prd`: deploys the PRD EDP Snowflake artifacts
 
 Those generated CI pipelines assume the base local platform has already been started with `./scripts/bootstrap.sh` and `./scripts/bootstrap-gitlab.sh`. They reuse the shared local runtime images and services instead of rebuilding or destroying the full platform stack inside the runner.
 

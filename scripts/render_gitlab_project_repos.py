@@ -91,7 +91,7 @@ def sdp_ci_yaml() -> str:
               docker() {
                 if [ "${1:-}" = "compose" ] && [ "${2:-}" = "run" ]; then
                   shift 2
-                  command docker compose run "$@" 2> >(awk 'index($0, "No services to build") == 0 { print > "/dev/stderr" }')
+                  command docker compose run "$@" 2> >(awk 'index($0, "No services to build") == 0 && index($0, "Found orphan containers") == 0 { print > "/dev/stderr" }')
                 else
                   command docker "$@"
                 fi
@@ -115,6 +115,7 @@ def sdp_ci_yaml() -> str:
           - promote_ingestion
           - promote_sdp
           - cd_verify
+          - deploy
           - cleanup
 
         build_sdp_runtimes:
@@ -215,6 +216,25 @@ def sdp_ci_yaml() -> str:
             paths:
               - artifacts/sdp-cd/
 
+        deploy_sdp_prd:
+          stage: deploy
+          needs:
+            - job: build_sdp_runtimes
+              artifacts: true
+            - job: verify_sdp_cd_clone
+              artifacts: true
+          rules:
+            - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
+            - when: never
+          script:
+            - set -a; . artifacts/context/runtime.env; set +a
+            - ./ci/scripts/deploy-sdp-prd.sh
+          artifacts:
+            when: always
+            expire_in: 7 days
+            paths:
+              - artifacts/deploy-sdp-prd/
+
         cleanup_sdp_sandbox:
           stage: cleanup
           when: always
@@ -271,7 +291,7 @@ def edp_ci_yaml() -> str:
               docker() {
                 if [ "${1:-}" = "compose" ] && [ "${2:-}" = "run" ]; then
                   shift 2
-                  command docker compose run "$@" 2> >(awk 'index($0, "No services to build") == 0 { print > "/dev/stderr" }')
+                  command docker compose run "$@" 2> >(awk 'index($0, "No services to build") == 0 && index($0, "Found orphan containers") == 0 { print > "/dev/stderr" }')
                 else
                   command docker "$@"
                 fi
@@ -294,6 +314,7 @@ def edp_ci_yaml() -> str:
           - validate
           - promote
           - cd_verify
+          - deploy
           - cleanup
 
         build_edp_runtime:
@@ -372,6 +393,25 @@ def edp_ci_yaml() -> str:
             expire_in: 7 days
             paths:
               - artifacts/edp-cd/
+
+        deploy_edp_prd:
+          stage: deploy
+          needs:
+            - job: build_edp_runtime
+              artifacts: true
+            - job: verify_edp_cd_clone
+              artifacts: true
+          rules:
+            - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
+            - when: never
+          script:
+            - set -a; . artifacts/context/runtime.env; set +a
+            - ./ci/scripts/deploy-edp-prd.sh
+          artifacts:
+            when: always
+            expire_in: 7 days
+            paths:
+              - artifacts/deploy-edp-prd/
 
         cleanup_edp_sandbox:
           stage: cleanup
@@ -772,6 +812,8 @@ def render_sdp_repo(project_path: str) -> None:
         "scripts/cleanup-ci-sandbox.sh",
         "scripts/load-source-sample-data.sh",
         "scripts/test-airflow-dag.sh",
+        "scripts/deploy-airflow-prd-dag.sh",
+        "scripts/deploy-sdp-prd.sh",
         "scripts/verify-ingestion-promotion.sh",
         "scripts/verify-sdp-promotion.sh",
         "scripts/verify-sdp-cd-clone.sh",
@@ -821,6 +863,7 @@ def render_sdp_repo(project_path: str) -> None:
                 - `./ci/scripts/verify-ingestion-promotion.sh`
                 - `./ci/scripts/verify-sdp-promotion.sh`
                 - `./ci/scripts/verify-sdp-cd-clone.sh`
+                - `./ci/scripts/deploy-sdp-prd.sh`
 
                 CI behaviour:
 
@@ -833,6 +876,7 @@ def render_sdp_repo(project_path: str) -> None:
                 - Merge request pipelines create a fresh disposable clone and isolated MinIO/Iceberg namespace, validate the change there, and destroy that merge sandbox automatically afterward.
                 - Validation runs `dbt parse` and `sqlfluff lint` before promotion, and promotion runs `dbt run` plus `dbt test`.
                 - Default-branch pipelines create a fresh merge clone, run an additional CD verification stage on a second fresh clone, and then clean both up automatically.
+                - After the default-branch CD verification succeeds, the pipeline deploys the Airflow DAG, dlt runtime image, SDP dbt runtime image, and Snowflake artifacts into the shared local services using `PRD_`-marked targets such as `PRD_local_platform_ingest` and `PRD_DB_SDP_ORDERS`.
                 - Branch environments are preserved after the pipeline, can be destroyed explicitly with the manual `destroy_sdp_branch_sandbox` job, and are also destroyed automatically when the GitLab branch is deleted.
                 """
             ),
@@ -852,6 +896,7 @@ def render_edp_repo(project_path: str) -> None:
         "scripts/ensure-snowflake-foundation.sh",
         "scripts/prepare-ci-sandbox.sh",
         "scripts/cleanup-ci-sandbox.sh",
+        "scripts/deploy-edp-prd.sh",
         "scripts/verify-edp-promotion.sh",
         "scripts/verify-edp-cd-clone.sh",
     ):
@@ -902,6 +947,7 @@ def render_edp_repo(project_path: str) -> None:
                 - `./ci/scripts/prepare-ci-sandbox.sh edp artifacts/context/edp.env`
                 - `./ci/scripts/verify-edp-promotion.sh`
                 - `./ci/scripts/verify-edp-cd-clone.sh`
+                - `./ci/scripts/deploy-edp-prd.sh`
 
                 CI behaviour:
 
@@ -913,6 +959,7 @@ def render_edp_repo(project_path: str) -> None:
                 - Merge request pipelines create a fresh disposable clone, validate the change there, and destroy that merge sandbox automatically afterward.
                 - Validation runs `dbt parse` and `sqlfluff lint`, and promotion runs `dbt run` plus `dbt test`.
                 - Default-branch pipelines create a fresh merge clone, run an additional CD verification stage on a second fresh clone, and then clean both up automatically.
+                - After the default-branch CD verification succeeds, the pipeline deploys the EDP dbt runtime image and Snowflake artifacts into the shared local services using `PRD_`-marked targets such as `PRD_DB_EDP_ORDERS`.
                 - Branch environments are preserved after the pipeline, can be destroyed explicitly with the manual `destroy_edp_branch_sandbox` job, and are also destroyed automatically when the GitLab branch is deleted.
                 """
             ),

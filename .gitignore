@@ -17,3 +17,4 @@ dbt/profiles/.user.yml
 dbt/projects/**/target/
 dbt/projects/**/logs/
 dlt/.dlt/
+airflow/dags/deployed/

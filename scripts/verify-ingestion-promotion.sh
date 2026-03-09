@@ -17,6 +17,10 @@ rm -rf "${ARTIFACT_DIR}"
 mkdir -p "${ARTIFACT_DIR}"
 
 iceberg_namespace="${ICEBERG_NAMESPACE:-landing}"
+catalog_namespace="$(printf '%s' "${iceberg_namespace}" | tr '[:upper:]' '[:lower:]')"
+execution_date="${1:-2026-03-07}"
+dag_id="${2:-local_platform_ingest}"
+dag_subdir="${3:-/opt/airflow/dags/local_platform_pipeline.py}"
 
 # The ingestion promotion validates the PostgreSQL -> Airflow/dlt -> MinIO/Iceberg path only.
 export SNOWFLAKE_ACCOUNT=""
@@ -28,7 +32,7 @@ export OPEN_CATALOG_CLIENT_ID=""
 export OPEN_CATALOG_CLIENT_SECRET=""
 export SNOWFLAKE_LOCAL_RAW_SYNC="false"
 
-"${SCRIPT_DIR}/test-airflow-dag.sh" "${1:-2026-03-07}" | tee "${ARTIFACT_DIR}/airflow_dag.log"
+"${SCRIPT_DIR}/test-airflow-dag.sh" "${execution_date}" "${dag_id}" "${dag_subdir}" | tee "${ARTIFACT_DIR}/airflow_dag.log"
 
 source_counts="$(
   docker compose exec -T source-postgres-db \
@@ -56,7 +60,7 @@ catalog_rows="$(
     psql -U "${AIRFLOW_METADATA_DB_USER}" -d iceberg_catalog -At -F ',' -c "
       select table_namespace, table_name, metadata_location
       from iceberg_tables
-      where table_namespace = '${iceberg_namespace}'
+      where table_namespace = '${catalog_namespace}'
       order by table_name;
     "
 )"
@@ -64,8 +68,8 @@ printf '%s\n' "${catalog_rows}" | tee "${ARTIFACT_DIR}/iceberg_catalog.csv"
 
 catalog_count="$(printf '%s\n' "${catalog_rows}" | sed '/^$/d' | wc -l | tr -d ' ')"
 [ "${catalog_count}" = "2" ] || { echo "expected 2 Iceberg catalog entries, got ${catalog_count}" >&2; exit 1; }
-printf '%s\n' "${catalog_rows}" | grep -q "^${iceberg_namespace},raw_order_items," || { echo "missing ${iceberg_namespace}.raw_order_items catalog entry" >&2; exit 1; }
-printf '%s\n' "${catalog_rows}" | grep -q "^${iceberg_namespace},raw_orders," || { echo "missing ${iceberg_namespace}.raw_orders catalog entry" >&2; exit 1; }
+printf '%s\n' "${catalog_rows}" | grep -q "^${catalog_namespace},raw_order_items," || { echo "missing ${catalog_namespace}.raw_order_items catalog entry" >&2; exit 1; }
+printf '%s\n' "${catalog_rows}" | grep -q "^${catalog_namespace},raw_orders," || { echo "missing ${catalog_namespace}.raw_orders catalog entry" >&2; exit 1; }
 
 docker compose run --rm --no-deps dlt-extractor python - <<'PY' | tee "${ARTIFACT_DIR}/minio_iceberg_summary.txt"
 from io import BytesIO
@@ -146,6 +150,7 @@ source.order_items=${order_item_count}
 source.raw_orders_export=${raw_orders_count}
 source.raw_order_items_export=${raw_order_items_count}
 iceberg.catalog_entries=${catalog_count}
-iceberg.namespace=${iceberg_namespace}
+iceberg.namespace=${catalog_namespace}
 object_store.bucket=${OBJECT_STORE_BUCKET}
+airflow.dag_id=${dag_id}
 EOF
