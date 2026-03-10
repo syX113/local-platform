@@ -25,6 +25,14 @@ foreach ($key in $requiredVars) {
 
 $sdpProjectDir = Resolve-ContainerDbtProjectDir -ProjectSlug "proj_sdp_orders" -RootDir $rootDir
 $edpProjectDir = Resolve-ContainerDbtProjectDir -ProjectSlug "proj_edp_orders" -RootDir $rootDir
+$sdpDbtProject = Get-EnvValue -Name "DEV_SNOWFLAKE_SDP_DBT_PROJECT"
+if ([string]::IsNullOrEmpty($sdpDbtProject)) {
+    $sdpDbtProject = "DEV_DBT_PROJECT_SDP_ORDERS"
+}
+$edpDbtProject = Get-EnvValue -Name "DEV_SNOWFLAKE_EDP_DBT_PROJECT"
+if ([string]::IsNullOrEmpty($edpDbtProject)) {
+    $edpDbtProject = "DEV_DBT_PROJECT_EDP_ORDERS"
+}
 
 Write-Host "reloading deterministic source sample data"
 & (Join-Path $PSScriptRoot "load-source-sample-data.ps1")
@@ -32,7 +40,7 @@ Write-Host "reloading deterministic source sample data"
 Write-Host "dropping lingering Snowflake CI clone databases"
 & (Join-Path $PSScriptRoot "cleanup-snowflake-ci-clones.ps1")
 
-Write-Host "dropping Snowflake SDP and EDP databases for a clean rebuild"
+Write-Host "dropping Snowflake control, SDP and EDP databases for a clean rebuild"
 $dropScript = @'
 import os
 import snowflake.connector
@@ -53,6 +61,7 @@ try:
     with connection.cursor() as cursor:
         cursor.execute(f'use role {ident(os.environ["SNOWFLAKE_ROLE"])}')
         cursor.execute(f'use warehouse {ident(os.environ["SNOWFLAKE_WAREHOUSE"])}')
+        cursor.execute(f'drop database if exists {ident(os.environ["SNOWFLAKE_CONTROL_DATABASE"])}')
         cursor.execute(f'drop database if exists {ident(os.environ["SNOWFLAKE_EDP_DATABASE"])}')
         cursor.execute(f'drop database if exists {ident(os.environ["SNOWFLAKE_SDP_DATABASE"])}')
 finally:
@@ -60,6 +69,7 @@ finally:
 
 print(
     {
+        "dropped_control_database": os.environ["SNOWFLAKE_CONTROL_DATABASE"],
         "dropped_sdp_database": os.environ["SNOWFLAKE_SDP_DATABASE"],
         "dropped_edp_database": os.environ["SNOWFLAKE_EDP_DATABASE"],
     }
@@ -71,14 +81,21 @@ Invoke-DockerComposeWithStdin -InputText $dropScript -Arguments @("run", "--rm",
 Write-Host "recreating Snowflake foundation"
 & (Join-Path $PSScriptRoot "ensure-snowflake-foundation.ps1")
 
+Write-Host "refreshing DEV Iceberg artifacts"
+Invoke-DockerCompose -Arguments @("run", "--rm", "--no-deps", "dlt-extractor", "python", "/opt/platform/dlt/pipeline.py")
+
 Write-Host "syncing inbound Snowflake raw tables"
 Invoke-DockerCompose -Arguments @("run", "--rm", "--no-deps", "dlt-extractor", "python", "/opt/platform/dlt/snowflake_raw_sync.py")
 
-Write-Host "building SDP data product"
-Invoke-DockerCompose -Arguments @("run", "--rm", "--no-deps", "dbt-executor", "dbt", "build", "--project-dir", $sdpProjectDir, "--profiles-dir", "/opt/platform/dbt/profiles")
+Write-Host "deploying DEV Snowflake dbt projects"
+Invoke-DockerCompose -Arguments @("run", "--rm", "--no-deps", "dbt-executor", "python", "/opt/platform/dbt/scripts/snow_dbt_cli.py", "deploy", "--project-dir", $sdpProjectDir, "--project-name", $sdpDbtProject, "--database", (Get-EnvValue -Name "SNOWFLAKE_SDP_DATABASE"), "--schema", (Get-EnvValue -Name "SNOWFLAKE_SDP_CORE_SCHEMA"), "--target-name", "dev")
+Invoke-DockerCompose -Arguments @("run", "--rm", "--no-deps", "dbt-executor", "python", "/opt/platform/dbt/scripts/snow_dbt_cli.py", "deploy", "--project-dir", $edpProjectDir, "--project-name", $edpDbtProject, "--database", (Get-EnvValue -Name "SNOWFLAKE_EDP_DATABASE"), "--schema", (Get-EnvValue -Name "SNOWFLAKE_EDP_CORE_SCHEMA"), "--target-name", "dev")
 
-Write-Host "building EDP data product"
-Invoke-DockerCompose -Arguments @("run", "--rm", "--no-deps", "dbt-executor", "dbt", "build", "--project-dir", $edpProjectDir, "--profiles-dir", "/opt/platform/dbt/profiles")
+Write-Host "building SDP data product in Snowflake"
+Invoke-DockerCompose -Arguments @("run", "--rm", "--no-deps", "dbt-executor", "python", "/opt/platform/dbt/scripts/snow_dbt_cli.py", "execute", "--project-name", $sdpDbtProject, "build")
+
+Write-Host "building EDP data product in Snowflake"
+Invoke-DockerCompose -Arguments @("run", "--rm", "--no-deps", "dbt-executor", "python", "/opt/platform/dbt/scripts/snow_dbt_cli.py", "execute", "--project-name", $edpDbtProject, "build")
 
 Write-Host "validating zero-copy clone semantics"
 Invoke-DockerCompose -Arguments @("run", "--rm", "--no-deps", "dbt-executor", "python", "/opt/platform/dbt/scripts/zero_copy_clone_check.py")

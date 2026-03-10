@@ -6,9 +6,7 @@ cd "${ROOT_DIR}"
 
 source "${ROOT_DIR}/scripts/common.sh"
 ensure_platform_env
-
-sdp_container_dbt_project_dir="$(resolve_container_dbt_project_dir proj_sdp_orders)"
-edp_container_dbt_project_dir="$(resolve_container_dbt_project_dir proj_edp_orders)"
+export_dev_runtime_env
 
 docker compose up -d --no-build airflow-metadata-db source-postgres-db lakehouse-object-store
 docker compose run --rm --no-deps lakehouse-bucket-init
@@ -18,10 +16,20 @@ docker compose run --rm --no-deps dlt-extractor python /opt/platform/dlt/pipelin
 if [ -n "${SNOWFLAKE_ACCOUNT:-}" ] && [ -n "${SNOWFLAKE_USER:-}" ] && [ -n "${SNOWFLAKE_PASSWORD:-}" ]; then
   bash ./scripts/ensure-snowflake-foundation.sh
   docker compose run --rm --no-deps dlt-extractor python /opt/platform/dlt/snowflake_raw_sync.py
-  docker compose run --rm --no-deps dbt-executor \
-    dbt build --project-dir "${sdp_container_dbt_project_dir}" --profiles-dir /opt/platform/dbt/profiles
-  docker compose run --rm --no-deps dbt-executor \
-    dbt build --project-dir "${edp_container_dbt_project_dir}" --profiles-dir /opt/platform/dbt/profiles
+  bash ./scripts/deploy-snowflake-dbt-project.sh \
+    proj_sdp_orders \
+    "${SNOWFLAKE_SDP_DBT_PROJECT}" \
+    "${SNOWFLAKE_SDP_DATABASE}" \
+    "${SNOWFLAKE_SDP_CORE_SCHEMA}" \
+    dev
+  bash ./scripts/deploy-snowflake-dbt-project.sh \
+    proj_edp_orders \
+    "${SNOWFLAKE_EDP_DBT_PROJECT}" \
+    "${SNOWFLAKE_EDP_DATABASE}" \
+    "${SNOWFLAKE_EDP_CORE_SCHEMA}" \
+    dev
+  bash ./scripts/execute-snowflake-dbt-project.sh "${SNOWFLAKE_SDP_DBT_PROJECT}" build
+  bash ./scripts/execute-snowflake-dbt-project.sh "${SNOWFLAKE_EDP_DBT_PROJECT}" build
 else
   echo "Skipping dbt build because Snowflake credentials are not set in .env"
 fi

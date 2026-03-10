@@ -40,10 +40,17 @@ export SNOWFLAKE_CLONE_OWNER_TOKEN="${clone_owner_token}"
 export SNOWFLAKE_CLONE_BRANCH_TOKEN="${clone_branch_token}"
 export SNOWFLAKE_SDP_DATABASE="$(build_clone_database_name "${source_sdp_database}" "${clone_owner_token}" "${clone_branch_token}" 120)"
 export SNOWFLAKE_EDP_DATABASE="$(build_clone_database_name "${source_edp_database}" "${clone_owner_token}" "${clone_branch_token}" 120)"
+export SNOWFLAKE_SDP_DBT_PROJECT="DBT_PROJECT_SDP_ORDERS_$(printf '%s' "${prd_namespace}" | tr '[:lower:]' '[:upper:]')"
+export SNOWFLAKE_EDP_DBT_PROJECT="DBT_PROJECT_EDP_ORDERS_$(printf '%s' "${prd_namespace}" | tr '[:lower:]' '[:upper:]')"
 export MINIO_PREFIX="platform/prd-ci/${CI_PROJECT_PATH_SLUG:-proj_sdp_orders}/${prd_slug}"
 export OBJECT_STORE_BUCKET="s3://${MINIO_BUCKET}/${MINIO_PREFIX}"
 export DLT_PIPELINE_NAME="sdp_prd_${prd_namespace}"
 export ICEBERG_NAMESPACE="prd_${prd_namespace}"
+export SNOW_DBT_TARGET_NAME="prd"
+
+candidate_dag_id="PRD_${DLT_PIPELINE_NAME}"
+export AIRFLOW_SANDBOX_DAG_ID="${candidate_dag_id}"
+bash "${SCRIPT_DIR}/deploy-airflow-dag.sh" current "${candidate_dag_id}" "current-sdp-prd" | tee "${ARTIFACT_DIR}/airflow_candidate.log"
 
 cleanup() {
   "${SCRIPT_DIR}/cleanup-ci-sandbox.sh" || true
@@ -70,7 +77,11 @@ docker compose run --rm --no-deps \
   dbt-executor \
   python /opt/platform/dbt/scripts/manage_ci_clones.py replace | tee "${ARTIFACT_DIR}/prd_clone_create.log"
 
-bash "${SCRIPT_DIR}/verify-ingestion-promotion.sh" | tee "${ARTIFACT_DIR}/ingestion.log"
+bash "${SCRIPT_DIR}/verify-ingestion-promotion.sh" \
+  "2026-03-07" \
+  "${candidate_dag_id}" \
+  "/opt/airflow/dags/deployed/$(sanitize_branch_token "${candidate_dag_id}").py" \
+  | tee "${ARTIFACT_DIR}/ingestion.log"
 bash "${SCRIPT_DIR}/verify-sdp-promotion.sh" | tee "${ARTIFACT_DIR}/sdp.log"
 
 printf 'sdp_prd_clone=passed\n' | tee "${ARTIFACT_DIR}/summary.txt"

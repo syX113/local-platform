@@ -38,3 +38,15 @@ docker compose run --rm --no-deps \
   -e "SNOWFLAKE_WAREHOUSE=${SNOWFLAKE_WAREHOUSE}" \
   dbt-executor \
   python /opt/platform/dbt/scripts/manage_ci_clones.py purge-ci
+
+docker compose run --rm --no-deps \
+  -e "SNOWFLAKE_ACCOUNT=${SNOWFLAKE_ACCOUNT}" \
+  -e "SNOWFLAKE_USER=${SNOWFLAKE_USER}" \
+  -e "SNOWFLAKE_PASSWORD=${SNOWFLAKE_PASSWORD}" \
+  -e "SNOWFLAKE_ROLE=${SNOWFLAKE_ROLE}" \
+  -e "SNOWFLAKE_WAREHOUSE=${SNOWFLAKE_WAREHOUSE}" \
+  -e "SNOWFLAKE_CONTROL_DATABASE=${SNOWFLAKE_CONTROL_DATABASE}" \
+  -e "SNOWFLAKE_CONTROL_SCHEMA=${SNOWFLAKE_CONTROL_SCHEMA}" \
+  -e "SNOWFLAKE_DBT_STAGE=${SNOWFLAKE_DBT_STAGE}" \
+  dbt-executor \
+  python /opt/platform/dbt/scripts/snow_dbt_cli.py purge

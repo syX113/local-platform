@@ -341,6 +341,9 @@ ensure_project_branch_webhook "${EDP_PROJECT_ID}" "${branch_hook_url}"
 
 docker compose up -d gitlab-fargate-runner
 
+echo "syncing GitLab CI variables before initial publish"
+./scripts/sync-gitlab-ci-variables.sh
+
 declare -a publish_args=()
 if [ "${SDP_PROJECT_STATUS:-existing}" = "created" ]; then
   publish_args+=(--init-sdp-history)
@@ -350,9 +353,9 @@ if [ "${EDP_PROJECT_STATUS:-existing}" = "created" ]; then
 fi
 
 if [ "${#publish_args[@]}" -gt 0 ]; then
-  ./scripts/publish-platform-repos.sh "${publish_args[@]}"
+  ./scripts/publish-platform-repos.sh --skip-variable-sync "${publish_args[@]}"
 else
-  ./scripts/publish-platform-repos.sh
+  ./scripts/publish-platform-repos.sh --skip-variable-sync
 fi
 
 echo "gitlab bootstrap complete"

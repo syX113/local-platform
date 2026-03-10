@@ -1,12 +1,12 @@
 # Local Platform
 
-This repository provides a local integration platform for fast CI testing across `GitLab`, `GitLab Runner`, `Airflow`, `dlt`, `dbt`, `PostgreSQL`, `MinIO`, and `Snowflake`.
+This repository provides a local integration platform for fast CI/CD testing across `GitLab`, `GitLab Runner`, `Airflow`, `dlt`, `dbt`, `PostgreSQL`, `MinIO`, and `Snowflake`.
 
 The default sample flow is:
 
 `PostgreSQL -> Airflow -> dlt -> MinIO/Iceberg -> Snowflake -> dbt`
 
-`dbt` and `dlt` always run in external containers. Locally those containers stand in for the real Fargate or EKS runtimes.
+`dlt` always runs in an external runtime container. `dbt` is deployed as a Snowflake dbt project object and executed natively inside Snowflake. The local `dbt-executor` container exists only to package and trigger Snowflake-native `dbt parse`, `dbt run`, `dbt test`, and `dbt build` through Snowflake CLI.
 
 The platform repo is the control plane. During GitLab bootstrap it renders and pushes two separate GitLab project repos:
 
@@ -19,7 +19,7 @@ The platform repo is the control plane. During GitLab bootstrap it renders and p
 - `gitlab-fargate-runner`: local Docker executor runner that approximates ephemeral Fargate-style jobs
 - `airflow-webserver` and `airflow-scheduler`: orchestration layer
 - `dlt-extractor`: ingestion runtime container
-- `dbt-executor`: dbt runtime container
+- `dbt-executor`: Snowflake CLI trigger runtime for Snowflake-native dbt project deploy/execute operations
 - `source-postgres-db`: operational source database with deterministic sample data
 - `lakehouse-object-store`: MinIO as local S3-compatible storage
 - `airflow-metadata-db`: Airflow metadata plus local Iceberg SQL catalog
@@ -278,13 +278,25 @@ You can watch the provisioner with:
 docker compose logs -f gitlab-branch-provisioner
 ```
 
-## PRD Deployment Model
+## DEV And PRD Deployment Model
 
 The platform now supports a real deployment step for the sample products without launching duplicate long-lived services.
 
 - deployment always targets the already running shared local services
-- deployed artifacts are marked with a `PRD_` prefix or a dedicated PRD image prefix
-- the deployment target is stable, so repeated default-branch runs update the same PRD objects instead of creating more ephemeral services
+- deployed artifacts are marked with explicit `DEV_` and `PRD_` targets or dedicated runtime image prefixes
+- the deployment target is stable, so repeated default-branch runs update the same DEV or PRD objects instead of creating more ephemeral services
+
+Current DEV targets:
+
+- Airflow DAG: `DEV_local_platform_ingest`
+- dlt pipeline name: `DEV_local_platform_ingest`
+- Iceberg namespace: `dev_landing`
+- MinIO/S3 prefix: `platform/dev/local_platform_ingest`
+- Snowflake SDP database: `DB_SDP_ORDERS`
+- Snowflake EDP database: `DB_EDP_ORDERS`
+- Snowflake dbt project objects: `DEV_DBT_PROJECT_SDP_ORDERS`, `DEV_DBT_PROJECT_EDP_ORDERS`
+- DEV SDP runtime image prefix: `local-platform-dev-sdp`
+- DEV EDP runtime image prefix: `local-platform-dev-edp`
 
 Current PRD targets:
 
@@ -294,13 +306,15 @@ Current PRD targets:
 - MinIO/S3 prefix: `platform/PRD/local_platform_ingest`
 - Snowflake SDP database: `PRD_DB_SDP_ORDERS`
 - Snowflake EDP database: `PRD_DB_EDP_ORDERS`
+- Snowflake dbt project objects: `PRD_DBT_PROJECT_SDP_ORDERS`, `PRD_DBT_PROJECT_EDP_ORDERS`
 - PRD SDP runtime image prefix: `local-platform-prd-sdp`
 - PRD EDP runtime image prefix: `local-platform-prd-edp`
 
 This gives you a clear distinction between:
 
 - branch sandboxes: isolated, temporary, branch-associated
-- PRD deployment: stable shared target for final deployment testing
+- DEV deployment: stable shared development target
+- PRD deployment: stable shared production-style target for final deployment testing
 
 ## Useful Commands
 
@@ -391,7 +405,7 @@ The Unix/macOS commands are the `.sh` entrypoints under `scripts/`. Windows host
 - `./scripts/bootstrap-snowflake-products.sh`
   Drops lingering Snowflake CI clone databases, recreates the sample SDP and EDP databases from scratch, reloads the raw inbound data, rebuilds both dbt products once, and then runs targeted post-build verification without repeating the same dbt work.
 - `./scripts/cleanup-snowflake-ci-clones.sh`
-  Drops all Snowflake CI clone databases for the registered data products, for example `DB_SDP_ORDERS_CI_CLO_*` and `DB_EDP_ORDERS_CI_CLO_*`.
+  Drops all Snowflake CI clone databases for the registered data products, for example `DB_SDP_ORDERS_CI_CLO_*` and `DB_EDP_ORDERS_CI_CLO_*`, and purges Snowflake dbt project objects from the control schema.
 - `./scripts/print-setup-summary.sh`
   Prints the current URLs, credentials, paths, project ids, tokens, and important runtime locations.
 - `pwsh ./scripts/windows/reset-platform.ps1`
@@ -410,7 +424,7 @@ The Unix/macOS commands are the `.sh` entrypoints under `scripts/`. Windows host
 - `./scripts/load-source-sample-data.sh`
   Reseeds the deterministic PostgreSQL sample data.
 - `./scripts/run-local-pipeline.sh`
-  Runs the default local sample flow end to end against the running platform.
+  Runs the default local sample flow end to end against the running platform using the explicit DEV Airflow DAG, DEV dlt settings, and Snowflake-native dbt project execution.
 - `pwsh ./scripts/windows/load-source-sample-data.ps1`
   Windows host equivalent of the PostgreSQL sample-data reload.
 - `pwsh ./scripts/windows/run-local-pipeline.ps1`
@@ -420,21 +434,27 @@ The Unix/macOS commands are the `.sh` entrypoints under `scripts/`. Windows host
 - `./scripts/verify-ingestion-promotion.sh`
   Validates the source ingestion path only: PostgreSQL -> Airflow -> dlt -> MinIO/Iceberg.
 - `./scripts/verify-sdp-promotion.sh`
-  Validates the SDP Snowflake/dbt promotion path. Internal `--skip-foundation`, `--skip-raw-sync`, and `--skip-dbt` flags exist for bootstrap and CI reuse.
+  Validates the SDP Snowflake/dbt promotion path. It deploys the SDP Snowflake dbt project object and executes `parse`, `run`, and `test` inside Snowflake. Internal `--skip-foundation`, `--skip-raw-sync`, and `--skip-dbt` flags exist for bootstrap and CI reuse.
 - `./scripts/verify-edp-promotion.sh`
-  Validates the EDP Snowflake/dbt promotion path. Internal `--skip-foundation` and `--skip-dbt` flags exist for bootstrap and CI reuse.
-- `./scripts/verify-dbt-promotion.sh`
-  Runs the ingestion, SDP, and EDP validations in sequence as one local verification flow.
+  Validates the EDP Snowflake/dbt promotion path. It deploys the EDP Snowflake dbt project object and executes `parse`, `run`, and `test` inside Snowflake. Internal `--skip-foundation` and `--skip-dbt` flags exist for bootstrap and CI reuse.
+- `./scripts/deploy-airflow-dev-dag.sh`
+  Deploys the DEV Airflow DAG wrapper into the shared Airflow service so the development ingestion pipeline is available as `DEV_local_platform_ingest`.
 - `./scripts/deploy-airflow-prd-dag.sh`
   Deploys the PRD Airflow DAG wrapper into the shared Airflow service so the deployed ingestion pipeline is available as `PRD_local_platform_ingest`.
+- `./scripts/deploy-snowflake-dbt-project.sh`
+  Packages a dbt project, uploads it to the Snowflake control stage, and creates or replaces the target Snowflake dbt project object.
+- `./scripts/execute-snowflake-dbt-project.sh`
+  Triggers `parse`, `run`, `test`, or `build` on a deployed Snowflake dbt project object.
+- `./scripts/drop-snowflake-dbt-project.sh`
+  Drops a Snowflake dbt project object and removes its staged project files from the Snowflake control stage.
 - `./scripts/deploy-sdp-dev.sh`
-  Deploys the owned SDP artifacts into the shared DEV target after the DEV approval step: refreshes the shared Airflow services in place, reuses the shared runtime image tags, validates ingestion again, and rebuilds the SDP product in the shared DEV Snowflake databases.
+  Deploys the owned SDP artifacts into the shared DEV target after the DEV approval step: refreshes the shared Airflow services in place, deploys the `DEV_` Airflow DAG, validates ingestion again, and deploys plus executes the SDP dbt project object natively in Snowflake.
 - `./scripts/deploy-edp-dev.sh`
-  Deploys the owned EDP artifacts into the shared DEV target after the DEV approval step by reusing the shared dbt runtime image tag and rebuilding the EDP product in the shared DEV Snowflake databases.
+  Deploys the owned EDP artifacts into the shared DEV target after the DEV approval step by deploying plus executing the EDP dbt project object natively in Snowflake.
 - `./scripts/deploy-sdp-prd.sh`
-  Retags the shared runtime images to stable PRD refs, deploys the PRD Airflow ingestion DAG, validates the PRD ingestion path, and rebuilds the SDP product in `PRD_DB_SDP_ORDERS`.
+  Retags the shared runtime images to stable PRD refs, deploys the `PRD_` Airflow ingestion DAG, validates the PRD ingestion path, and deploys plus executes the SDP dbt project object in `PRD_DB_SDP_ORDERS`.
 - `./scripts/deploy-edp-prd.sh`
-  Retags the shared dbt runtime image to a stable PRD ref and rebuilds the EDP product in `PRD_DB_EDP_ORDERS`.
+  Retags the shared Snowflake trigger runtime image to a stable PRD ref and deploys plus executes the EDP dbt project object in `PRD_DB_EDP_ORDERS`.
 
 ### GitLab Publishing And Project Sync
 
@@ -511,12 +531,6 @@ Validate the EDP dbt promotion flow:
 ./scripts/verify-edp-promotion.sh
 ```
 
-Run both promotion validations in sequence:
-
-```bash
-./scripts/verify-dbt-promotion.sh
-```
-
 Run the zero-copy clone check:
 
 ```bash
@@ -543,7 +557,7 @@ Each generated project ships its own `.gitlab-ci.yml` with isolated CI/CD verifi
 - branch-creation pushes do not run the heavy validation pipeline; they only create the isolated developer sandbox
 - later non-default branch push pipelines reuse one stable branch-scoped Snowflake zero-copy environment so developers do not touch the shared DEV databases
 - the SDP pipeline also reuses one stable branch-scoped MinIO/S3 prefix, dlt pipeline name, and Iceberg namespace
-- branch CI runs `sqlfluff lint`, `dbt parse`, and the owned runtime validations repeatedly against that preserved sandbox
+- branch CI runs `sqlfluff lint` plus repeated Snowflake-native `dbt parse`, `dbt run`, and `dbt test` validations against that preserved sandbox
 - merge request pipelines validate again against a fresh disposable DEV-style zero-copy clone
 - default-branch pipelines validate again against a fresh disposable DEV-style zero-copy clone, then stop at a manual approval gate that must be played by the commit identity, then deploy into the shared DEV target
 - PRD deployment is a separate manual default-branch pipeline run with `RELEASE_TO_PRD=true`; it validates against a fresh disposable PRD-style zero-copy clone, then stops at another manual approval gate, then deploys into the shared PRD target
@@ -561,10 +575,10 @@ The EDP project pipeline keeps a single CI validation step because it only owns 
 
 Default-branch and PRD pipelines now include real deployment jobs:
 
-- `deploy_sdp_dev`: deploys the shared DEV Airflow DAG, dlt runtime, and SDP Snowflake artifacts after the DEV approval step
-- `deploy_edp_dev`: deploys the shared DEV EDP Snowflake artifacts after the DEV approval step
-- `deploy_sdp_prd`: deploys the PRD Airflow DAG plus the PRD SDP Snowflake artifacts
-- `deploy_edp_prd`: deploys the PRD EDP Snowflake artifacts
+- `deploy_sdp_dev`: deploys the shared DEV Airflow DAG, DEV dlt runtime settings, and the SDP Snowflake dbt project artifacts after the DEV approval step
+- `deploy_edp_dev`: deploys the shared DEV EDP Snowflake dbt project artifacts after the DEV approval step
+- `deploy_sdp_prd`: deploys the PRD Airflow DAG plus the PRD SDP Snowflake dbt project artifacts
+- `deploy_edp_prd`: deploys the PRD EDP Snowflake dbt project artifacts
 
 The expected GitLab operator flow is:
 
@@ -619,7 +633,7 @@ That creates:
 
 - Snowflake cannot read private `localhost` MinIO endpoints.
 - Snowflake Open Catalog requires real cloud object storage, not local MinIO.
-- Because of that, local mode uses the `snowflake_raw_sync.py` bridge to mirror the SDP inbound layer into Snowflake before dbt runs.
+- Because of that, local mode uses the `snowflake_raw_sync.py` bridge to mirror the SDP inbound layer into Snowflake before Snowflake-native dbt runs.
 - The GitLab runner uses Docker executor locally. It is a pragmatic stand-in for Fargate, not a literal reproduction of AWS networking or IAM.
 
 ## Sample Source Data

@@ -8,6 +8,7 @@ services:
   airflow-scheduler:
     volumes: !override
       - airflow-logs:/opt/airflow/logs
+      - ./airflow/dags:/opt/airflow/dags
       - /var/run/docker.sock:/var/run/docker.sock
 
   dlt-extractor:

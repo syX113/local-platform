@@ -392,19 +392,38 @@ def main() -> int:
             done
 
             docker compose up -d airflow-metadata-db source-postgres-db lakehouse-object-store
-            docker compose run --rm lakehouse-bucket-init | tee "${{ARTIFACT_DIR}}/bucket_init.log"
+            docker compose run --rm --no-deps lakehouse-bucket-init | tee "${{ARTIFACT_DIR}}/bucket_init.log"
             ./scripts/load-source-sample-data.sh | tee "${{ARTIFACT_DIR}}/source_seed.log"
             bash ./scripts/ensure-snowflake-foundation.sh | tee "${{ARTIFACT_DIR}}/snowflake_bootstrap.log"
 
             export SNOWFLAKE_SDP_DATABASE="{sdp_database}"
             export SNOWFLAKE_SDP_IN_SCHEMA="INBOUND"
             export SNOWFLAKE_LOCAL_RAW_SYNC="true"
+            export SNOWFLAKE_SDP_DBT_PROJECT="DEV_DBT_PROJECT_SDP_{product_prefix}"
+            export SNOWFLAKE_EDP_DBT_PROJECT="DEV_DBT_PROJECT_EDP_{product_prefix}"
+            export SNOW_DBT_TARGET_NAME="dev"
 
             docker compose run --rm --no-deps dlt-extractor python /opt/platform/dlt/snowflake_raw_sync.py | tee "${{ARTIFACT_DIR}}/snowflake_raw_sync.log"
-            docker compose run --rm --no-deps dbt-executor \\
-              dbt parse --project-dir /opt/platform/dbt --profiles-dir /opt/platform/dbt/profiles | tee "${{ARTIFACT_DIR}}/dbt_parse.log"
-            docker compose run --rm --no-deps dbt-executor \\
-              dbt build --select path:models/products/{slug} --project-dir /opt/platform/dbt --profiles-dir /opt/platform/dbt/profiles | tee "${{ARTIFACT_DIR}}/dbt_build.log"
+            bash ./scripts/deploy-snowflake-dbt-project.sh \\
+              proj_sdp_orders \\
+              "${{SNOWFLAKE_SDP_DBT_PROJECT}}" \\
+              "${{SNOWFLAKE_SDP_DATABASE}}" \\
+              "CORE" \\
+              "${{SNOW_DBT_TARGET_NAME}}" | tee "${{ARTIFACT_DIR}}/dbt_deploy_sdp.log"
+            bash ./scripts/deploy-snowflake-dbt-project.sh \\
+              proj_edp_orders \\
+              "${{SNOWFLAKE_EDP_DBT_PROJECT}}" \\
+              "{edp_database}" \\
+              "CORE" \\
+              "${{SNOW_DBT_TARGET_NAME}}" | tee "${{ARTIFACT_DIR}}/dbt_deploy_edp.log"
+            bash ./scripts/execute-snowflake-dbt-project.sh \\
+              "${{SNOWFLAKE_SDP_DBT_PROJECT}}" parse | tee "${{ARTIFACT_DIR}}/dbt_parse_sdp.log"
+            bash ./scripts/execute-snowflake-dbt-project.sh \\
+              "${{SNOWFLAKE_SDP_DBT_PROJECT}}" build | tee "${{ARTIFACT_DIR}}/dbt_build_sdp.log"
+            bash ./scripts/execute-snowflake-dbt-project.sh \\
+              "${{SNOWFLAKE_EDP_DBT_PROJECT}}" parse | tee "${{ARTIFACT_DIR}}/dbt_parse_edp.log"
+            bash ./scripts/execute-snowflake-dbt-project.sh \\
+              "${{SNOWFLAKE_EDP_DBT_PROJECT}}" build | tee "${{ARTIFACT_DIR}}/dbt_build_edp.log"
 
             docker compose run --rm --no-deps dbt-executor python - <<'PY' | tee "${{ARTIFACT_DIR}}/snowflake_validation.txt"
             import os

@@ -22,6 +22,7 @@ export_prd_runtime_env
 
 export RUNTIME_IMAGE_PREFIX="${PRD_EDP_RUNTIME_IMAGE_PREFIX}"
 export DBT_RUNNER_IMAGE="${PRD_EDP_RUNTIME_IMAGE_PREFIX}/dbt-executor:dev"
+export SNOW_DBT_RUNNER_IMAGE="${DBT_RUNNER_IMAGE}"
 
 docker image inspect "${source_dbt_image}" >/dev/null 2>&1
 docker tag "${source_dbt_image}" "${DBT_RUNNER_IMAGE}"
@@ -32,5 +33,5 @@ cat > "${ARTIFACT_DIR}/summary.txt" <<EOF
 edp_prd_deploy=passed
 snowflake.prd_sdp_database=${SNOWFLAKE_SDP_DATABASE}
 snowflake.prd_edp_database=${SNOWFLAKE_EDP_DATABASE}
-runtime.dbt_image=${DBT_RUNNER_IMAGE}
+runtime.snow_dbt_image=${SNOW_DBT_RUNNER_IMAGE}
 EOF

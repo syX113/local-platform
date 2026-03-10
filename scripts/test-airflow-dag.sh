@@ -13,8 +13,21 @@ source "${SCRIPT_DIR}/common.sh"
 ensure_platform_env
 
 execution_date="${1:-2026-03-07}"
-dag_id="${2:-local_platform_ingest}"
-dag_subdir="${3:-/opt/airflow/dags/local_platform_pipeline.py}"
+if [ -n "${2:-}" ]; then
+  dag_id="${2}"
+elif [ -n "${AIRFLOW_SANDBOX_DAG_ID:-}" ]; then
+  dag_id="${AIRFLOW_SANDBOX_DAG_ID}"
+else
+  dag_id="${DEV_AIRFLOW_DAG_ID:-DEV_local_platform_ingest}"
+fi
+
+if [ -n "${3:-}" ]; then
+  dag_subdir="${3}"
+elif [ -n "${AIRFLOW_SANDBOX_DAG_ID:-}" ]; then
+  dag_subdir="/opt/airflow/dags/deployed/$(sanitize_branch_token "${AIRFLOW_SANDBOX_DAG_ID}").py"
+else
+  dag_subdir="/opt/airflow/dags/deployed/${DEV_AIRFLOW_DAG_FILENAME:-dev_local_platform_ingest.py}"
+fi
 env_keys=(
   PLATFORM_DOCKER_NETWORK
   MINIO_ROOT_USER
@@ -54,20 +67,27 @@ env_keys=(
   SNOWFLAKE_PASSWORD
   SNOWFLAKE_ROLE
   SNOWFLAKE_WAREHOUSE
+  SNOWFLAKE_CONTROL_DATABASE
+  SNOWFLAKE_CONTROL_SCHEMA
+  SNOWFLAKE_DBT_STAGE
   SNOWFLAKE_SDP_DATABASE
   SNOWFLAKE_SDP_IN_SCHEMA
   SNOWFLAKE_SDP_CORE_SCHEMA
   SNOWFLAKE_SDP_ACC_SCHEMA
+  SNOWFLAKE_SDP_DBT_PROJECT
   SNOWFLAKE_EDP_DATABASE
   SNOWFLAKE_EDP_IN_SCHEMA
   SNOWFLAKE_EDP_CORE_SCHEMA
   SNOWFLAKE_EDP_ACC_SCHEMA
+  SNOWFLAKE_EDP_DBT_PROJECT
   SNOWFLAKE_CATALOG_INTEGRATION
   SNOWFLAKE_CLONE_SCHEMA
   SNOWFLAKE_LOCAL_RAW_SYNC
+  SNOW_DBT_TARGET_NAME
   DBT_THREADS
   DLT_RUNNER_IMAGE
   DBT_RUNNER_IMAGE
+  SNOW_DBT_RUNNER_IMAGE
 )
 
 if [ "${LOCAL_PLATFORM_SHARED_STACK:-false}" != "true" ]; then
@@ -84,11 +104,52 @@ for key in "${env_keys[@]}"; do
   fi
 done
 
-docker compose run --rm --no-deps "${exec_env_args[@]}" airflow-scheduler \
-  airflow dags list-import-errors
+if [ "${LOCAL_PLATFORM_SHARED_STACK:-false}" = "true" ]; then
+  airflow_cli=(docker compose exec -T airflow-scheduler)
+else
+  airflow_cli=(docker compose run --rm --no-deps "${exec_env_args[@]}" airflow-scheduler)
+fi
 
-docker compose run --rm --no-deps "${exec_env_args[@]}" airflow-scheduler \
-  airflow dags test \
-  --subdir "${dag_subdir}" \
-  "${dag_id}" \
-  "${execution_date}"
+"${airflow_cli[@]}" airflow dags list-import-errors
+
+"${airflow_cli[@]}" \
+  python - "${dag_subdir}" "${dag_id}" "${execution_date}" <<'PY'
+import importlib.util
+import sys
+from pathlib import Path
+
+import pendulum
+from airflow.models.dag import DAG
+import airflow.providers.fab.auth_manager.models  # noqa: F401
+
+dag_subdir = Path(sys.argv[1])
+dag_id = sys.argv[2]
+execution_date = pendulum.parse(sys.argv[3])
+
+module_dir = str(dag_subdir.parent)
+if module_dir not in sys.path:
+    sys.path.insert(0, module_dir)
+
+spec = importlib.util.spec_from_file_location("local_platform_dynamic_dag", dag_subdir)
+if spec is None or spec.loader is None:
+    raise SystemExit(f"unable to load DAG module from {dag_subdir}")
+
+module = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(module)
+
+dag = getattr(module, "dag", None)
+if not isinstance(dag, DAG):
+    matching_dags = [
+        value for value in module.__dict__.values()
+        if isinstance(value, DAG) and value.dag_id == dag_id
+    ]
+    dag = matching_dags[0] if matching_dags else None
+
+if not isinstance(dag, DAG):
+    raise SystemExit(f"dag {dag_id} not found in {dag_subdir}")
+
+if dag.dag_id != dag_id:
+    raise SystemExit(f"loaded dag id {dag.dag_id} does not match expected {dag_id}")
+
+dag.test(execution_date=execution_date)
+PY

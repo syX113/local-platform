@@ -2,4 +2,4 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-exec "${SCRIPT_DIR}/deploy-airflow-dag.sh" prd
+exec "${SCRIPT_DIR}/deploy-airflow-dag.sh" dev

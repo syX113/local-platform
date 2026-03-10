@@ -28,6 +28,9 @@ export SNOWFLAKE_CLONE_OWNER_TOKEN="${clone_owner_token}"
 export SNOWFLAKE_CLONE_BRANCH_TOKEN="${clone_branch_token}"
 export SNOWFLAKE_SDP_DATABASE="$(build_clone_database_name "${source_sdp_database}" "${clone_owner_token}" "${clone_branch_token}" 120)"
 export SNOWFLAKE_EDP_DATABASE="$(build_clone_database_name "${source_edp_database}" "${clone_owner_token}" "${clone_branch_token}" 120)"
+export SNOWFLAKE_SDP_DBT_PROJECT="DBT_PROJECT_SDP_ORDERS_${clone_owner_token}_$(stable_token "${clone_branch_token}")"
+export SNOWFLAKE_EDP_DBT_PROJECT="DBT_PROJECT_EDP_ORDERS_${clone_owner_token}_$(stable_token "${clone_branch_token}")"
+export SNOW_DBT_TARGET_NAME="prd"
 
 cleanup() {
   "${SCRIPT_DIR}/cleanup-ci-sandbox.sh" || true

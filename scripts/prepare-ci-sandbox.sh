@@ -59,6 +59,8 @@ db_suffix="$(printf '%s' "${namespace_suffix}" | tr '[:lower:]' '[:upper:]')"
 project_path_slug="${CI_PROJECT_PATH_SLUG:-${project_kind}}"
 object_prefix="platform/ci/${project_path_slug}/${sandbox_slug}"
 object_store_bucket="s3://${MINIO_BUCKET}/${object_prefix}"
+sdp_dbt_project="DBT_PROJECT_SDP_ORDERS_${db_suffix}"
+edp_dbt_project="DBT_PROJECT_EDP_ORDERS_${db_suffix}"
 
 base_sdp_database="${SNOWFLAKE_SDP_DATABASE}"
 base_edp_database="${SNOWFLAKE_EDP_DATABASE}"
@@ -79,10 +81,14 @@ SNOWFLAKE_EDP_DATABASE_BASE=${base_edp_database}
 SNOWFLAKE_SDP_DATABASE=${branch_sdp_database}
 SNOWFLAKE_EDP_DATABASE=${branch_edp_database}
 SNOWFLAKE_CLONE_SCHEMA=CLONE_${db_suffix}
+SNOWFLAKE_SDP_DBT_PROJECT=${sdp_dbt_project}
+SNOWFLAKE_EDP_DBT_PROJECT=${edp_dbt_project}
 MINIO_PREFIX=${object_prefix}
 OBJECT_STORE_BUCKET=${object_store_bucket}
 DLT_PIPELINE_NAME=${project_kind}_${namespace_suffix}
 ICEBERG_NAMESPACE=landing_${namespace_suffix}
+SNOW_DBT_TARGET_NAME=${sandbox_kind}
+AIRFLOW_SANDBOX_DAG_ID=DEV_${project_kind}_${namespace_suffix}
 EOF
 
 bash "${SCRIPT_DIR}/ensure-snowflake-foundation.sh" | tee "${base_bootstrap_log}"

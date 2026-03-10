@@ -16,11 +16,28 @@ ARTIFACT_DIR="${ROOT_DIR}/artifacts/ingestion"
 rm -rf "${ARTIFACT_DIR}"
 mkdir -p "${ARTIFACT_DIR}"
 
+if [ -z "${AIRFLOW_SANDBOX_DAG_ID:-}" ]; then
+  export_dev_runtime_env
+fi
+
 iceberg_namespace="${ICEBERG_NAMESPACE:-landing}"
 catalog_namespace="$(printf '%s' "${iceberg_namespace}" | tr '[:upper:]' '[:lower:]')"
 execution_date="${1:-2026-03-07}"
-dag_id="${2:-local_platform_ingest}"
-dag_subdir="${3:-/opt/airflow/dags/local_platform_pipeline.py}"
+if [ -n "${2:-}" ]; then
+  dag_id="${2}"
+elif [ -n "${AIRFLOW_SANDBOX_DAG_ID:-}" ]; then
+  dag_id="${AIRFLOW_SANDBOX_DAG_ID}"
+else
+  dag_id="${DEV_AIRFLOW_DAG_ID:-DEV_local_platform_ingest}"
+fi
+
+if [ -n "${3:-}" ]; then
+  dag_subdir="${3}"
+elif [ -n "${AIRFLOW_SANDBOX_DAG_ID:-}" ]; then
+  dag_subdir="/opt/airflow/dags/deployed/$(sanitize_branch_token "${AIRFLOW_SANDBOX_DAG_ID}").py"
+else
+  dag_subdir="/opt/airflow/dags/deployed/${DEV_AIRFLOW_DAG_FILENAME:-dev_local_platform_ingest.py}"
+fi
 
 # The ingestion promotion validates the PostgreSQL -> Airflow/dlt -> MinIO/Iceberg path only.
 export SNOWFLAKE_ACCOUNT=""

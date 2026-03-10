@@ -24,16 +24,13 @@ for key in "${required_vars[@]}"; do
   fi
 done
 
-sdp_container_dbt_project_dir="$(resolve_container_dbt_project_dir proj_sdp_orders)"
-edp_container_dbt_project_dir="$(resolve_container_dbt_project_dir proj_edp_orders)"
-
 echo "reloading deterministic source sample data"
 ./scripts/load-source-sample-data.sh
 
 echo "dropping lingering Snowflake CI clone databases"
 bash ./scripts/cleanup-snowflake-ci-clones.sh
 
-echo "dropping Snowflake SDP and EDP databases for a clean rebuild"
+echo "dropping Snowflake control, SDP, and EDP databases for a clean rebuild"
 docker compose run --rm --no-deps dbt-executor python - <<'PY'
 import os
 
@@ -57,6 +54,7 @@ try:
     with connection.cursor() as cursor:
         cursor.execute(f'use role {ident(os.environ["SNOWFLAKE_ROLE"])}')
         cursor.execute(f'use warehouse {ident(os.environ["SNOWFLAKE_WAREHOUSE"])}')
+        cursor.execute(f'drop database if exists {ident(os.environ["SNOWFLAKE_CONTROL_DATABASE"])}')
         cursor.execute(f'drop database if exists {ident(os.environ["SNOWFLAKE_EDP_DATABASE"])}')
         cursor.execute(f'drop database if exists {ident(os.environ["SNOWFLAKE_SDP_DATABASE"])}')
 finally:
@@ -64,6 +62,7 @@ finally:
 
 print(
     {
+        "dropped_control_database": os.environ["SNOWFLAKE_CONTROL_DATABASE"],
         "dropped_sdp_database": os.environ["SNOWFLAKE_SDP_DATABASE"],
         "dropped_edp_database": os.environ["SNOWFLAKE_EDP_DATABASE"],
     }
@@ -73,16 +72,33 @@ PY
 echo "recreating Snowflake foundation"
 bash ./scripts/ensure-snowflake-foundation.sh
 
+export_dev_runtime_env
+
+echo "refreshing DEV Iceberg artifacts"
+docker compose run --rm --no-deps dlt-extractor python /opt/platform/dlt/pipeline.py
+
 echo "syncing inbound Snowflake raw tables"
 docker compose run --rm --no-deps dlt-extractor python /opt/platform/dlt/snowflake_raw_sync.py
 
+echo "deploying DEV Snowflake dbt projects"
+bash ./scripts/deploy-snowflake-dbt-project.sh \
+  proj_sdp_orders \
+  "${SNOWFLAKE_SDP_DBT_PROJECT}" \
+  "${SNOWFLAKE_SDP_DATABASE}" \
+  "${SNOWFLAKE_SDP_CORE_SCHEMA}" \
+  dev
+bash ./scripts/deploy-snowflake-dbt-project.sh \
+  proj_edp_orders \
+  "${SNOWFLAKE_EDP_DBT_PROJECT}" \
+  "${SNOWFLAKE_EDP_DATABASE}" \
+  "${SNOWFLAKE_EDP_CORE_SCHEMA}" \
+  dev
+
 echo "building SDP data product"
-docker compose run --rm --no-deps dbt-executor \
-  dbt build --project-dir "${sdp_container_dbt_project_dir}" --profiles-dir /opt/platform/dbt/profiles
+bash ./scripts/execute-snowflake-dbt-project.sh "${SNOWFLAKE_SDP_DBT_PROJECT}" build
 
 echo "building EDP data product"
-docker compose run --rm --no-deps dbt-executor \
-  dbt build --project-dir "${edp_container_dbt_project_dir}" --profiles-dir /opt/platform/dbt/profiles
+bash ./scripts/execute-snowflake-dbt-project.sh "${SNOWFLAKE_EDP_DBT_PROJECT}" build
 
 echo "verifying rebuilt SDP without rerunning dbt"
 ./scripts/verify-sdp-promotion.sh --skip-foundation --skip-raw-sync --skip-dbt

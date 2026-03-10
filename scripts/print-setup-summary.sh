@@ -91,8 +91,9 @@ printf '\n'
 
 printf 'Runtime Services\n'
 printf '  dlt runtime service: dlt-extractor\n'
-printf '  dbt runtime service: dbt-executor\n'
-printf '  Airflow DAG id: local_platform_ingest\n'
+printf '  Snowflake dbt trigger runtime service: dbt-executor\n'
+printf '  Airflow DEV DAG id: %s\n' "${DEV_AIRFLOW_DAG_ID:-DEV_local_platform_ingest}"
+printf '  Airflow PRD DAG id: %s\n' "${PRD_AIRFLOW_DAG_ID:-PRD_local_platform_ingest}"
 printf '  GitLab runner service: gitlab-fargate-runner\n'
 printf '  GitLab branch provisioner service: gitlab-branch-provisioner\n'
 printf '\n'
@@ -105,6 +106,13 @@ printf '  Snowflake SDP database: %s\n' "${SNOWFLAKE_SDP_DATABASE}"
 printf '  Snowflake SDP schemas: %s, %s, %s\n' "${SNOWFLAKE_SDP_IN_SCHEMA}" "${SNOWFLAKE_SDP_CORE_SCHEMA}" "${SNOWFLAKE_SDP_ACC_SCHEMA}"
 printf '  Snowflake EDP database: %s\n' "${SNOWFLAKE_EDP_DATABASE}"
 printf '  Snowflake EDP schemas: %s, %s, %s\n' "${SNOWFLAKE_EDP_IN_SCHEMA}" "${SNOWFLAKE_EDP_CORE_SCHEMA}" "${SNOWFLAKE_EDP_ACC_SCHEMA}"
+printf '  Snowflake control database: %s\n' "${SNOWFLAKE_CONTROL_DATABASE}"
+printf '  Snowflake control schema: %s\n' "${SNOWFLAKE_CONTROL_SCHEMA}"
+printf '  Snowflake dbt stage: %s\n' "${SNOWFLAKE_DBT_STAGE}"
+printf '  DEV SDP dbt project: %s\n' "${DEV_SNOWFLAKE_SDP_DBT_PROJECT:-DEV_DBT_PROJECT_SDP_ORDERS}"
+printf '  DEV EDP dbt project: %s\n' "${DEV_SNOWFLAKE_EDP_DBT_PROJECT:-DEV_DBT_PROJECT_EDP_ORDERS}"
+printf '  PRD SDP dbt project: %s\n' "${PRD_SNOWFLAKE_SDP_DBT_PROJECT:-PRD_DBT_PROJECT_SDP_ORDERS}"
+printf '  PRD EDP dbt project: %s\n' "${PRD_SNOWFLAKE_EDP_DBT_PROJECT:-PRD_DBT_PROJECT_EDP_ORDERS}"
 printf '  Snowflake warehouse: %s\n' "${SNOWFLAKE_WAREHOUSE}"
 printf '  Local Snowflake raw sync: %s\n' "${SNOWFLAKE_LOCAL_RAW_SYNC:-false}"
 printf '\n'

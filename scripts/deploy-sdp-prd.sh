@@ -25,6 +25,7 @@ export_prd_runtime_env
 export RUNTIME_IMAGE_PREFIX="${PRD_SDP_RUNTIME_IMAGE_PREFIX}"
 export DLT_RUNNER_IMAGE="${PRD_SDP_RUNTIME_IMAGE_PREFIX}/dlt-extractor:dev"
 export DBT_RUNNER_IMAGE="${PRD_SDP_RUNTIME_IMAGE_PREFIX}/dbt-executor:dev"
+export SNOW_DBT_RUNNER_IMAGE="${DBT_RUNNER_IMAGE}"
 
 docker image inspect "${source_dlt_image}" >/dev/null 2>&1
 docker image inspect "${source_dbt_image}" >/dev/null 2>&1
@@ -49,5 +50,5 @@ snowflake.prd_edp_database=${SNOWFLAKE_EDP_DATABASE}
 iceberg.prd_namespace=${ICEBERG_NAMESPACE}
 object_store.prd_bucket=${OBJECT_STORE_BUCKET}
 runtime.dlt_image=${DLT_RUNNER_IMAGE}
-runtime.dbt_image=${DBT_RUNNER_IMAGE}
+runtime.snow_dbt_image=${SNOW_DBT_RUNNER_IMAGE}
 EOF

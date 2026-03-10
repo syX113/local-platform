@@ -42,6 +42,10 @@ if [ "${should_destroy}" != "true" ]; then
   exit 0
 fi
 
+if [ -n "${AIRFLOW_SANDBOX_DAG_ID:-}" ]; then
+  remove_deployed_airflow_dag "${AIRFLOW_SANDBOX_DAG_ID}"
+fi
+
 if [ -n "${ICEBERG_NAMESPACE:-}" ] && [ -n "${OBJECT_STORE_BUCKET:-}" ] && docker compose config --services 2>/dev/null | grep -qx "dlt-extractor"; then
   docker compose run --rm --no-deps dlt-extractor python - <<'PY'
 from __future__ import annotations
@@ -120,6 +124,14 @@ if [ -n "${SNOWFLAKE_ACCOUNT:-}" ] && [ -n "${SNOWFLAKE_USER:-}" ] && [ -n "${SN
     -e "SNOWFLAKE_EDP_DATABASE=${SNOWFLAKE_EDP_DATABASE:-}" \
     dbt-executor \
     python /opt/platform/dbt/scripts/manage_ci_clones.py drop
+fi
+
+if [ -n "${SNOWFLAKE_SDP_DBT_PROJECT:-}" ]; then
+  bash "${SCRIPT_DIR}/drop-snowflake-dbt-project.sh" "${SNOWFLAKE_SDP_DBT_PROJECT}" || true
+fi
+
+if [ -n "${SNOWFLAKE_EDP_DBT_PROJECT:-}" ]; then
+  bash "${SCRIPT_DIR}/drop-snowflake-dbt-project.sh" "${SNOWFLAKE_EDP_DBT_PROJECT}" || true
 fi
 
 rm -f \

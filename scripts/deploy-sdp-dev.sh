@@ -11,6 +11,7 @@ cd "${ROOT_DIR}"
 
 source "${SCRIPT_DIR}/common.sh"
 ensure_platform_env
+export_dev_runtime_env
 
 ARTIFACT_DIR="${ROOT_DIR}/artifacts/deploy-sdp-dev"
 rm -rf "${ARTIFACT_DIR}"
@@ -28,28 +29,29 @@ docker image inspect "${source_dlt_image}" >/dev/null 2>&1
 docker image inspect "${source_dbt_image}" >/dev/null 2>&1
 
 docker tag "${source_airflow_image}" "${shared_runtime_prefix}/airflow:dev"
-docker tag "${source_dlt_image}" "${shared_runtime_prefix}/dlt-extractor:dev"
-docker tag "${source_dbt_image}" "${shared_runtime_prefix}/dbt-executor:dev"
+docker tag "${source_dlt_image}" "${DEV_SDP_RUNTIME_IMAGE_PREFIX}/dlt-extractor:dev"
+docker tag "${source_dbt_image}" "${DEV_SDP_RUNTIME_IMAGE_PREFIX}/dbt-executor:dev"
 
-export RUNTIME_IMAGE_PREFIX="${shared_runtime_prefix}"
-export DLT_RUNNER_IMAGE="${shared_runtime_prefix}/dlt-extractor:dev"
-export DBT_RUNNER_IMAGE="${shared_runtime_prefix}/dbt-executor:dev"
+export RUNTIME_IMAGE_PREFIX="${DEV_SDP_RUNTIME_IMAGE_PREFIX}"
+export DLT_RUNNER_IMAGE="${DEV_SDP_RUNTIME_IMAGE_PREFIX}/dlt-extractor:dev"
+export DBT_RUNNER_IMAGE="${DEV_SDP_RUNTIME_IMAGE_PREFIX}/dbt-executor:dev"
+export SNOW_DBT_RUNNER_IMAGE="${DBT_RUNNER_IMAGE}"
 
-# Recreate the shared Airflow services from the base compose file so CI overrides
-# never strip the host port binding from the operator-facing web UI.
-COMPOSE_FILE=compose.yaml docker compose up -d --no-build --no-deps airflow-webserver airflow-scheduler >/dev/null
+bash "${SCRIPT_DIR}/deploy-airflow-dev-dag.sh" | tee "${ARTIFACT_DIR}/deploy_airflow_dev.log"
 
 bash "${SCRIPT_DIR}/verify-ingestion-promotion.sh" "${1:-2026-03-07}" \
+  "${DEV_AIRFLOW_DAG_ID}" \
+  "/opt/airflow/dags/deployed/${DEV_AIRFLOW_DAG_FILENAME}" \
   | tee "${ARTIFACT_DIR}/verify_ingestion_dev.log"
 
 bash "${SCRIPT_DIR}/verify-sdp-promotion.sh" | tee "${ARTIFACT_DIR}/verify_sdp_dev.log"
 
 cat > "${ARTIFACT_DIR}/summary.txt" <<EOF
 sdp_dev_deploy=passed
-airflow.dev_dag_id=local_platform_ingest
+airflow.dev_dag_id=${DEV_AIRFLOW_DAG_ID}
 snowflake.dev_sdp_database=${SNOWFLAKE_SDP_DATABASE}
 snowflake.dev_edp_database=${SNOWFLAKE_EDP_DATABASE}
 runtime.airflow_image=${shared_runtime_prefix}/airflow:dev
 runtime.dlt_image=${DLT_RUNNER_IMAGE}
-runtime.dbt_image=${DBT_RUNNER_IMAGE}
+runtime.snow_dbt_image=${SNOW_DBT_RUNNER_IMAGE}
 EOF

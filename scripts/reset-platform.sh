@@ -14,6 +14,7 @@ fi
 docker compose down -v --remove-orphans || true
 
 rm -rf artifacts
+rm -rf airflow/dags/deployed
 rm -rf dbt/target
 rm -rf dbt/logs
 rm -f dbt/profiles/.user.yml

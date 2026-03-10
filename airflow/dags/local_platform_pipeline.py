@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-import os
 from datetime import datetime
+import os
 
 from airflow import DAG
 from airflow.operators.empty import EmptyOperator
@@ -14,17 +14,10 @@ from platform_support import docker_environment, seed_source_postgres as seed_so
 DEFAULT_DAG_ID = "local_platform_ingest"
 DEFAULT_DESCRIPTION = (
     "Seeds PostgreSQL sample data, writes Iceberg tables to object storage, mirrors "
-    "the SDP inbound layer into Snowflake for local mode, and runs the SDP dbt "
-    "project in an external container."
+    "the SDP inbound layer into Snowflake for local mode, and triggers the SDP dbt "
+    "project inside Snowflake."
 )
 DEFAULT_TAGS = ["local-platform", "postgres", "dlt", "dbt", "snowflake"]
-
-
-def resolve_sdp_dbt_project_dir() -> str:
-    nested_project_dir = "/opt/platform/dbt/projects/proj_sdp_orders"
-    if os.path.exists(f"{nested_project_dir}/dbt_project.yml"):
-        return nested_project_dir
-    return "/opt/platform/dbt"
 
 
 def build_ingest_dag(
@@ -81,12 +74,15 @@ def build_ingest_dag(
         )
 
         run_dbt = DockerOperator(
-            task_id="run_external_sdp_dbt_build",
-            image=runtime_environment.get("DBT_RUNNER_IMAGE", "local-platform/dbt-executor:dev"),
+            task_id="run_snowflake_sdp_dbt_build",
+            image=runtime_environment.get(
+                "SNOW_DBT_RUNNER_IMAGE",
+                runtime_environment.get("DBT_RUNNER_IMAGE", "local-platform/dbt-executor:dev"),
+            ),
             docker_url=os.environ.get("DOCKER_URL", "unix:///var/run/docker.sock"),
             command=(
-                f"dbt build --project-dir {resolve_sdp_dbt_project_dir()} "
-                "--profiles-dir /opt/platform/dbt/profiles"
+                "python /opt/platform/dbt/scripts/snow_dbt_cli.py "
+                f"execute --project-name {runtime_environment.get('SNOWFLAKE_SDP_DBT_PROJECT', 'DBT_PROJECT_SDP_ORDERS')} build"
             ),
             network_mode=os.environ.get("PLATFORM_DOCKER_NETWORK", "local-platform-net"),
             mount_tmp_dir=False,
@@ -100,6 +96,3 @@ def build_ingest_dag(
         start >> seed_source_postgres_task >> run_dlt >> check_snowflake >> sync_snowflake_raw >> run_dbt >> finish
 
     return dag
-
-
-dag = build_ingest_dag()

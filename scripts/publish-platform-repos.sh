@@ -157,7 +157,7 @@ sync_rendered_repo() {
     git -C "${repo_dir}" add -A
     git -C "${repo_dir}" commit --allow-empty -m "init-artifacts" >/dev/null
     git -C "${repo_dir}" branch -M __init_artifacts__ main >/dev/null
-    if ! git -C "${repo_dir}" push --force --set-upstream "${remote_name}" main; then
+    if ! git -C "${repo_dir}" push -o ci.skip --force --set-upstream "${remote_name}" main; then
       if [ -n "${project_id}" ]; then
         protect_main_branch "${project_id}"
       fi

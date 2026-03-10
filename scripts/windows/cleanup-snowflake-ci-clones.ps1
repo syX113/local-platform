@@ -40,3 +40,8 @@ Invoke-DockerCompose -Arguments @(
     "python", "/opt/platform/dbt/scripts/manage_ci_clones.py", "purge-ci"
 )
 
+Invoke-DockerCompose -Arguments @(
+    "run", "--rm", "--no-deps",
+    "dbt-executor",
+    "python", "/opt/platform/dbt/scripts/snow_dbt_cli.py", "purge"
+)

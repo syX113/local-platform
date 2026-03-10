@@ -9,7 +9,7 @@ from textwrap import dedent
 
 ROOT_DIR = Path(__file__).resolve().parent.parent
 GENERATED_ROOT = ROOT_DIR / "gitlab-projects" / "generated"
-IGNORE_NAMES = {".DS_Store", "__pycache__", ".dlt", "target", "logs"}
+IGNORE_NAMES = {".DS_Store", "__pycache__", ".dlt", "target", "logs", "deployed"}
 
 
 def env(name: str, default: str) -> str:
@@ -59,6 +59,7 @@ def shared_gitignore() -> str:
         .env
         artifacts/
         logs/
+        airflow/dags/deployed/
         dbt/profiles/.user.yml
         dbt/target/
         dbt/dbt_packages/
@@ -81,12 +82,11 @@ def sdp_ci_yaml() -> str:
             - when: never
 
         default:
-          image: docker:29.1.3-cli
+          image: ${GITLAB_RUNNER_JOB_IMAGE:-local-platform/gitlab-ci-tools:dev}
           tags:
             - local
             - fargate
           before_script:
-            - apk add --no-cache bash curl
             - |
               docker() {
                 if [ "${1:-}" = "compose" ] && [ "${2:-}" = "run" ]; then
@@ -129,6 +129,7 @@ def sdp_ci_yaml() -> str:
             - printf 'RUNTIME_IMAGE_PREFIX=%s\\n' "${RUNTIME_IMAGE_PREFIX}" > artifacts/context/runtime.env
             - printf 'DLT_RUNNER_IMAGE=%s/dlt-extractor:dev\\n' "${RUNTIME_IMAGE_PREFIX}" >> artifacts/context/runtime.env
             - printf 'DBT_RUNNER_IMAGE=%s/dbt-executor:dev\\n' "${RUNTIME_IMAGE_PREFIX}" >> artifacts/context/runtime.env
+            - printf 'SNOW_DBT_RUNNER_IMAGE=%s/dbt-executor:dev\\n' "${RUNTIME_IMAGE_PREFIX}" >> artifacts/context/runtime.env
           artifacts:
             when: always
             reports:
@@ -146,8 +147,6 @@ def sdp_ci_yaml() -> str:
             - ./ci/scripts/prepare-ci-sandbox.sh sdp artifacts/context/sdp.env
           artifacts:
             when: always
-            reports:
-              dotenv: artifacts/context/sdp.env
             paths:
               - artifacts/context/
 
@@ -168,7 +167,6 @@ def sdp_ci_yaml() -> str:
             - docker compose run --rm --no-deps --entrypoint python airflow-webserver -m compileall /opt/airflow/dags
             - docker compose run --rm --no-deps --entrypoint python dlt-extractor -m compileall /opt/platform/dlt
             - docker compose run --rm --no-deps --entrypoint python dbt-executor -m compileall /opt/platform/dbt
-            - docker compose run --rm --no-deps dbt-executor dbt parse --project-dir /opt/platform/dbt --profiles-dir /opt/platform/dbt/profiles
             - docker compose run --rm --no-deps dbt-executor sqlfluff lint --config /opt/platform/dbt/.sqlfluff /opt/platform/dbt/models
 
         ci_validate_sdp_ingestion:
@@ -186,6 +184,8 @@ def sdp_ci_yaml() -> str:
             - when: never
           script:
             - set -a; . artifacts/context/runtime.env; . artifacts/context/sdp.env; set +a
+            - export AIRFLOW_SANDBOX_DAG_ID="DEV_${DLT_PIPELINE_NAME}"
+            - ./ci/scripts/deploy-airflow-dag.sh current "${AIRFLOW_SANDBOX_DAG_ID}" "current-sdp-ci"
             - ./ci/scripts/verify-ingestion-promotion.sh
           artifacts:
             when: always
@@ -386,12 +386,11 @@ def edp_ci_yaml() -> str:
             - when: never
 
         default:
-          image: docker:29.1.3-cli
+          image: ${GITLAB_RUNNER_JOB_IMAGE:-local-platform/gitlab-ci-tools:dev}
           tags:
             - local
             - fargate
           before_script:
-            - apk add --no-cache bash curl
             - |
               docker() {
                 if [ "${1:-}" = "compose" ] && [ "${2:-}" = "run" ]; then
@@ -433,6 +432,7 @@ def edp_ci_yaml() -> str:
             - docker compose build dbt-executor
             - printf 'RUNTIME_IMAGE_PREFIX=%s\\n' "${RUNTIME_IMAGE_PREFIX}" > artifacts/context/runtime.env
             - printf 'DBT_RUNNER_IMAGE=%s/dbt-executor:dev\\n' "${RUNTIME_IMAGE_PREFIX}" >> artifacts/context/runtime.env
+            - printf 'SNOW_DBT_RUNNER_IMAGE=%s/dbt-executor:dev\\n' "${RUNTIME_IMAGE_PREFIX}" >> artifacts/context/runtime.env
           artifacts:
             when: always
             reports:
@@ -450,8 +450,6 @@ def edp_ci_yaml() -> str:
             - ./ci/scripts/prepare-ci-sandbox.sh edp artifacts/context/edp.env
           artifacts:
             when: always
-            reports:
-              dotenv: artifacts/context/edp.env
             paths:
               - artifacts/context/
 
@@ -470,7 +468,6 @@ def edp_ci_yaml() -> str:
             - set -a; . artifacts/context/runtime.env; . artifacts/context/edp.env; set +a
             - docker compose config -q
             - docker compose run --rm --no-deps --entrypoint python dbt-executor -m compileall /opt/platform/dbt
-            - docker compose run --rm --no-deps dbt-executor dbt parse --project-dir /opt/platform/dbt --profiles-dir /opt/platform/dbt/profiles
             - docker compose run --rm --no-deps dbt-executor sqlfluff lint --config /opt/platform/dbt/.sqlfluff /opt/platform/dbt/models
 
         ci_validate_edp_models:
@@ -700,17 +697,23 @@ def sdp_compose_yaml() -> str:
           SNOWFLAKE_PASSWORD: ${SNOWFLAKE_PASSWORD}
           SNOWFLAKE_ROLE: ${SNOWFLAKE_ROLE}
           SNOWFLAKE_WAREHOUSE: ${SNOWFLAKE_WAREHOUSE}
+          SNOWFLAKE_CONTROL_DATABASE: ${SNOWFLAKE_CONTROL_DATABASE:-LOCAL_PLATFORM_CONTROL}
+          SNOWFLAKE_CONTROL_SCHEMA: ${SNOWFLAKE_CONTROL_SCHEMA:-OPERATIONS}
+          SNOWFLAKE_DBT_STAGE: ${SNOWFLAKE_DBT_STAGE:-DBT_PROJECT_STAGE}
           SNOWFLAKE_SDP_DATABASE: ${SNOWFLAKE_SDP_DATABASE}
           SNOWFLAKE_SDP_IN_SCHEMA: ${SNOWFLAKE_SDP_IN_SCHEMA}
           SNOWFLAKE_SDP_CORE_SCHEMA: ${SNOWFLAKE_SDP_CORE_SCHEMA}
           SNOWFLAKE_SDP_ACC_SCHEMA: ${SNOWFLAKE_SDP_ACC_SCHEMA}
+          SNOWFLAKE_SDP_DBT_PROJECT: ${SNOWFLAKE_SDP_DBT_PROJECT:-DEV_DBT_PROJECT_SDP_ORDERS}
           SNOWFLAKE_EDP_DATABASE: ${SNOWFLAKE_EDP_DATABASE}
           SNOWFLAKE_EDP_IN_SCHEMA: ${SNOWFLAKE_EDP_IN_SCHEMA}
           SNOWFLAKE_EDP_CORE_SCHEMA: ${SNOWFLAKE_EDP_CORE_SCHEMA}
           SNOWFLAKE_EDP_ACC_SCHEMA: ${SNOWFLAKE_EDP_ACC_SCHEMA}
+          SNOWFLAKE_EDP_DBT_PROJECT: ${SNOWFLAKE_EDP_DBT_PROJECT:-DEV_DBT_PROJECT_EDP_ORDERS}
           SNOWFLAKE_CATALOG_INTEGRATION: ${SNOWFLAKE_CATALOG_INTEGRATION}
           SNOWFLAKE_CLONE_SCHEMA: ${SNOWFLAKE_CLONE_SCHEMA}
           SNOWFLAKE_LOCAL_RAW_SYNC: ${SNOWFLAKE_LOCAL_RAW_SYNC}
+          SNOW_DBT_TARGET_NAME: ${SNOW_DBT_TARGET_NAME:-dev}
           DBT_THREADS: ${DBT_THREADS}
 
         x-airflow-build: &airflow-build
@@ -737,6 +740,7 @@ def sdp_compose_yaml() -> str:
           DOCKER_URL: unix:///var/run/docker.sock
           DLT_RUNNER_IMAGE: ${RUNTIME_IMAGE_PREFIX:-${COMPOSE_PROJECT_NAME:-proj-sdp-local}}/dlt-extractor:dev
           DBT_RUNNER_IMAGE: ${RUNTIME_IMAGE_PREFIX:-${COMPOSE_PROJECT_NAME:-proj-sdp-local}}/dbt-executor:dev
+          SNOW_DBT_RUNNER_IMAGE: ${RUNTIME_IMAGE_PREFIX:-${COMPOSE_PROJECT_NAME:-proj-sdp-local}}/dbt-executor:dev
 
         services:
           airflow-metadata-db:
@@ -966,15 +970,21 @@ def edp_compose_yaml() -> str:
               SNOWFLAKE_PASSWORD: ${SNOWFLAKE_PASSWORD}
               SNOWFLAKE_ROLE: ${SNOWFLAKE_ROLE}
               SNOWFLAKE_WAREHOUSE: ${SNOWFLAKE_WAREHOUSE}
+              SNOWFLAKE_CONTROL_DATABASE: ${SNOWFLAKE_CONTROL_DATABASE:-LOCAL_PLATFORM_CONTROL}
+              SNOWFLAKE_CONTROL_SCHEMA: ${SNOWFLAKE_CONTROL_SCHEMA:-OPERATIONS}
+              SNOWFLAKE_DBT_STAGE: ${SNOWFLAKE_DBT_STAGE:-DBT_PROJECT_STAGE}
               SNOWFLAKE_SDP_DATABASE: ${SNOWFLAKE_SDP_DATABASE}
               SNOWFLAKE_SDP_IN_SCHEMA: ${SNOWFLAKE_SDP_IN_SCHEMA}
               SNOWFLAKE_SDP_CORE_SCHEMA: ${SNOWFLAKE_SDP_CORE_SCHEMA}
               SNOWFLAKE_SDP_ACC_SCHEMA: ${SNOWFLAKE_SDP_ACC_SCHEMA}
+              SNOWFLAKE_SDP_DBT_PROJECT: ${SNOWFLAKE_SDP_DBT_PROJECT:-DEV_DBT_PROJECT_SDP_ORDERS}
               SNOWFLAKE_EDP_DATABASE: ${SNOWFLAKE_EDP_DATABASE}
               SNOWFLAKE_EDP_IN_SCHEMA: ${SNOWFLAKE_EDP_IN_SCHEMA}
               SNOWFLAKE_EDP_CORE_SCHEMA: ${SNOWFLAKE_EDP_CORE_SCHEMA}
               SNOWFLAKE_EDP_ACC_SCHEMA: ${SNOWFLAKE_EDP_ACC_SCHEMA}
+              SNOWFLAKE_EDP_DBT_PROJECT: ${SNOWFLAKE_EDP_DBT_PROJECT:-DEV_DBT_PROJECT_EDP_ORDERS}
               SNOWFLAKE_CLONE_SCHEMA: ${SNOWFLAKE_CLONE_SCHEMA}
+              SNOW_DBT_TARGET_NAME: ${SNOW_DBT_TARGET_NAME:-dev}
               DBT_THREADS: ${DBT_THREADS}
             volumes:
               - ./dbt:/opt/platform/dbt
@@ -1029,7 +1039,12 @@ def render_sdp_repo(project_path: str) -> None:
         "scripts/require-approver-match-commit.sh",
         "scripts/load-source-sample-data.sh",
         "scripts/test-airflow-dag.sh",
+        "scripts/deploy-airflow-dag.sh",
+        "scripts/deploy-airflow-dev-dag.sh",
         "scripts/deploy-airflow-prd-dag.sh",
+        "scripts/deploy-snowflake-dbt-project.sh",
+        "scripts/execute-snowflake-dbt-project.sh",
+        "scripts/drop-snowflake-dbt-project.sh",
         "scripts/deploy-sdp-dev.sh",
         "scripts/deploy-sdp-prd.sh",
         "scripts/verify-ingestion-promotion.sh",
@@ -1046,6 +1061,7 @@ def render_sdp_repo(project_path: str) -> None:
         "dbt/macros",
         "dbt/scripts/apply_sql.py",
         "dbt/scripts/manage_ci_clones.py",
+        "dbt/scripts/snow_dbt_cli.py",
     ):
         copy_path(relative_path, repo_dir)
     copy_path("dbt/profiles/profiles.yml", repo_dir, "dbt/profiles/profiles.yml")
@@ -1072,7 +1088,7 @@ def render_sdp_repo(project_path: str) -> None:
 
                 - Airflow DAG for PostgreSQL -> MinIO/Iceberg ingestion
                 - dlt ingestion runtime code
-                - SDP dbt project for Snowflake `INBOUND`, `CORE`, and `ACCESS`
+                - SDP dbt project for Snowflake `INBOUND`, `CORE`, and `ACCESS`, executed natively in Snowflake
                 - `ci/scripts/` contains only CI helper scripts
                 - `ci/` contains runner-only config and Snowflake foundation metadata
 
@@ -1093,7 +1109,7 @@ def render_sdp_repo(project_path: str) -> None:
                 - Later branch push pipelines reuse one branch-scoped Snowflake zero-copy environment instead of replacing the shared DEV objects.
                 - The clone lifecycle is driven by `ci/snowflake/data_products.json`, so every registered Snowflake data product database is cloned, not just the sample SDP and EDP orders databases.
                 - Branch clone databases are named from the original database plus `CI_CLO`, the owning project token, and the branch token, for example `DB_SDP_ORDERS_CI_CLO_SDP_FEATURE_X`.
-                - Later non-default branch push pipelines write ingestion output to a stable branch-scoped MinIO/S3 prefix and Iceberg namespace and run repeatable CI validation there with `sqlfluff lint`, `dbt parse`, ingestion checks, `dbt run`, and `dbt test`.
+                - Later non-default branch push pipelines write ingestion output to a stable branch-scoped MinIO/S3 prefix and Iceberg namespace and run repeatable CI validation there with `sqlfluff lint`, ingestion checks, and Snowflake-native `dbt parse`, `dbt run`, and `dbt test`.
                 - Merge request pipelines create a fresh disposable clone and isolated MinIO/Iceberg namespace, validate the change there, and destroy that merge sandbox automatically afterward.
                 - Default-branch pipelines validate the merged candidate again on a fresh disposable DEV clone, then wait for a manual approval by the commit identity, and only then deploy to the shared DEV services.
                 - PRD deployment is a separate manual default-branch pipeline run with `RELEASE_TO_PRD=true`. That pipeline first validates on a fresh disposable PRD clone, then waits for a manual approval by the commit identity, and only then deploys to the shared local services using `PRD_`-marked targets such as `PRD_local_platform_ingest` and `PRD_DB_SDP_ORDERS`.
@@ -1117,6 +1133,9 @@ def render_edp_repo(project_path: str) -> None:
         "scripts/prepare-ci-sandbox.sh",
         "scripts/cleanup-ci-sandbox.sh",
         "scripts/require-approver-match-commit.sh",
+        "scripts/deploy-snowflake-dbt-project.sh",
+        "scripts/execute-snowflake-dbt-project.sh",
+        "scripts/drop-snowflake-dbt-project.sh",
         "scripts/deploy-edp-dev.sh",
         "scripts/deploy-edp-prd.sh",
         "scripts/verify-edp-promotion.sh",
@@ -1132,6 +1151,7 @@ def render_edp_repo(project_path: str) -> None:
         "dbt/macros",
         "dbt/scripts/apply_sql.py",
         "dbt/scripts/manage_ci_clones.py",
+        "dbt/scripts/snow_dbt_cli.py",
         "dbt/scripts/zero_copy_clone_check.py",
     ):
         copy_path(relative_path, repo_dir)
@@ -1157,7 +1177,7 @@ def render_edp_repo(project_path: str) -> None:
 
                 Managed artifacts:
 
-                - EDP dbt project for Snowflake `INBOUND`, `CORE`, and `ACCESS`
+                - EDP dbt project for Snowflake `INBOUND`, `CORE`, and `ACCESS`, executed natively in Snowflake
                 - `ci/scripts/` contains only CI helper scripts
                 - `ci/` contains runner-only config and Snowflake foundation metadata
 
@@ -1181,7 +1201,7 @@ def render_edp_repo(project_path: str) -> None:
                 - Later branch push pipelines reuse one branch-scoped Snowflake zero-copy environment instead of replacing the shared DEV objects.
                 - The clone lifecycle is driven by `ci/snowflake/data_products.json`, so every registered Snowflake data product database is cloned, not just the sample SDP and EDP orders databases.
                 - Branch clone databases are named from the original database plus `CI_CLO`, the owning project token, and the branch token, for example `DB_EDP_ORDERS_CI_CLO_EDP_FEATURE_X`.
-                - Later non-default branch push pipelines run repeatable CI validation in the branch clone with `sqlfluff lint`, `dbt parse`, `dbt run`, and `dbt test`.
+                - Later non-default branch push pipelines run repeatable CI validation in the branch clone with `sqlfluff lint` plus Snowflake-native `dbt parse`, `dbt run`, and `dbt test`.
                 - Merge request pipelines create a fresh disposable clone, validate the change there, and destroy that merge sandbox automatically afterward.
                 - Default-branch pipelines validate the merged candidate again on a fresh disposable DEV clone, then wait for a manual approval by the commit identity, and only then deploy to the shared DEV services.
                 - PRD deployment is a separate manual default-branch pipeline run with `RELEASE_TO_PRD=true`. That pipeline first validates on a fresh disposable PRD clone, then waits for a manual approval by the commit identity, and only then deploys to the shared local services using `PRD_`-marked targets such as `PRD_DB_EDP_ORDERS`.

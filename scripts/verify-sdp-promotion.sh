@@ -12,6 +12,12 @@ cd "${ROOT_DIR}"
 source "${SCRIPT_DIR}/common.sh"
 ensure_platform_env
 
+if [ -z "${CI_SANDBOX_KIND:-}" ]; then
+  export_dev_runtime_env
+fi
+
+dbt_target_name="${SNOW_DBT_TARGET_NAME:-dev}"
+
 skip_foundation="false"
 skip_raw_sync="false"
 skip_dbt="false"
@@ -64,8 +70,6 @@ if [ "${SNOWFLAKE_LOCAL_RAW_SYNC:-false}" != "true" ] && {
   echo "SDP promotion requires either SNOWFLAKE_LOCAL_RAW_SYNC=true or complete OPEN_CATALOG_* configuration" >&2
   exit 1
 fi
-
-container_dbt_project_dir="$(resolve_container_dbt_project_dir proj_sdp_orders)"
 
 if [ "${skip_foundation}" != "true" ]; then
   bash "${SCRIPT_DIR}/ensure-snowflake-foundation.sh" | tee "${ARTIFACT_DIR}/snowflake_bootstrap.log"
@@ -125,17 +129,24 @@ print("sdp_inbound_contract=passed")
 PY
 
 if [ "${skip_dbt}" != "true" ]; then
-  docker compose run --rm --no-deps dbt-executor \
-    dbt parse --project-dir "${container_dbt_project_dir}" --profiles-dir /opt/platform/dbt/profiles \
-    | tee "${ARTIFACT_DIR}/dbt_parse.log"
+  bash "${SCRIPT_DIR}/deploy-snowflake-dbt-project.sh" \
+    proj_sdp_orders \
+    "${SNOWFLAKE_SDP_DBT_PROJECT}" \
+    "${SNOWFLAKE_SDP_DATABASE}" \
+    "${SNOWFLAKE_SDP_CORE_SCHEMA}" \
+    "${dbt_target_name}" | tee "${ARTIFACT_DIR}/dbt_deploy.log"
 
-  docker compose run --rm --no-deps dbt-executor \
-    dbt run --project-dir "${container_dbt_project_dir}" --profiles-dir /opt/platform/dbt/profiles \
-    | tee "${ARTIFACT_DIR}/dbt_run.log"
+  bash "${SCRIPT_DIR}/execute-snowflake-dbt-project.sh" \
+    "${SNOWFLAKE_SDP_DBT_PROJECT}" \
+    parse | tee "${ARTIFACT_DIR}/dbt_parse.log"
 
-  docker compose run --rm --no-deps dbt-executor \
-    dbt test --project-dir "${container_dbt_project_dir}" --profiles-dir /opt/platform/dbt/profiles \
-    | tee "${ARTIFACT_DIR}/dbt_test.log"
+  bash "${SCRIPT_DIR}/execute-snowflake-dbt-project.sh" \
+    "${SNOWFLAKE_SDP_DBT_PROJECT}" \
+    run | tee "${ARTIFACT_DIR}/dbt_run.log"
+
+  bash "${SCRIPT_DIR}/execute-snowflake-dbt-project.sh" \
+    "${SNOWFLAKE_SDP_DBT_PROJECT}" \
+    test | tee "${ARTIFACT_DIR}/dbt_test.log"
 fi
 
 docker compose run --rm --no-deps dbt-executor python - <<'PY' | tee "${ARTIFACT_DIR}/snowflake_validation.txt"
@@ -210,4 +221,6 @@ snowflake.sdp_core_order_items_clean=60
 snowflake.sdp_access_orders_order_grain=30
 snowflake.sdp_access_orders_customer_grain=12
 snowflake.sdp_access_order_lines_order_grain=60
+snowflake.sdp_dbt_project=${SNOWFLAKE_SDP_DBT_PROJECT}
+snowflake.dbt_target=${dbt_target_name}
 EOF
