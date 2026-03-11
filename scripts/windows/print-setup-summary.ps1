@@ -64,6 +64,7 @@ Write-Host "  MinIO secret key: $(Get-EnvValue -Name 'MINIO_ROOT_PASSWORD')"
 Write-Host ""
 Write-Host "Storage And Data Targets"
 Write-Host "  Object store URI: $(Get-EnvValue -Name 'OBJECT_STORE_BUCKET')"
+Write-Host "  Iceberg catalog: $(Get-EnvValue -Name 'ICEBERG_CATALOG_NAME')"
 Write-Host "  Iceberg namespace: $(Get-EnvValue -Name 'ICEBERG_NAMESPACE')"
 Write-Host "  Snowflake SDP database: $(Get-EnvValue -Name 'SNOWFLAKE_SDP_DATABASE')"
 Write-Host "  Snowflake EDP database: $(Get-EnvValue -Name 'SNOWFLAKE_EDP_DATABASE')"
@@ -86,4 +87,3 @@ Write-Host "  Bootstrap GitLab (Windows): pwsh ./scripts/windows/bootstrap-gitla
 Write-Host "  Snowflake-only rebuild (Unix/macOS): ./scripts/bootstrap-snowflake-products.sh"
 Write-Host "  Snowflake-only rebuild (Windows): pwsh ./scripts/windows/bootstrap-snowflake-products.ps1"
 Write-Host ""
-

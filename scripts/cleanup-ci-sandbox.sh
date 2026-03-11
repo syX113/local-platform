@@ -46,61 +46,16 @@ if [ -n "${AIRFLOW_SANDBOX_DAG_ID:-}" ]; then
   remove_deployed_airflow_dag "${AIRFLOW_SANDBOX_DAG_ID}"
 fi
 
-if [ -n "${ICEBERG_NAMESPACE:-}" ] && [ -n "${OBJECT_STORE_BUCKET:-}" ] && docker compose config --services 2>/dev/null | grep -qx "dlt-extractor"; then
-  docker compose run --rm --no-deps dlt-extractor python - <<'PY'
-from __future__ import annotations
-
-import os
-from urllib.parse import urlparse
-
-import boto3
-
-from dlt.common.libs.pyiceberg import get_catalog
-
-
-namespace = os.environ["ICEBERG_NAMESPACE"]
-bucket_uri = os.environ["OBJECT_STORE_BUCKET"]
-parsed = urlparse(bucket_uri)
-bucket = parsed.netloc
-prefix = parsed.path.lstrip("/")
-
-catalog = get_catalog()
-try:
-    tables = list(catalog.list_tables(namespace))
-except Exception:
-    tables = []
-
-for table_ident in tables:
-    if isinstance(table_ident, tuple):
-        full_name = ".".join(table_ident)
-    else:
-        full_name = f"{namespace}.{table_ident}"
-    try:
-        catalog.drop_table(full_name)
-    except Exception:
-        pass
-
-client = boto3.client(
-    "s3",
-    endpoint_url=os.environ["OBJECT_STORE_ENDPOINT_URL"],
-    aws_access_key_id=os.environ["OBJECT_STORE_ACCESS_KEY_ID"],
-    aws_secret_access_key=os.environ["OBJECT_STORE_SECRET_ACCESS_KEY"],
-    region_name=os.environ["OBJECT_STORE_REGION"],
-)
-
-continuation_token = None
-while True:
-    kwargs = {"Bucket": bucket, "Prefix": prefix}
-    if continuation_token:
-        kwargs["ContinuationToken"] = continuation_token
-    response = client.list_objects_v2(**kwargs)
-    objects = [{"Key": item["Key"]} for item in response.get("Contents", [])]
-    if objects:
-        client.delete_objects(Bucket=bucket, Delete={"Objects": objects})
-    if not response.get("IsTruncated"):
-        break
-    continuation_token = response.get("NextContinuationToken")
-PY
+if [ -n "${ICEBERG_NAMESPACE:-}" ] && [ -n "${OBJECT_STORE_BUCKET:-}" ] && docker compose --profile tooling config --services 2>/dev/null | grep -qx "dlt-extractor"; then
+  docker compose run --rm --no-deps \
+    -e "ICEBERG_CATALOG_NAME=${ICEBERG_CATALOG_NAME:-}" \
+    -e "ICEBERG_NAMESPACE=${ICEBERG_NAMESPACE}" \
+    -e "OBJECT_STORE_BUCKET=${OBJECT_STORE_BUCKET}" \
+    -e "OBJECT_STORE_ENDPOINT_URL=${OBJECT_STORE_ENDPOINT_URL}" \
+    -e "OBJECT_STORE_ACCESS_KEY_ID=${OBJECT_STORE_ACCESS_KEY_ID}" \
+    -e "OBJECT_STORE_SECRET_ACCESS_KEY=${OBJECT_STORE_SECRET_ACCESS_KEY}" \
+    -e "OBJECT_STORE_REGION=${OBJECT_STORE_REGION}" \
+    dlt-extractor python /opt/platform/dlt/cleanup_namespace.py
 fi
 
 if [ -n "${SNOWFLAKE_ACCOUNT:-}" ] && [ -n "${SNOWFLAKE_USER:-}" ] && [ -n "${SNOWFLAKE_PASSWORD:-}" ] \

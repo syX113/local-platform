@@ -113,6 +113,14 @@ snowflake_dbt_project_object_name() {
   printf '%s' "${base_name}"
 }
 
+source_system_slug() {
+  printf '%s' "${SOURCE_SYSTEM_SLUG:-postgres}"
+}
+
+object_store_config_prefix() {
+  printf '%s' "${OBJECT_STORE_CONFIG_PREFIX:-config}"
+}
+
 build_clone_database_name() {
   local base_name="${1:?base name is required}"
   local owner_token="${2:?owner token is required}"
@@ -154,21 +162,56 @@ remove_deployed_airflow_dag() {
   local deployed_dir="${ROOT_DIR}/airflow/dags/deployed"
   local scheduler_container_id
 
-  rm -f \
-    "${deployed_dir}/${module_prefix}.py" \
-    "${deployed_dir}/${module_prefix}_platform_support.py" \
-    "${deployed_dir}/${module_prefix}_pipeline_impl.py"
+  python3 - "${deployed_dir}" "${module_prefix}" <<'PY'
+from pathlib import Path
+import sys
+
+deployed_dir = Path(sys.argv[1])
+module_prefix = sys.argv[2]
+
+for path in (
+    deployed_dir / f"{module_prefix}.py",
+    deployed_dir / f"{module_prefix}_platform_support.py",
+    deployed_dir / f"{module_prefix}_pipeline_impl.py",
+):
+    path.unlink(missing_ok=True)
+PY
 
   scheduler_container_id="$(docker compose ps -q airflow-scheduler 2>/dev/null || true)"
   if [ -n "${scheduler_container_id}" ]; then
-    docker compose exec -T airflow-scheduler sh -lc \
-      "rm -f \
-        /opt/airflow/dags/deployed/${module_prefix}.py \
-        /opt/airflow/dags/deployed/${module_prefix}_platform_support.py \
-        /opt/airflow/dags/deployed/${module_prefix}_pipeline_impl.py" >/dev/null 2>&1 || true
+    docker compose exec -T airflow-scheduler python3 - "${module_prefix}" <<'PY' >/dev/null 2>&1 || true
+from pathlib import Path
+import sys
+
+module_prefix = sys.argv[1]
+deployed_dir = Path("/opt/airflow/dags/deployed")
+
+for path in (
+    deployed_dir / f"{module_prefix}.py",
+    deployed_dir / f"{module_prefix}_platform_support.py",
+    deployed_dir / f"{module_prefix}_pipeline_impl.py",
+):
+    path.unlink(missing_ok=True)
+PY
     docker compose exec -T airflow-scheduler \
       airflow dags delete --yes "${dag_id}" >/dev/null 2>&1 || true
   fi
+}
+
+ensure_shared_airflow_services() {
+  if [ "${LOCAL_PLATFORM_SHARED_STACK:-false}" != "true" ]; then
+    return 0
+  fi
+
+  local scheduler_container_id webserver_container_id
+  scheduler_container_id="$(docker compose ps -q airflow-scheduler 2>/dev/null || true)"
+  webserver_container_id="$(docker compose ps -q airflow-webserver 2>/dev/null || true)"
+
+  if [ -n "${scheduler_container_id}" ] && [ -n "${webserver_container_id}" ]; then
+    return 0
+  fi
+
+  docker compose up -d airflow-webserver airflow-scheduler >/dev/null
 }
 
 load_env_preserving_existing() {
@@ -242,6 +285,9 @@ ensure_platform_env() {
   export SNOWFLAKE_CONTROL_DATABASE="${SNOWFLAKE_CONTROL_DATABASE:-$(snowflake_control_database)}"
   export SNOWFLAKE_CONTROL_SCHEMA="${SNOWFLAKE_CONTROL_SCHEMA:-$(snowflake_control_schema)}"
   export SNOWFLAKE_DBT_STAGE="${SNOWFLAKE_DBT_STAGE:-$(snowflake_dbt_stage_name)}"
+  export SOURCE_SYSTEM_SLUG="${SOURCE_SYSTEM_SLUG:-$(source_system_slug)}"
+  export OBJECT_STORE_CONFIG_PREFIX="${OBJECT_STORE_CONFIG_PREFIX:-$(object_store_config_prefix)}"
+  export ICEBERG_CATALOG_NAME="${ICEBERG_CATALOG_NAME:-dev}"
 }
 
 resolve_host_dbt_project_dir() {
@@ -281,11 +327,13 @@ resolve_container_dbt_project_dir() {
 export_prd_runtime_env() {
   local prd_prefix source_dlt_pipeline source_iceberg_namespace source_minio_prefix
   local source_sdp_database source_edp_database
+  local source_system_slug_value
 
   prd_prefix="${PRD_DEPLOYMENT_PREFIX:-PRD}"
+  source_system_slug_value="$(source_system_slug)"
   source_dlt_pipeline="${PRD_SOURCE_DLT_PIPELINE_NAME:-${DLT_PIPELINE_NAME:-local_platform_ingest}}"
-  source_iceberg_namespace="${PRD_SOURCE_ICEBERG_NAMESPACE:-${ICEBERG_NAMESPACE:-landing}}"
-  source_minio_prefix="${PRD_SOURCE_MINIO_PREFIX:-${MINIO_PREFIX:-platform}}"
+  source_iceberg_namespace="${PRD_SOURCE_ICEBERG_NAMESPACE:-${source_system_slug_value}}"
+  source_minio_prefix="${PRD_SOURCE_MINIO_PREFIX:-landing/prd}"
   source_sdp_database="${PRD_SOURCE_SDP_DATABASE:-${SNOWFLAKE_SDP_DATABASE_BASE:-${SNOWFLAKE_SDP_DATABASE}}}"
   source_edp_database="${PRD_SOURCE_EDP_DATABASE:-${SNOWFLAKE_EDP_DATABASE_BASE:-${SNOWFLAKE_EDP_DATABASE}}}"
 
@@ -303,8 +351,9 @@ export_prd_runtime_env() {
   export PRD_AIRFLOW_MODULE_PREFIX="${PRD_AIRFLOW_MODULE_PREFIX:-$(sanitize_branch_token "${PRD_AIRFLOW_DAG_ID}")}"
   export PRD_AIRFLOW_DAG_FILENAME="${PRD_AIRFLOW_DAG_FILENAME:-${PRD_AIRFLOW_MODULE_PREFIX}.py}"
   export PRD_DLT_PIPELINE_NAME="${PRD_DLT_PIPELINE_NAME:-$(prefixed_identifier "${source_dlt_pipeline}" "${prd_prefix}")}"
-  export PRD_ICEBERG_NAMESPACE="${PRD_ICEBERG_NAMESPACE:-$(sanitize_branch_token "$(prefixed_identifier "${source_iceberg_namespace}" "${prd_prefix}")")}"
-  export PRD_MINIO_PREFIX="${PRD_MINIO_PREFIX:-${source_minio_prefix}/${prd_prefix}/${source_dlt_pipeline}}"
+  export PRD_ICEBERG_CATALOG_NAME="${PRD_ICEBERG_CATALOG_NAME:-prd}"
+  export PRD_ICEBERG_NAMESPACE="${PRD_ICEBERG_NAMESPACE:-${source_iceberg_namespace}}"
+  export PRD_MINIO_PREFIX="${PRD_MINIO_PREFIX:-${source_minio_prefix}}"
   export PRD_SNOWFLAKE_SDP_DATABASE="${PRD_SNOWFLAKE_SDP_DATABASE:-$(prefixed_identifier "${source_sdp_database}" "${prd_prefix}")}"
   export PRD_SNOWFLAKE_EDP_DATABASE="${PRD_SNOWFLAKE_EDP_DATABASE:-$(prefixed_identifier "${source_edp_database}" "${prd_prefix}")}"
   export PRD_SDP_RUNTIME_IMAGE_PREFIX="${PRD_SDP_RUNTIME_IMAGE_PREFIX:-local-platform-prd-sdp}"
@@ -321,6 +370,7 @@ export_prd_runtime_env() {
   export SNOWFLAKE_EDP_DBT_PROJECT="${PRD_SNOWFLAKE_EDP_DBT_PROJECT}"
   export SNOW_DBT_TARGET_NAME="${PRD_SNOW_DBT_TARGET_NAME}"
   export DLT_PIPELINE_NAME="${PRD_DLT_PIPELINE_NAME}"
+  export ICEBERG_CATALOG_NAME="${PRD_ICEBERG_CATALOG_NAME}"
   export ICEBERG_NAMESPACE="${PRD_ICEBERG_NAMESPACE}"
   export MINIO_PREFIX="${PRD_MINIO_PREFIX}"
   export OBJECT_STORE_BUCKET="s3://${MINIO_BUCKET}/${MINIO_PREFIX}"
@@ -329,11 +379,13 @@ export_prd_runtime_env() {
 export_dev_runtime_env() {
   local dev_prefix source_dlt_pipeline source_iceberg_namespace source_minio_prefix
   local source_sdp_database source_edp_database
+  local source_system_slug_value
 
   dev_prefix="${DEV_DEPLOYMENT_PREFIX:-DEV}"
+  source_system_slug_value="$(source_system_slug)"
   source_dlt_pipeline="${DEV_SOURCE_DLT_PIPELINE_NAME:-${DLT_PIPELINE_NAME:-local_platform_ingest}}"
-  source_iceberg_namespace="${DEV_SOURCE_ICEBERG_NAMESPACE:-${ICEBERG_NAMESPACE:-landing}}"
-  source_minio_prefix="${DEV_SOURCE_MINIO_PREFIX:-${MINIO_PREFIX:-platform/dev}}"
+  source_iceberg_namespace="${DEV_SOURCE_ICEBERG_NAMESPACE:-${source_system_slug_value}}"
+  source_minio_prefix="${DEV_SOURCE_MINIO_PREFIX:-landing/dev}"
   source_sdp_database="${DEV_SOURCE_SDP_DATABASE:-${SNOWFLAKE_SDP_DATABASE_BASE:-${SNOWFLAKE_SDP_DATABASE}}}"
   source_edp_database="${DEV_SOURCE_EDP_DATABASE:-${SNOWFLAKE_EDP_DATABASE_BASE:-${SNOWFLAKE_EDP_DATABASE}}}"
 
@@ -351,8 +403,9 @@ export_dev_runtime_env() {
   export DEV_AIRFLOW_MODULE_PREFIX="${DEV_AIRFLOW_MODULE_PREFIX:-$(sanitize_branch_token "${DEV_AIRFLOW_DAG_ID}")}"
   export DEV_AIRFLOW_DAG_FILENAME="${DEV_AIRFLOW_DAG_FILENAME:-${DEV_AIRFLOW_MODULE_PREFIX}.py}"
   export DEV_DLT_PIPELINE_NAME="${DEV_DLT_PIPELINE_NAME:-$(prefixed_identifier "${source_dlt_pipeline}" "${dev_prefix}")}"
-  export DEV_ICEBERG_NAMESPACE="${DEV_ICEBERG_NAMESPACE:-$(sanitize_branch_token "$(prefixed_identifier "${source_iceberg_namespace}" "${dev_prefix}")")}"
-  export DEV_MINIO_PREFIX="${DEV_MINIO_PREFIX:-${source_minio_prefix}/${source_dlt_pipeline}}"
+  export DEV_ICEBERG_CATALOG_NAME="${DEV_ICEBERG_CATALOG_NAME:-dev}"
+  export DEV_ICEBERG_NAMESPACE="${DEV_ICEBERG_NAMESPACE:-${source_iceberg_namespace}}"
+  export DEV_MINIO_PREFIX="${DEV_MINIO_PREFIX:-${source_minio_prefix}}"
   export DEV_SNOWFLAKE_SDP_DATABASE="${DEV_SNOWFLAKE_SDP_DATABASE:-${source_sdp_database}}"
   export DEV_SNOWFLAKE_EDP_DATABASE="${DEV_SNOWFLAKE_EDP_DATABASE:-${source_edp_database}}"
   export DEV_SDP_RUNTIME_IMAGE_PREFIX="${DEV_SDP_RUNTIME_IMAGE_PREFIX:-local-platform-dev-sdp}"
@@ -369,6 +422,7 @@ export_dev_runtime_env() {
   export SNOWFLAKE_EDP_DBT_PROJECT="${DEV_SNOWFLAKE_EDP_DBT_PROJECT}"
   export SNOW_DBT_TARGET_NAME="${DEV_SNOW_DBT_TARGET_NAME}"
   export DLT_PIPELINE_NAME="${DEV_DLT_PIPELINE_NAME}"
+  export ICEBERG_CATALOG_NAME="${DEV_ICEBERG_CATALOG_NAME}"
   export ICEBERG_NAMESPACE="${DEV_ICEBERG_NAMESPACE}"
   export MINIO_PREFIX="${DEV_MINIO_PREFIX}"
   export OBJECT_STORE_BUCKET="s3://${MINIO_BUCKET}/${MINIO_PREFIX}"

@@ -17,7 +17,7 @@ region_name = "${OBJECT_STORE_REGION}"
 use_ssl = ${OBJECT_STORE_USE_SSL}
 
 [iceberg_catalog]
-iceberg_catalog_name = "default"
+iceberg_catalog_name = "${ICEBERG_CATALOG_NAME}"
 iceberg_catalog_type = "${ICEBERG_CATALOG_TYPE}"
 EOF
 

@@ -19,6 +19,9 @@ def _flatten_mapping(source: Mapping[str, Any], prefix: str = "") -> dict[str, A
 
 def patch_pyiceberg_catalog_loading() -> None:
     import dlt.common.libs.pyiceberg as dlt_pyiceberg
+    from pyiceberg.catalog.sql import SqlCatalog
+    from pyiceberg.exceptions import NamespaceAlreadyExistsError
+    from sqlalchemy.exc import IntegrityError
 
     if getattr(dlt_pyiceberg, "_local_platform_flatten_patch", False):
         return
@@ -37,4 +40,19 @@ def patch_pyiceberg_catalog_loading() -> None:
 
     _wrap("_load_catalog_from_config")
     _wrap("_load_catalog_from_pyiceberg")
+
+    original_create_namespace = SqlCatalog.create_namespace
+
+    def patched_create_namespace(self: SqlCatalog, namespace: str | tuple[str, ...], properties: Mapping[str, Any] | None = None) -> None:
+        try:
+            original_create_namespace(self, namespace, properties or {})
+        except NamespaceAlreadyExistsError:
+            return
+        except IntegrityError as exc:
+            message = str(exc).lower()
+            if "iceberg_namespace_properties_pkey" in message or "duplicate key value violates unique constraint" in message:
+                return
+            raise
+
+    SqlCatalog.create_namespace = patched_create_namespace
     dlt_pyiceberg._local_platform_flatten_patch = True

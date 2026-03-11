@@ -16,6 +16,9 @@ target_env="${1:?target environment is required (dev|prd|current)}"
 case "${target_env}" in
   dev)
     export_dev_runtime_env
+    export DLT_RUNNER_IMAGE="${DLT_RUNNER_IMAGE:-${DEV_SDP_RUNTIME_IMAGE_PREFIX}/dlt-extractor:dev}"
+    export DBT_RUNNER_IMAGE="${DBT_RUNNER_IMAGE:-${DEV_SDP_RUNTIME_IMAGE_PREFIX}/dbt-executor:dev}"
+    export SNOW_DBT_RUNNER_IMAGE="${SNOW_DBT_RUNNER_IMAGE:-${DBT_RUNNER_IMAGE}}"
     airflow_dag_id="${DEV_AIRFLOW_DAG_ID}"
     airflow_module_prefix="${DEV_AIRFLOW_MODULE_PREFIX}"
     airflow_dag_filename="${DEV_AIRFLOW_DAG_FILENAME}"
@@ -23,6 +26,9 @@ case "${target_env}" in
     ;;
   prd)
     export_prd_runtime_env
+    export DLT_RUNNER_IMAGE="${DLT_RUNNER_IMAGE:-${PRD_SDP_RUNTIME_IMAGE_PREFIX}/dlt-extractor:dev}"
+    export DBT_RUNNER_IMAGE="${DBT_RUNNER_IMAGE:-${PRD_SDP_RUNTIME_IMAGE_PREFIX}/dbt-executor:dev}"
+    export SNOW_DBT_RUNNER_IMAGE="${SNOW_DBT_RUNNER_IMAGE:-${DBT_RUNNER_IMAGE}}"
     airflow_dag_id="${PRD_AIRFLOW_DAG_ID}"
     airflow_module_prefix="${PRD_AIRFLOW_MODULE_PREFIX}"
     airflow_dag_filename="${PRD_AIRFLOW_DAG_FILENAME}"
@@ -111,6 +117,7 @@ dag = build_ingest_dag(
     description=$(python_literal "$(printf '%s deployment for %s.' "${target_label_upper}" "${airflow_dag_id}")"),
     runtime_overrides={
         "DLT_PIPELINE_NAME": $(python_literal "${DLT_PIPELINE_NAME}"),
+        "ICEBERG_CATALOG_NAME": $(python_literal "${ICEBERG_CATALOG_NAME}"),
         "ICEBERG_NAMESPACE": $(python_literal "${ICEBERG_NAMESPACE}"),
         "MINIO_PREFIX": $(python_literal "${MINIO_PREFIX}"),
         "OBJECT_STORE_BUCKET": $(python_literal "${OBJECT_STORE_BUCKET}"),
@@ -134,6 +141,8 @@ mkdir -p "${host_deployed_dir}"
 cp "${support_file}" "${host_deployed_dir}/$(basename "${support_file}")"
 cp "${impl_file}" "${host_deployed_dir}/$(basename "${impl_file}")"
 cp "${wrapper_file}" "${host_deployed_dir}/${dag_filename}"
+
+ensure_shared_airflow_services
 
 scheduler_container_id="$(docker compose ps -q airflow-scheduler || true)"
 if [ -n "${scheduler_container_id}" ]; then

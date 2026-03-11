@@ -108,16 +108,21 @@ prime_rendered_repo() {
     git -C "${repo_dir}" remote add "${remote_name}" "${remote_url}"
   fi
 
+  # Generated GitLab project repos are disposable render outputs. Force them back
+  # to a clean baseline before re-rendering so publish is deterministic.
+  git -C "${repo_dir}" reset --hard --quiet >/dev/null 2>&1 || true
+  git -C "${repo_dir}" clean -fd --quiet >/dev/null 2>&1 || true
+
   if remote_repo_is_empty "${remote_url}"; then
-    git -C "${repo_dir}" checkout -B main >/dev/null 2>&1 || true
+    git -C "${repo_dir}" checkout -f -B main >/dev/null 2>&1 || true
     return 0
   fi
 
   git -C "${repo_dir}" fetch "${remote_name}" main >/dev/null 2>&1 || true
   if git -C "${repo_dir}" rev-parse --verify "${remote_name}/main" >/dev/null 2>&1; then
-    git -C "${repo_dir}" checkout -B main "${remote_name}/main" >/dev/null
+    git -C "${repo_dir}" checkout -f -B main "${remote_name}/main" >/dev/null
   else
-    git -C "${repo_dir}" checkout -B main >/dev/null
+    git -C "${repo_dir}" checkout -f -B main >/dev/null
   fi
 }
 

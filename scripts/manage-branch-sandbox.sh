@@ -34,25 +34,27 @@ file_token() {
 }
 
 ensure_sdp_object_prefix() {
+  local action="${1:-ensure}"
+  local marker_prefix="${OBJECT_STORE_CONFIG_PREFIX:-config}/ci/${project_path_slug}/branches/${branch_slug}"
   docker compose run --rm --no-deps \
-    -e "OBJECT_STORE_BUCKET=${OBJECT_STORE_BUCKET}" \
+    -e "MINIO_BUCKET=${MINIO_BUCKET}" \
+    -e "MARKER_PREFIX=${marker_prefix}" \
     -e "OBJECT_STORE_ENDPOINT_URL=${OBJECT_STORE_ENDPOINT_URL}" \
     -e "OBJECT_STORE_ACCESS_KEY_ID=${OBJECT_STORE_ACCESS_KEY_ID}" \
     -e "OBJECT_STORE_SECRET_ACCESS_KEY=${OBJECT_STORE_SECRET_ACCESS_KEY}" \
     -e "OBJECT_STORE_REGION=${OBJECT_STORE_REGION}" \
-    dlt-extractor python - <<'PY'
+    dlt-extractor python - "${action}" <<'PY'
 from __future__ import annotations
 
 import os
-from urllib.parse import urlparse
+import sys
 
 import boto3
 
 
-bucket_uri = os.environ["OBJECT_STORE_BUCKET"]
-parsed = urlparse(bucket_uri)
-bucket = parsed.netloc
-prefix = parsed.path.lstrip("/").rstrip("/")
+action = sys.argv[1]
+bucket = os.environ["MINIO_BUCKET"]
+prefix = os.environ["MARKER_PREFIX"].rstrip("/")
 key = f"{prefix}/.branch-sandbox"
 
 client = boto3.client(
@@ -62,8 +64,14 @@ client = boto3.client(
     aws_secret_access_key=os.environ["OBJECT_STORE_SECRET_ACCESS_KEY"],
     region_name=os.environ["OBJECT_STORE_REGION"],
 )
-client.put_object(Bucket=bucket, Key=key, Body=b"branch sandbox ready\n")
-print(f"ensured branch object prefix s3://{bucket}/{key}")
+if action == "ensure":
+    client.put_object(Bucket=bucket, Key=key, Body=b"branch sandbox ready\n")
+    print(f"ensured branch config marker s3://{bucket}/{key}")
+elif action == "destroy":
+    client.delete_object(Bucket=bucket, Key=key)
+    print(f"removed branch config marker s3://{bucket}/{key}")
+else:
+    raise SystemExit(f"unsupported action: {action}")
 PY
 }
 
@@ -90,7 +98,7 @@ case "${action}" in
       # shellcheck disable=SC1090
       source "${dotenv_path}"
       set +a
-      ensure_sdp_object_prefix
+      ensure_sdp_object_prefix ensure
     fi
     printf 'branch sandbox ready for %s:%s at %s\n' "${project_kind}" "${branch_name}" "${dotenv_path}"
     ;;
@@ -100,6 +108,13 @@ case "${action}" in
       exit 0
     fi
     bash ./scripts/cleanup-ci-sandbox.sh --destroy "${dotenv_path}"
+    if [ "${project_kind}" = "sdp" ]; then
+      set -a
+      # shellcheck disable=SC1090
+      source "${dotenv_path}"
+      set +a
+      ensure_sdp_object_prefix destroy
+    fi
     rm -f "${dotenv_path}"
     rmdir "$(dirname "${dotenv_path}")" 2>/dev/null || true
     printf 'branch sandbox removed for %s:%s\n' "${project_kind}" "${branch_name}"

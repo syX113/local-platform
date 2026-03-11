@@ -28,13 +28,19 @@ branch_name_raw="${CI_MERGE_REQUEST_SOURCE_BRANCH_NAME:-${CI_COMMIT_BRANCH:-${CI
 branch_token="$(sanitize_branch_token "${branch_name_raw}")"
 branch_token="${branch_token:-local}"
 clone_owner_token="$(printf '%s' "${project_kind}" | tr '[:lower:]' '[:upper:]')"
+merge_request_token_raw="${CI_MERGE_REQUEST_IID:-${CI_MERGE_REQUEST_ID:-}}"
+merge_request_token=""
+if [ -n "${merge_request_token_raw}" ]; then
+  merge_request_token="$(sanitize_branch_token "${merge_request_token_raw}")"
+fi
 
 if [ "${CI_PIPELINE_SOURCE:-}" = "merge_request_event" ]; then
   sandbox_kind="merge_request"
-  branch_seed="mr_${project_token}_${branch_token}_${CI_PIPELINE_ID:-local}"
-  clone_branch_token="mr_${branch_token}_${CI_PIPELINE_ID:-local}"
-  clone_action="replace"
-  cleanup_mode="destroy"
+  merge_request_token="${merge_request_token:-local}"
+  branch_seed="mr_${project_token}_${merge_request_token}_${branch_token}"
+  clone_branch_token="mr_${merge_request_token}_${branch_token}"
+  clone_action="ensure"
+  cleanup_mode="preserve"
 elif [ "${CI_COMMIT_BRANCH:-}" = "${CI_DEFAULT_BRANCH:-main}" ]; then
   sandbox_kind="merge"
   branch_seed="merge_${project_token}_${CI_PIPELINE_ID:-local}_${CI_COMMIT_SHORT_SHA:-head}"
@@ -57,7 +63,8 @@ namespace_suffix="$(trim_identifier "${namespace_suffix}" 40)"
 namespace_suffix="${namespace_suffix:-local}"
 db_suffix="$(printf '%s' "${namespace_suffix}" | tr '[:lower:]' '[:upper:]')"
 project_path_slug="${CI_PROJECT_PATH_SLUG:-${project_kind}}"
-object_prefix="platform/ci/${project_path_slug}/${sandbox_slug}"
+source_system_slug="${SOURCE_SYSTEM_SLUG:-postgres}"
+object_prefix="landing/ci/${project_path_slug}/${sandbox_kind}/${source_system_slug}"
 object_store_bucket="s3://${MINIO_BUCKET}/${object_prefix}"
 sdp_dbt_project="DBT_PROJECT_SDP_ORDERS_${db_suffix}"
 edp_dbt_project="DBT_PROJECT_EDP_ORDERS_${db_suffix}"
@@ -71,9 +78,12 @@ cat > "${tmp_dotenv_path}" <<EOF
 CI_SANDBOX_KIND=${sandbox_kind}
 CI_SANDBOX_PROJECT_KIND=${project_kind}
 CI_SANDBOX_SLUG=${sandbox_slug}
+CI_SANDBOX_BRANCH_NAME=${branch_name_raw}
+CI_SANDBOX_MERGE_REQUEST=${CI_MERGE_REQUEST_IID:-}
 CI_SANDBOX_CLONE_ACTION=${clone_action}
 CI_SANDBOX_CLEANUP_MODE=${cleanup_mode}
 CI_SANDBOX_OBJECT_PREFIX=${object_prefix}
+ICEBERG_CATALOG_NAME=ci_${project_kind}_${sandbox_kind}_${namespace_suffix}
 SNOWFLAKE_CLONE_OWNER_TOKEN=${clone_owner_token}
 SNOWFLAKE_CLONE_BRANCH_TOKEN=${clone_branch_token}
 SNOWFLAKE_SDP_DATABASE_BASE=${base_sdp_database}
@@ -85,10 +95,10 @@ SNOWFLAKE_SDP_DBT_PROJECT=${sdp_dbt_project}
 SNOWFLAKE_EDP_DBT_PROJECT=${edp_dbt_project}
 MINIO_PREFIX=${object_prefix}
 OBJECT_STORE_BUCKET=${object_store_bucket}
-DLT_PIPELINE_NAME=${project_kind}_${namespace_suffix}
-ICEBERG_NAMESPACE=landing_${namespace_suffix}
+DLT_PIPELINE_NAME=${project_kind}_${sandbox_kind}_${namespace_suffix}
+ICEBERG_NAMESPACE=${namespace_suffix}
 SNOW_DBT_TARGET_NAME=${sandbox_kind}
-AIRFLOW_SANDBOX_DAG_ID=DEV_${project_kind}_${namespace_suffix}
+AIRFLOW_SANDBOX_DAG_ID=$( [ "${sandbox_kind}" = "merge_request" ] && printf 'MR_%s_%s' "${project_kind}" "${namespace_suffix}" || printf 'DEV_%s_%s' "${project_kind}" "${namespace_suffix}" )
 EOF
 
 bash "${SCRIPT_DIR}/ensure-snowflake-foundation.sh" | tee "${base_bootstrap_log}"

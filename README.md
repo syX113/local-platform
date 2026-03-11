@@ -290,8 +290,10 @@ Current DEV targets:
 
 - Airflow DAG: `DEV_local_platform_ingest`
 - dlt pipeline name: `DEV_local_platform_ingest`
-- Iceberg namespace: `dev_landing`
-- MinIO/S3 prefix: `platform/dev/local_platform_ingest`
+- source system namespace: `postgres`
+- Iceberg catalog name: `dev`
+- MinIO/S3 prefix: `landing/dev`
+- resulting Iceberg layout: `landing/dev/postgres/{table_name}/...`
 - Snowflake SDP database: `DB_SDP_ORDERS`
 - Snowflake EDP database: `DB_EDP_ORDERS`
 - Snowflake dbt project objects: `DEV_DBT_PROJECT_SDP_ORDERS`, `DEV_DBT_PROJECT_EDP_ORDERS`
@@ -302,13 +304,23 @@ Current PRD targets:
 
 - Airflow DAG: `PRD_local_platform_ingest`
 - dlt pipeline name: `PRD_local_platform_ingest`
-- Iceberg namespace: `prd_landing`
-- MinIO/S3 prefix: `platform/PRD/local_platform_ingest`
+- source system namespace: `postgres`
+- Iceberg catalog name: `prd`
+- MinIO/S3 prefix: `landing/prd`
+- resulting Iceberg layout: `landing/prd/postgres/{table_name}/...`
 - Snowflake SDP database: `PRD_DB_SDP_ORDERS`
 - Snowflake EDP database: `PRD_DB_EDP_ORDERS`
 - Snowflake dbt project objects: `PRD_DBT_PROJECT_SDP_ORDERS`, `PRD_DBT_PROJECT_EDP_ORDERS`
 - PRD SDP runtime image prefix: `local-platform-prd-sdp`
 - PRD EDP runtime image prefix: `local-platform-prd-edp`
+
+Storage layout rules:
+
+- DEV ingestion writes to `landing/dev/{source_system}/{table_name}/...`
+- PRD ingestion writes to `landing/prd/{source_system}/{table_name}/...`
+- branch and MR sandboxes write to `landing/ci/{project}/{sandbox_kind}/{source_system}/{sandbox_namespace}/...`
+- sandbox marker/config files live under `config/ci/...`
+- dlt/Iceberg also create technical namespace objects such as `_dlt_*` and `init` inside the namespace root; those are expected runtime artifacts, while platform-owned config markers are kept under `config/...`
 
 This gives you a clear distinction between:
 
@@ -447,10 +459,10 @@ The Unix/macOS commands are the `.sh` entrypoints under `scripts/`. Windows host
   Triggers `parse`, `run`, `test`, or `build` on a deployed Snowflake dbt project object.
 - `./scripts/drop-snowflake-dbt-project.sh`
   Drops a Snowflake dbt project object and removes its staged project files from the Snowflake control stage.
-- `./scripts/deploy-sdp-dev.sh`
-  Deploys the owned SDP artifacts into the shared DEV target after the DEV approval step: refreshes the shared Airflow services in place, deploys the `DEV_` Airflow DAG, validates ingestion again, and deploys plus executes the SDP dbt project object natively in Snowflake.
-- `./scripts/deploy-edp-dev.sh`
-  Deploys the owned EDP artifacts into the shared DEV target after the DEV approval step by deploying plus executing the EDP dbt project object natively in Snowflake.
+- `./scripts/deploy-sdp-dev.sh`  
+  Deploys the owned SDP artifacts into the shared DEV target automatically after merge: refreshes the shared Airflow services in place, deploys the `DEV_` Airflow DAG, validates ingestion again, and deploys plus executes the SDP dbt project object natively in Snowflake.
+- `./scripts/deploy-edp-dev.sh`  
+  Deploys the owned EDP artifacts into the shared DEV target automatically after merge by deploying plus executing the EDP dbt project object natively in Snowflake.
 - `./scripts/deploy-sdp-prd.sh`
   Retags the shared runtime images to stable PRD refs, deploys the `PRD_` Airflow ingestion DAG, validates the PRD ingestion path, and deploys plus executes the SDP dbt project object in `PRD_DB_SDP_ORDERS`.
 - `./scripts/deploy-edp-prd.sh`
@@ -477,16 +489,10 @@ The Unix/macOS commands are the `.sh` entrypoints under `scripts/`. Windows host
   Internal CI helper that creates or reuses the Snowflake clone environment and, for SDP, the isolated MinIO/Iceberg namespace.
 - `./scripts/cleanup-ci-sandbox.sh`
   Internal CI helper that preserves or destroys a sandbox depending on branch/default-branch rules.
-- `./scripts/verify-sdp-cd-clone.sh`
-  Internal DEV-candidate verification for the SDP project against a fresh disposable clone of the shared DEV objects.
-- `./scripts/verify-edp-cd-clone.sh`
-  Internal DEV-candidate verification for the EDP project against a fresh disposable clone of the shared DEV objects.
-- `./scripts/verify-sdp-prd-clone.sh`
-  Internal PRD-candidate verification for the SDP project against a fresh disposable clone of the current PRD objects plus a temporary PRD-scoped MinIO/Iceberg namespace.
-- `./scripts/verify-edp-prd-clone.sh`
-  Internal PRD-candidate verification for the EDP project against a fresh disposable clone of the current PRD objects.
+- `./scripts/manage-merge-request-sandbox.sh`
+  Internal helper for merge-request-scoped sandbox lifecycle. It provisions MR clones when a merge request is opened and destroys them again when the merge request is merged or closed.
 - `./scripts/require-approver-match-commit.sh`
-  Internal approval guard used by GitLab manual jobs. It checks that the GitLab user who played the approval step matches the checked-out commit identity before DEV or PRD deployment is allowed to continue.
+  Internal approval guard used by GitLab manual PRD jobs. It checks that the GitLab user who played the approval step matches the checked-out commit identity before PRD deployment is allowed to continue.
 
 ### Scaffolding New Assets
 
@@ -558,11 +564,12 @@ Each generated project ships its own `.gitlab-ci.yml` with isolated CI/CD verifi
 - later non-default branch push pipelines reuse one stable branch-scoped Snowflake zero-copy environment so developers do not touch the shared DEV databases
 - the SDP pipeline also reuses one stable branch-scoped MinIO/S3 prefix, dlt pipeline name, and Iceberg namespace
 - branch CI runs `sqlfluff lint` plus repeated Snowflake-native `dbt parse`, `dbt run`, and `dbt test` validations against that preserved sandbox
-- merge request pipelines validate again against a fresh disposable DEV-style zero-copy clone
-- default-branch pipelines validate again against a fresh disposable DEV-style zero-copy clone, then stop at a manual approval gate that must be played by the commit identity, then deploy into the shared DEV target
-- PRD deployment is a separate manual default-branch pipeline run with `RELEASE_TO_PRD=true`; it validates against a fresh disposable PRD-style zero-copy clone, then stops at another manual approval gate, then deploys into the shared PRD target
+- opening a merge request creates one MR-scoped zero-copy environment; MR pipelines validate there in detail and that MR sandbox stays alive until the merge request is merged or closed
+- merging the merge request to `main` triggers the post-merge CD pipeline automatically; it deploys directly into the shared DEV target
+- the same post-merge pipeline then stops at a manual PRD approval gate that must be played by the commit identity, and only then deploys into the shared PRD target
 - non-default branch pipelines preserve the branch sandbox after the pipeline
 - branch sandboxes can be destroyed explicitly with the manual cleanup jobs in GitLab and are also destroyed automatically when the branch itself is deleted in GitLab
+- if the source branch is kept after merge, the branch sandbox also stays in place until that branch is explicitly deleted
 
 The SDP project pipeline is intentionally split into two CI validation steps so cold-start GitLab runs stay stable:
 
@@ -575,8 +582,8 @@ The EDP project pipeline keeps a single CI validation step because it only owns 
 
 Default-branch and PRD pipelines now include real deployment jobs:
 
-- `deploy_sdp_dev`: deploys the shared DEV Airflow DAG, DEV dlt runtime settings, and the SDP Snowflake dbt project artifacts after the DEV approval step
-- `deploy_edp_dev`: deploys the shared DEV EDP Snowflake dbt project artifacts after the DEV approval step
+- `deploy_sdp_dev`: deploys the shared DEV Airflow DAG, DEV dlt runtime settings, and the SDP Snowflake dbt project artifacts automatically after merge
+- `deploy_edp_dev`: deploys the shared DEV EDP Snowflake dbt project artifacts automatically after merge
 - `deploy_sdp_prd`: deploys the PRD Airflow DAG plus the PRD SDP Snowflake dbt project artifacts
 - `deploy_edp_prd`: deploys the PRD EDP Snowflake dbt project artifacts
 
@@ -585,9 +592,10 @@ The expected GitLab operator flow is:
 1. Create a new branch in `proj_sdp_orders` or `proj_edp_orders`.
 2. Wait for the platform webhook handler to create the isolated branch sandbox automatically.
 3. Push commits to that branch and rerun the branch CI pipeline as often as needed.
-4. Open a merge request and let the MR pipeline validate again on a fresh disposable clone.
-5. Merge to `main`, let the default-branch pipeline validate again on a fresh disposable DEV clone, then manually approve the DEV deployment.
-6. When you want to deploy to PRD, run a manual `main` pipeline with `RELEASE_TO_PRD=true`, wait for the PRD clone verification to pass, then manually approve the PRD deployment.
+4. Open a merge request. The platform creates an MR-scoped sandbox automatically and the MR pipeline validates the candidate there in detail.
+5. Merge the merge request to `main`. The post-merge default-branch pipeline deploys to the shared DEV target automatically.
+6. If the DEV deployment is green, play the PRD approval job in that same post-merge pipeline. The PRD deployment then starts automatically.
+7. If the merge request is closed or merged, the MR-scoped sandbox is destroyed automatically. If the source branch is deleted too, the branch-scoped sandbox is destroyed as well.
 
 Those generated CI pipelines assume the base local platform has already been started with `./scripts/bootstrap.sh` and `./scripts/bootstrap-gitlab.sh`. They reuse the shared local runtime images and services instead of rebuilding or destroying the full platform stack inside the runner.
 

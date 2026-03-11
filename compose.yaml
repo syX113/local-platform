@@ -24,6 +24,7 @@ x-common-env: &common-env
   OBJECT_STORE_USE_SSL: ${OBJECT_STORE_USE_SSL}
   DLT_PIPELINE_NAME: ${DLT_PIPELINE_NAME}
   DLT_REFRESH_MODE: ${DLT_REFRESH_MODE}
+  ICEBERG_CATALOG_NAME: ${ICEBERG_CATALOG_NAME}
   ICEBERG_NAMESPACE: ${ICEBERG_NAMESPACE}
   ICEBERG_CATALOG_TYPE: ${ICEBERG_CATALOG_TYPE}
   ICEBERG_SQL_URI: ${ICEBERG_SQL_URI}
@@ -102,9 +103,7 @@ services:
       timeout: 5s
       retries: 10
     networks:
-      platform:
-        aliases:
-          - ${GITLAB_BRANCH_PROVISIONER_WEBHOOK_HOST:-gitlab-branch-provisioner.local}
+      - platform
     ports:
       - "${AIRFLOW_METADATA_DB_PORT:-5432}:5432"
     volumes:
@@ -236,7 +235,9 @@ services:
       GITLAB_BRANCH_PROVISIONER_STATE_DIR: /var/lib/local-platform/branch-provisioner
       LOCAL_PLATFORM_ROOT: ${LOCAL_PLATFORM_ROOT}
     networks:
-      - platform
+      platform:
+        aliases:
+          - ${GITLAB_BRANCH_PROVISIONER_WEBHOOK_HOST:-gitlab-branch-provisioner}
     restart: unless-stopped
     working_dir: "${LOCAL_PLATFORM_ROOT}"
     volumes:

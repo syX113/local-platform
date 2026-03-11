@@ -12,10 +12,6 @@ cd "${ROOT_DIR}"
 source "${SCRIPT_DIR}/common.sh"
 ensure_platform_env
 
-if [ -z "${CI_SANDBOX_KIND:-}" ]; then
-  export_dev_runtime_env
-fi
-
 dbt_target_name="${SNOW_DBT_TARGET_NAME:-dev}"
 
 skip_foundation="false"

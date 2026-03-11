@@ -50,12 +50,17 @@ if ([string]::IsNullOrEmpty($dltPipelineName)) {
 
 $icebergNamespace = Get-EnvValue -Name "DEV_ICEBERG_NAMESPACE"
 if ([string]::IsNullOrEmpty($icebergNamespace)) {
-    $icebergNamespace = "dev_landing"
+    $icebergNamespace = "postgres"
+}
+
+$icebergCatalogName = Get-EnvValue -Name "DEV_ICEBERG_CATALOG_NAME"
+if ([string]::IsNullOrEmpty($icebergCatalogName)) {
+    $icebergCatalogName = "dev"
 }
 
 $minioPrefix = Get-EnvValue -Name "DEV_MINIO_PREFIX"
 if ([string]::IsNullOrEmpty($minioPrefix)) {
-    $minioPrefix = "platform/dev/local_platform_ingest"
+    $minioPrefix = "landing/dev"
 }
 
 $minioBucket = Get-EnvValue -Name "MINIO_BUCKET"
@@ -135,6 +140,7 @@ dag = build_ingest_dag(
     description=$(Convert-ToPythonStringLiteral -Value "DEV deployment for $devDagId."),
     runtime_overrides={
         "DLT_PIPELINE_NAME": $(Convert-ToPythonStringLiteral -Value $dltPipelineName),
+        "ICEBERG_CATALOG_NAME": $(Convert-ToPythonStringLiteral -Value $icebergCatalogName),
         "ICEBERG_NAMESPACE": $(Convert-ToPythonStringLiteral -Value $icebergNamespace),
         "MINIO_PREFIX": $(Convert-ToPythonStringLiteral -Value $minioPrefix),
         "OBJECT_STORE_BUCKET": $(Convert-ToPythonStringLiteral -Value $objectStoreBucket),

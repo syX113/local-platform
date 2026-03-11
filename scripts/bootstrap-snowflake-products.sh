@@ -27,6 +27,13 @@ done
 echo "reloading deterministic source sample data"
 ./scripts/load-source-sample-data.sh
 
+if [ "${ICEBERG_CATALOG_TYPE:-sql}" = "sql" ]; then
+  echo "clearing local SQL Iceberg catalog entries"
+  docker compose exec -T airflow-metadata-db \
+    psql -U "${AIRFLOW_METADATA_DB_USER}" -d iceberg_catalog \
+    -c "truncate table iceberg_tables, iceberg_namespace_properties restart identity cascade;" >/dev/null
+fi
+
 echo "dropping lingering Snowflake CI clone databases"
 bash ./scripts/cleanup-snowflake-ci-clones.sh
 

@@ -44,7 +44,7 @@ def catalog_config() -> dict[str, str]:
 
 
 def main() -> None:
-    catalog = load_catalog("default", **catalog_config())
+    catalog = load_catalog(os.environ.get("ICEBERG_CATALOG_NAME", "default"), **catalog_config())
     namespace = (os.environ.get("ICEBERG_NAMESPACE", "landing"),)
     try:
         catalog.create_namespace(namespace)

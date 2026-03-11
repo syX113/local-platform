@@ -22,7 +22,8 @@ STATE_DIR = Path(
         ROOT_DIR / "gitlab-branch-provisioner" / "state",
     )
 )
-STATE_FILE = STATE_DIR / "managed-branches.json"
+BRANCH_STATE_FILE = STATE_DIR / "managed-branches.json"
+MR_STATE_FILE = STATE_DIR / "managed-merge-requests.json"
 BOOTSTRAP_ENV = ROOT_DIR / "gitlab-runner" / "generated" / "bootstrap.env"
 PROJECTS_ENV = ROOT_DIR / "gitlab-runner" / "generated" / "projects.env"
 GITLAB_URL = os.environ.get("GITLAB_URL_INTERNAL", "http://gitlab").rstrip("/")
@@ -56,8 +57,9 @@ def gitlab_slug(raw: str) -> str:
     return slug[:63] or "local"
 
 
-def file_token(project_kind: str, project_slug: str, branch_name: str) -> str:
-    token = re.sub(r"[^a-z0-9]+", "_", f"{project_kind}_{project_slug}_{branch_name}".lower()).strip("_")
+def file_token(*parts: str) -> str:
+    raw = "_".join(part for part in parts if part)
+    token = re.sub(r"[^a-z0-9]+", "_", raw.lower()).strip("_")
     return token[:120] or "local"
 
 
@@ -65,15 +67,19 @@ def env_path_for(project_kind: str, project_slug: str, branch_name: str) -> Path
     return STATE_DIR / project_kind / f"{file_token(project_kind, project_slug, branch_name)}.env"
 
 
-def load_state() -> list[dict[str, str]]:
-    if not STATE_FILE.exists():
+def mr_env_path_for(project_kind: str, project_slug: str, mr_iid: str, branch_name: str) -> Path:
+    return STATE_DIR / "merge_requests" / f"{file_token('mr', project_kind, project_slug, mr_iid, branch_name)}.env"
+
+
+def load_state(path: Path) -> list[dict[str, str]]:
+    if not path.exists():
         return []
-    return json.loads(STATE_FILE.read_text(encoding="utf-8"))
+    return json.loads(path.read_text(encoding="utf-8"))
 
 
-def save_state(entries: list[dict[str, str]]) -> None:
+def save_state(path: Path, entries: list[dict[str, str]]) -> None:
     STATE_DIR.mkdir(parents=True, exist_ok=True)
-    STATE_FILE.write_text(json.dumps(entries, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    path.write_text(json.dumps(entries, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
 
 def gitlab_api(token: str, path: str) -> Any:
@@ -128,6 +134,10 @@ def branch_list(token: str, project_id: str) -> list[dict[str, Any]]:
     return gitlab_api(token, f"/projects/{project_id}/repository/branches?per_page=100")
 
 
+def merge_request_list(token: str, project_id: str) -> list[dict[str, Any]]:
+    return gitlab_api(token, f"/projects/{project_id}/merge_requests?state=opened&per_page=100")
+
+
 def project_details(token: str, project_id: str) -> dict[str, Any]:
     return gitlab_api(token, f"/projects/{project_id}")
 
@@ -136,12 +146,24 @@ def key_for(entry: dict[str, str]) -> str:
     return f"{entry['project_kind']}::{entry['project_slug']}::{entry['branch_name']}"
 
 
-def state_map() -> dict[str, dict[str, str]]:
-    return {key_for(entry): entry for entry in load_state()}
+def mr_key_for(entry: dict[str, str]) -> str:
+    return f"{entry['project_kind']}::{entry['project_slug']}::{entry['mr_iid']}"
 
 
-def persist_state(known: dict[str, dict[str, str]]) -> None:
-    save_state(sorted(known.values(), key=lambda item: (item["project_kind"], item["branch_name"])))
+def branch_state_map() -> dict[str, dict[str, str]]:
+    return {key_for(entry): entry for entry in load_state(BRANCH_STATE_FILE)}
+
+
+def mr_state_map() -> dict[str, dict[str, str]]:
+    return {mr_key_for(entry): entry for entry in load_state(MR_STATE_FILE)}
+
+
+def persist_branch_state(known: dict[str, dict[str, str]]) -> None:
+    save_state(BRANCH_STATE_FILE, sorted(known.values(), key=lambda item: (item["project_kind"], item["branch_name"])))
+
+
+def persist_mr_state(known: dict[str, dict[str, str]]) -> None:
+    save_state(MR_STATE_FILE, sorted(known.values(), key=lambda item: (item["project_kind"], item["mr_iid"])))
 
 
 def run_manage(action: str, project_kind: str, project_slug: str, branch_name: str, default_branch: str) -> None:
@@ -193,12 +215,38 @@ def current_branch_entries(token: str, projects: list[dict[str, str]]) -> list[d
     return entries
 
 
+def current_merge_request_entries(token: str, projects: list[dict[str, str]]) -> list[dict[str, str]]:
+    entries: list[dict[str, str]] = []
+    for project in projects:
+        details = project_details(token, project["id"])
+        default_branch = details.get("default_branch") or "main"
+        project_slug = gitlab_slug(details.get("path_with_namespace", f"root/{project['path']}"))
+        for merge_request in merge_request_list(token, project["id"]):
+            source_branch = merge_request.get("source_branch") or ""
+            target_branch = merge_request.get("target_branch") or ""
+            mr_iid = str(merge_request.get("iid") or "")
+            if not source_branch or not mr_iid or source_branch == default_branch or target_branch != default_branch:
+                continue
+            entries.append(
+                {
+                    "project_id": project["id"],
+                    "project_kind": project["kind"],
+                    "project_path": project["path"],
+                    "project_slug": project_slug,
+                    "default_branch": default_branch,
+                    "branch_name": source_branch,
+                    "mr_iid": mr_iid,
+                }
+            )
+    return entries
+
+
 def ensure_entry(entry: dict[str, str]) -> None:
     env_path = env_path_for(entry["project_kind"], entry["project_slug"], entry["branch_name"])
     key = key_for(entry)
 
     with STATE_LOCK:
-        known = state_map()
+        known = branch_state_map()
         if key in known and env_path.exists():
             return
 
@@ -212,9 +260,9 @@ def ensure_entry(entry: dict[str, str]) -> None:
     )
 
     with STATE_LOCK:
-        known = state_map()
+        known = branch_state_map()
         known[key] = entry
-        persist_state(known)
+        persist_branch_state(known)
 
 
 def destroy_entry(entry: dict[str, str]) -> None:
@@ -222,7 +270,7 @@ def destroy_entry(entry: dict[str, str]) -> None:
     key = key_for(entry)
 
     with STATE_LOCK:
-        known = state_map()
+        known = branch_state_map()
         if key not in known and not env_path.exists():
             return
 
@@ -236,18 +284,106 @@ def destroy_entry(entry: dict[str, str]) -> None:
     )
 
     with STATE_LOCK:
-        known = state_map()
+        known = branch_state_map()
         known.pop(key, None)
-        persist_state(known)
+        persist_branch_state(known)
+
+
+def ensure_mr_entry(entry: dict[str, str]) -> None:
+    env_path = mr_env_path_for(entry["project_kind"], entry["project_slug"], entry["mr_iid"], entry["branch_name"])
+    key = mr_key_for(entry)
+
+    with STATE_LOCK:
+        known = mr_state_map()
+        if key in known and env_path.exists():
+            return
+
+    log(
+        "detected merge request sandbox target "
+        f"{entry['project_kind']}:!{entry['mr_iid']} ({entry['branch_name']}) -> provision"
+    )
+    command = [
+        "bash",
+        str(ROOT_DIR / "scripts" / "manage-merge-request-sandbox.sh"),
+        "provision",
+        entry["project_kind"],
+        entry["project_slug"],
+        entry["branch_name"],
+        entry["default_branch"],
+        entry["mr_iid"],
+    ]
+    completed = subprocess.run(
+        command,
+        cwd=ROOT_DIR,
+        check=False,
+        capture_output=True,
+        text=True,
+        env=os.environ.copy(),
+    )
+    if completed.stdout:
+        print(completed.stdout, end="", flush=True)
+    if completed.stderr:
+        print(completed.stderr, end="", file=sys.stderr, flush=True)
+    if completed.returncode != 0:
+        raise RuntimeError(f"merge request sandbox command failed: {' '.join(command)}")
+
+    with STATE_LOCK:
+        known = mr_state_map()
+        known[key] = entry
+        persist_mr_state(known)
+
+
+def destroy_mr_entry(entry: dict[str, str]) -> None:
+    env_path = mr_env_path_for(entry["project_kind"], entry["project_slug"], entry["mr_iid"], entry["branch_name"])
+    key = mr_key_for(entry)
+
+    with STATE_LOCK:
+        known = mr_state_map()
+        if key not in known and not env_path.exists():
+            return
+
+    log(f"merge request disappeared from GitLab {entry['project_kind']}:!{entry['mr_iid']} -> destroy")
+    command = [
+        "bash",
+        str(ROOT_DIR / "scripts" / "manage-merge-request-sandbox.sh"),
+        "destroy",
+        entry["project_kind"],
+        entry["project_slug"],
+        entry["branch_name"],
+        entry["default_branch"],
+        entry["mr_iid"],
+    ]
+    completed = subprocess.run(
+        command,
+        cwd=ROOT_DIR,
+        check=False,
+        capture_output=True,
+        text=True,
+        env=os.environ.copy(),
+    )
+    if completed.stdout:
+        print(completed.stdout, end="", flush=True)
+    if completed.stderr:
+        print(completed.stderr, end="", file=sys.stderr, flush=True)
+    if completed.returncode != 0:
+        raise RuntimeError(f"merge request sandbox command failed: {' '.join(command)}")
+
+    with STATE_LOCK:
+        known = mr_state_map()
+        known.pop(key, None)
+        persist_mr_state(known)
 
 
 def reconcile_once() -> tuple[str, list[dict[str, str]]]:
     token, projects = wait_for_bootstrap()
     desired_entries = current_branch_entries(token, projects)
     current = {key_for(entry): entry for entry in desired_entries}
+    desired_mr_entries = current_merge_request_entries(token, projects)
+    current_mrs = {mr_key_for(entry): entry for entry in desired_mr_entries}
 
     with STATE_LOCK:
-        known = state_map()
+        known = branch_state_map()
+        known_mrs = mr_state_map()
 
     for key, entry in current.items():
         env_path = env_path_for(entry["project_kind"], entry["project_slug"], entry["branch_name"])
@@ -281,10 +417,42 @@ def reconcile_once() -> tuple[str, list[dict[str, str]]]:
         known.pop(key, None)
 
     with STATE_LOCK:
-        persist_state(known)
+        persist_branch_state(known)
+
+    for key, entry in current_mrs.items():
+        env_path = mr_env_path_for(entry["project_kind"], entry["project_slug"], entry["mr_iid"], entry["branch_name"])
+        if key in known_mrs and env_path.exists():
+            continue
+        log(f"startup reconciliation provisioning {entry['project_kind']}:!{entry['mr_iid']}")
+        ensure_mr_entry(entry)
+        known_mrs[key] = entry
+
+    for key, entry in list(known_mrs.items()):
+        if key in current_mrs:
+            continue
+        env_path = mr_env_path_for(entry["project_kind"], entry["project_slug"], entry["mr_iid"], entry["branch_name"])
+        if not env_path.exists():
+            known_mrs.pop(key, None)
+            continue
+        log(f"startup reconciliation destroying stale merge request sandbox {entry['project_kind']}:!{entry['mr_iid']}")
+        destroy_mr_entry(entry)
+        known_mrs.pop(key, None)
+
+    with STATE_LOCK:
+        persist_mr_state(known_mrs)
 
     log("startup reconciliation complete")
     return token, projects
+
+
+def reconcile_forever() -> None:
+    while True:
+        try:
+            reconcile_once()
+            return
+        except Exception as exc:  # noqa: BLE001
+            log(f"startup reconciliation failed: {exc}")
+            time.sleep(5)
 
 
 def branch_name_from_ref(ref: str) -> str:
@@ -296,7 +464,7 @@ def branch_name_from_ref(ref: str) -> str:
 
 def project_lookup(projects: list[dict[str, str]], payload: dict[str, Any]) -> dict[str, str] | None:
     project = payload.get("project", {})
-    payload_project_id = str(project.get("id", ""))
+    payload_project_id = str(project.get("id") or payload.get("project_id") or "")
     payload_path = project.get("path_with_namespace", "")
 
     for candidate in projects:
@@ -326,6 +494,36 @@ def project_lookup(projects: list[dict[str, str]], payload: dict[str, Any]) -> d
     return None
 
 
+def handle_push_change(
+    project_info: dict[str, str],
+    branch_name: str,
+    before: str,
+    after: str,
+    source_label: str,
+) -> None:
+    if not branch_name:
+        log(f"ignoring {source_label} webhook without branch ref")
+        return
+
+    if branch_name == project_info["default_branch"]:
+        return
+
+    entry = {
+        **project_info,
+        "branch_name": branch_name,
+    }
+
+    if after == ZERO_SHA:
+        destroy_entry(entry)
+        return
+
+    if before == ZERO_SHA:
+        log(f"received {source_label} branch-create webhook for {project_info['project_kind']}:{branch_name}")
+    else:
+        log(f"received {source_label} branch-update webhook for {project_info['project_kind']}:{branch_name}")
+    ensure_entry(entry)
+
+
 class WebhookHandler(BaseHTTPRequestHandler):
     server_version = "LocalPlatformBranchProvisioner/1.0"
 
@@ -338,7 +536,10 @@ class WebhookHandler(BaseHTTPRequestHandler):
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
-        self.wfile.write(body)
+        try:
+            self.wfile.write(body)
+        except BrokenPipeError:
+            return
 
     def do_GET(self) -> None:  # noqa: N802
         if self.path == "/health":
@@ -368,60 +569,101 @@ class WebhookHandler(BaseHTTPRequestHandler):
             self._send_json(HTTPStatus.BAD_REQUEST, {"error": "invalid json"})
             return
 
-        try:
-            self.handle_payload(payload)
-        except Exception as exc:  # noqa: BLE001
-            log(f"branch provisioner webhook failed: {exc}")
-            self._send_json(HTTPStatus.INTERNAL_SERVER_ERROR, {"error": str(exc)})
-            return
-
+        threading.Thread(target=process_webhook_payload, args=(payload,), daemon=True).start()
         self._send_json(HTTPStatus.OK, {"status": "accepted"})
 
-    def handle_payload(self, payload: dict[str, Any]) -> None:
-        object_kind = payload.get("object_kind", "")
-        if object_kind != "push":
-            log(f"ignoring unsupported webhook kind: {object_kind or '<empty>'}")
-            return
 
+def process_webhook_payload(payload: dict[str, Any]) -> None:
+    try:
+        object_kind = payload.get("object_kind", "") or payload.get("event_name", "")
         token, projects = wait_for_bootstrap()
         _ = token
-        project_info = project_lookup(projects, payload)
-        if not project_info:
-            log("ignoring webhook for unmanaged GitLab project")
+
+        if object_kind == "push":
+            project_info = project_lookup(projects, payload)
+            if not project_info:
+                log("ignoring webhook for unmanaged GitLab project")
+                return
+
+            handle_push_change(
+                project_info,
+                branch_name_from_ref(payload.get("ref", "")),
+                payload.get("before", ""),
+                payload.get("after", ""),
+                "project",
+            )
             return
 
-        branch_name = branch_name_from_ref(payload.get("ref", ""))
-        if not branch_name:
-            log("ignoring webhook without branch ref")
+        if object_kind == "repository_update":
+            project_info = project_lookup(projects, payload)
+            if not project_info:
+                log("ignoring repository_update webhook for unmanaged GitLab project")
+                return
+
+            changes = payload.get("changes") or []
+            if not isinstance(changes, list):
+                changes = []
+            if not changes:
+                log("ignoring repository_update webhook without change list")
+                return
+
+            for change in changes:
+                handle_push_change(
+                    project_info,
+                    branch_name_from_ref(str(change.get("ref", ""))),
+                    str(change.get("before", "")),
+                    str(change.get("after", "")),
+                    "system",
+                )
             return
 
-        if branch_name == project_info["default_branch"]:
+        if object_kind == "merge_request":
+            project_info = project_lookup(projects, payload)
+            if not project_info:
+                log("ignoring merge request webhook for unmanaged GitLab project")
+                return
+
+            attributes = payload.get("object_attributes", {})
+            branch_name = attributes.get("source_branch", "")
+            target_branch = attributes.get("target_branch", "")
+            mr_iid = str(attributes.get("iid") or attributes.get("id") or "")
+            action = attributes.get("action") or ""
+            state = attributes.get("state") or ""
+
+            if not branch_name or not mr_iid or branch_name == project_info["default_branch"]:
+                log("ignoring merge request webhook without usable source branch")
+                return
+
+            if target_branch != project_info["default_branch"]:
+                log("ignoring merge request webhook that does not target the default branch")
+                return
+
+            entry = {
+                **project_info,
+                "branch_name": branch_name,
+                "mr_iid": mr_iid,
+            }
+
+            if action in {"close", "merge"} or state in {"closed", "merged"}:
+                destroy_mr_entry(entry)
+                return
+
+            log(
+                "received merge request webhook for "
+                f"{project_info['project_kind']}:!{mr_iid} ({branch_name}) action={action or '<unset>'}"
+            )
+            ensure_mr_entry(entry)
             return
 
-        entry = {
-            **project_info,
-            "branch_name": branch_name,
-        }
-
-        before = payload.get("before", "")
-        after = payload.get("after", "")
-
-        if after == ZERO_SHA:
-            destroy_entry(entry)
-            return
-
-        # Branch creation and ordinary pushes both ensure the same stable sandbox.
-        if before == ZERO_SHA:
-            log(f"received branch-create webhook for {project_info['project_kind']}:{branch_name}")
-        else:
-            log(f"received branch-update webhook for {project_info['project_kind']}:{branch_name}")
-        ensure_entry(entry)
+        log(f"ignoring unsupported webhook kind: {object_kind or '<empty>'}")
+    except Exception as exc:  # noqa: BLE001
+        log(f"branch provisioner webhook failed: {exc}")
 
 
 def main() -> int:
     log("starting GitLab branch provisioner")
-    reconcile_once()
     server = ThreadingHTTPServer((WEBHOOK_HOST, WEBHOOK_PORT), WebhookHandler)
+    threading.Thread(target=reconcile_forever, daemon=True).start()
     log(f"branch provisioner listening on http://{WEBHOOK_HOST}:{WEBHOOK_PORT}")
     server.serve_forever()
     return 0

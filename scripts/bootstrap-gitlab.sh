@@ -186,19 +186,44 @@ import os
 import sys
 
 hook_url = os.environ["HOOK_URL"]
+fallback_hosts = {
+    "http://gitlab-branch-provisioner.local:8090/gitlab/webhook",
+    "http://gitlab-branch-provisioner:8090/gitlab/webhook",
+}
+matches = []
 for hook in json.load(sys.stdin):
-    if hook.get("url") == hook_url:
-        print(hook["id"])
-        break
+    url = hook.get("url")
+    if url == hook_url:
+        matches.insert(0, str(hook["id"]))
+    elif url in fallback_hosts:
+        matches.append(str(hook["id"]))
+for hook_id in matches:
+    print(hook_id)
 ' <<<"${hooks_json}"
 }
 
-ensure_project_branch_webhook() {
+delete_project_hook() {
+  local project_id="${1:?project id is required}"
+  local hook_id="${2:?hook id is required}"
+
+  gitlab_api_request DELETE "/projects/${project_id}/hooks/${hook_id}" >/dev/null
+}
+
+ensure_project_platform_webhook() {
   local project_id="${1:?project id is required}"
   local hook_url="${2:?hook url is required}"
-  local hook_id
+  local hook_ids hook_id extra_hook_id
 
-  hook_id="$(project_hook_id_by_url "${project_id}" "${hook_url}")"
+  hook_ids="$(project_hook_id_by_url "${project_id}" "${hook_url}")"
+  hook_id="$(printf '%s\n' "${hook_ids}" | sed -n '1p')"
+
+  if [ -n "${hook_ids}" ]; then
+    while IFS= read -r extra_hook_id; do
+      [ -n "${extra_hook_id}" ] || continue
+      [ "${extra_hook_id}" = "${hook_id}" ] && continue
+      delete_project_hook "${project_id}" "${extra_hook_id}"
+    done <<<"${hook_ids}"
+  fi
 
   if [ -n "${hook_id}" ]; then
     gitlab_api_request PUT "/projects/${project_id}/hooks/${hook_id}" \
@@ -206,7 +231,7 @@ ensure_project_branch_webhook() {
       --data-urlencode "push_events=true" \
       --data-urlencode "tag_push_events=false" \
       --data-urlencode "issues_events=false" \
-      --data-urlencode "merge_requests_events=false" \
+      --data-urlencode "merge_requests_events=true" \
       --data-urlencode "job_events=false" \
       --data-urlencode "pipeline_events=false" \
       --data-urlencode "wiki_page_events=false" \
@@ -220,12 +245,80 @@ ensure_project_branch_webhook() {
     --data-urlencode "push_events=true" \
     --data-urlencode "tag_push_events=false" \
     --data-urlencode "issues_events=false" \
-    --data-urlencode "merge_requests_events=false" \
+    --data-urlencode "merge_requests_events=true" \
     --data-urlencode "job_events=false" \
     --data-urlencode "pipeline_events=false" \
     --data-urlencode "wiki_page_events=false" \
     --data-urlencode "enable_ssl_verification=false" \
     --data-urlencode "token=${BRANCH_PROVISIONER_TOKEN}" >/dev/null
+}
+
+ensure_system_platform_webhook() {
+  local hook_url="${1:?hook url is required}"
+  local hooks_json existing_hook_ids existing_hook_id extra_hook_id webhook_token
+  webhook_token="${GITLAB_BRANCH_PROVISIONER_WEBHOOK_TOKEN:-local-platform-branch-provisioner}"
+
+  hooks_json="$(gitlab_api_request GET "/hooks")"
+  existing_hook_ids="$(printf '%s' "${hooks_json}" | python3 -c '
+import json
+import sys
+
+target = sys.argv[1]
+fallback_hosts = {
+    "http://gitlab-branch-provisioner.local:8090/gitlab/webhook",
+    "http://gitlab-branch-provisioner:8090/gitlab/webhook",
+}
+matches = []
+for hook in json.load(sys.stdin):
+    url = hook.get("url")
+    if url == target:
+        matches.insert(0, str(hook["id"]))
+    elif url in fallback_hosts:
+        matches.append(str(hook["id"]))
+for hook_id in matches:
+    print(hook_id)
+' "${hook_url}")"
+  existing_hook_id="$(printf '%s\n' "${existing_hook_ids}" | sed -n '1p')"
+
+  if [ -n "${existing_hook_ids}" ]; then
+    while IFS= read -r extra_hook_id; do
+      [ -n "${extra_hook_id}" ] || continue
+      [ "${extra_hook_id}" = "${existing_hook_id}" ] && continue
+      gitlab_api_request DELETE "/hooks/${extra_hook_id}" >/dev/null
+    done <<<"${existing_hook_ids}"
+  fi
+
+  if [ -n "${existing_hook_id}" ]; then
+    gitlab_api_request PUT "/hooks/${existing_hook_id}" \
+      --data-urlencode "url=${hook_url}" \
+      --data-urlencode "push_events=true" \
+      --data-urlencode "merge_requests_events=true" \
+      --data-urlencode "repository_update_events=true" \
+      --data-urlencode "tag_push_events=false" \
+      --data-urlencode "enable_ssl_verification=false" \
+      --data-urlencode "token=${webhook_token}" >/dev/null
+  else
+    gitlab_api_request POST "/hooks" \
+      --data-urlencode "url=${hook_url}" \
+      --data-urlencode "name=local-platform-branch-provisioner" \
+      --data-urlencode "description=Platform-wide branch and MR sandbox provisioning" \
+      --data-urlencode "push_events=true" \
+      --data-urlencode "merge_requests_events=true" \
+      --data-urlencode "repository_update_events=true" \
+      --data-urlencode "tag_push_events=false" \
+      --data-urlencode "enable_ssl_verification=false" \
+      --data-urlencode "token=${webhook_token}" >/dev/null
+  fi
+}
+
+configure_project_merge_policy() {
+  local project_id="${1:?project id is required}"
+
+  gitlab_api_request PUT "/projects/${project_id}" \
+    --data-urlencode "only_allow_merge_if_pipeline_succeeds=true" \
+    --data-urlencode "remove_source_branch_after_merge=false" \
+    --data-urlencode "merge_method=merge" \
+    --data-urlencode "squash_option=never" >/dev/null
 }
 
 render_runner_config() {
@@ -298,7 +391,7 @@ SDP_RUNNER_DESCRIPTION="${RUNNER_PREFIX}-sdp"
 EDP_RUNNER_DESCRIPTION="${RUNNER_PREFIX}-edp"
 BRANCH_PROVISIONER_PORT="${GITLAB_BRANCH_PROVISIONER_PORT:-8090}"
 BRANCH_PROVISIONER_TOKEN="${GITLAB_BRANCH_PROVISIONER_WEBHOOK_TOKEN:-local-platform-branch-provisioner}"
-BRANCH_PROVISIONER_HOST="${GITLAB_BRANCH_PROVISIONER_WEBHOOK_HOST:-gitlab-branch-provisioner.local}"
+BRANCH_PROVISIONER_HOST="${GITLAB_BRANCH_PROVISIONER_WEBHOOK_HOST:-gitlab-branch-provisioner}"
 
 echo "creating or resolving SDP GitLab project"
 read -r SDP_PROJECT_ID SDP_PROJECT_STATUS <<<"$(create_or_resolve_project "${SDP_PROJECT_NAME}" "${SDP_PROJECT_PATH}")"
@@ -330,16 +423,23 @@ render_runner_config \
   "${EDP_RUNNER_DESCRIPTION}" "${EDP_RUNNER_TOKEN}"
 
 docker compose up -d gitlab-branch-provisioner
+docker compose restart gitlab-branch-provisioner
 
 branch_hook_url="http://${BRANCH_PROVISIONER_HOST}:${BRANCH_PROVISIONER_PORT}/gitlab/webhook"
 
+echo "configuring GitLab system webhook"
+ensure_system_platform_webhook "${branch_hook_url}"
+
 echo "configuring SDP GitLab branch webhook"
-ensure_project_branch_webhook "${SDP_PROJECT_ID}" "${branch_hook_url}"
+configure_project_merge_policy "${SDP_PROJECT_ID}"
+ensure_project_platform_webhook "${SDP_PROJECT_ID}" "${branch_hook_url}"
 
 echo "configuring EDP GitLab branch webhook"
-ensure_project_branch_webhook "${EDP_PROJECT_ID}" "${branch_hook_url}"
+configure_project_merge_policy "${EDP_PROJECT_ID}"
+ensure_project_platform_webhook "${EDP_PROJECT_ID}" "${branch_hook_url}"
 
 docker compose up -d gitlab-fargate-runner
+docker compose restart gitlab-fargate-runner
 
 echo "syncing GitLab CI variables before initial publish"
 ./scripts/sync-gitlab-ci-variables.sh

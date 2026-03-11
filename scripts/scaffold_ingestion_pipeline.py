@@ -23,6 +23,9 @@ def main() -> int:
     slug = require_slug(args.slug)
     dag_id = args.dag_id or f"{slug}_ingest"
     namespace = args.namespace or slug
+    source_system_slug = "postgres"
+    catalog_name = "dev"
+    object_prefix = f"landing/dev/{source_system_slug}"
 
     dlt_script = ROOT_DIR / "dlt" / f"{slug}_pipeline.py"
     dag_file = ROOT_DIR / "airflow" / "dags" / f"{slug}_pipeline.py"
@@ -155,7 +158,10 @@ def main() -> int:
                     environment=docker_environment(
                         {{
                             "DLT_PIPELINE_NAME": "{dag_id}",
+                            "ICEBERG_CATALOG_NAME": "{catalog_name}",
                             "ICEBERG_NAMESPACE": "{namespace}",
+                            "MINIO_PREFIX": "{object_prefix}",
+                            "OBJECT_STORE_BUCKET": "s3://lakehouse/{object_prefix}",
                         }}
                     ),
                 )
@@ -182,6 +188,10 @@ def main() -> int:
             ARTIFACT_DIR="${{ROOT_DIR}}/{artifact_dir}"
             rm -rf "${{ARTIFACT_DIR}}"
             mkdir -p "${{ARTIFACT_DIR}}"
+            iceberg_catalog_name="{catalog_name}"
+            object_store_bucket="s3://lakehouse/{object_prefix}"
+            object_store_prefix="{object_prefix}"
+            object_store_namespace="{namespace}"
 
             export SNOWFLAKE_ACCOUNT=""
             export SNOWFLAKE_USER=""
@@ -191,6 +201,10 @@ def main() -> int:
             export OPEN_CATALOG_CLIENT_ID=""
             export OPEN_CATALOG_CLIENT_SECRET=""
             export SNOWFLAKE_LOCAL_RAW_SYNC="false"
+            export ICEBERG_CATALOG_NAME="${{ICEBERG_CATALOG_NAME:-${{iceberg_catalog_name}}}}"
+            export OBJECT_STORE_BUCKET="${{OBJECT_STORE_BUCKET:-${{object_store_bucket}}}}"
+            export MINIO_PREFIX="${{MINIO_PREFIX:-${{object_store_prefix}}}}"
+            export ICEBERG_NAMESPACE="${{ICEBERG_NAMESPACE:-${{object_store_namespace}}}}"
 
             ./scripts/test-airflow-dag.sh "${{1:-2026-03-07}}" "{dag_id}" "/opt/airflow/dags/{slug}_pipeline.py" | tee "${{ARTIFACT_DIR}}/airflow_dag.log"
 
@@ -218,9 +232,10 @@ def main() -> int:
             catalog_rows="$(
               docker compose exec -T airflow-metadata-db \\
                 psql -U "${{AIRFLOW_METADATA_DB_USER}}" -d iceberg_catalog -At -F ',' -c "
-                  select table_namespace, table_name, metadata_location
+                  select catalog_name, table_namespace, table_name, metadata_location
                   from iceberg_tables
-                  where table_namespace = '{namespace}'
+                  where catalog_name = '${{ICEBERG_CATALOG_NAME}}'
+                    and table_namespace = '${{ICEBERG_NAMESPACE}}'
                   order by table_name;
                 "
             )"
@@ -228,15 +243,23 @@ def main() -> int:
 
             catalog_count="$(printf '%s\\n' "${{catalog_rows}}" | sed '/^$/d' | wc -l | tr -d ' ')"
             [ "${{catalog_count}}" = "2" ] || {{ echo "expected 2 Iceberg catalog entries, got ${{catalog_count}}" >&2; exit 1; }}
-            printf '%s\\n' "${{catalog_rows}}" | grep -q '^{namespace},raw_order_items,' || {{ echo "missing {namespace}.raw_order_items catalog entry" >&2; exit 1; }}
-            printf '%s\\n' "${{catalog_rows}}" | grep -q '^{namespace},raw_orders,' || {{ echo "missing {namespace}.raw_orders catalog entry" >&2; exit 1; }}
+            printf '%s\\n' "${{catalog_rows}}" | grep -q "^${{ICEBERG_CATALOG_NAME}},${{ICEBERG_NAMESPACE}},raw_order_items," || {{ echo "missing ${{ICEBERG_CATALOG_NAME}}.${{ICEBERG_NAMESPACE}}.raw_order_items catalog entry" >&2; exit 1; }}
+            printf '%s\\n' "${{catalog_rows}}" | grep -q "^${{ICEBERG_CATALOG_NAME}},${{ICEBERG_NAMESPACE}},raw_orders," || {{ echo "missing ${{ICEBERG_CATALOG_NAME}}.${{ICEBERG_NAMESPACE}}.raw_orders catalog entry" >&2; exit 1; }}
 
             docker compose run --rm --no-deps dlt-extractor python - <<'PY' | tee "${{ARTIFACT_DIR}}/minio_iceberg_summary.txt"
             from io import BytesIO
             import json
+            import os
+            from urllib.parse import urlparse
 
             import boto3
             import pyarrow.parquet as pq
+
+            bucket_uri = os.environ["OBJECT_STORE_BUCKET"]
+            parsed = urlparse(bucket_uri)
+            bucket = parsed.netloc
+            prefix = parsed.path.lstrip("/")
+            namespace = os.environ["ICEBERG_NAMESPACE"]
 
             s3 = boto3.client(
                 "s3",
@@ -246,7 +269,7 @@ def main() -> int:
                 region_name="us-east-1",
             )
 
-            response = s3.list_objects_v2(Bucket="lakehouse", Prefix="platform/{namespace}/")
+            response = s3.list_objects_v2(Bucket=bucket, Prefix=f"{{prefix}}/{{namespace}}/")
             keys = [obj["Key"] for obj in response.get("Contents", [])]
             metadata_keys = sorted(key for key in keys if "/metadata/" in key and key.endswith(".metadata.json"))
             parquet_keys = sorted(key for key in keys if key.endswith(".parquet"))
@@ -271,9 +294,11 @@ def main() -> int:
                 )
 
             for key in parquet_keys:
-                payload = s3.get_object(Bucket="lakehouse", Key=key)["Body"].read()
+                payload = s3.get_object(Bucket=bucket, Key=key)["Body"].read()
                 row_count = pq.read_table(BytesIO(payload)).num_rows
-                table_name = key.split("/")[2]
+                parts = key.split("/")
+                namespace_index = parts.index(namespace)
+                table_name = parts[namespace_index + 1]
                 row_totals[table_name] = row_totals.get(table_name, 0) + row_count
 
             expected = {{"raw_orders": 30, "raw_order_items": 60}}
@@ -289,7 +314,9 @@ def main() -> int:
             cat > "${{ARTIFACT_DIR}}/summary.txt" <<EOF
             Ingestion promotion succeeded.
             dag.id={dag_id}
-            iceberg.namespace={namespace}
+            iceberg.catalog=${{ICEBERG_CATALOG_NAME}}
+            iceberg.namespace=${{ICEBERG_NAMESPACE}}
+            object_store.bucket=${{OBJECT_STORE_BUCKET}}
             source.customers=${{customer_count}}
             source.orders=${{order_count}}
             source.order_items=${{order_item_count}}

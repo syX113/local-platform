@@ -45,6 +45,7 @@ $ciVariableKeys = @(
     "SOURCE_POSTGRES_SCHEMA",
     "DLT_PIPELINE_NAME",
     "DLT_REFRESH_MODE",
+    "ICEBERG_CATALOG_NAME",
     "ICEBERG_NAMESPACE",
     "ICEBERG_CATALOG_TYPE",
     "ICEBERG_SQL_URI",
@@ -134,4 +135,3 @@ if (-not [string]::IsNullOrEmpty($edpProjectId)) {
     Sync-ProjectVariables -ProjectId $edpProjectId
     Write-Host "Synced $($ciVariableKeys.Count) GitLab CI/CD variables to EDP project $edpProjectId"
 }
-

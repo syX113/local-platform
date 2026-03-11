@@ -47,6 +47,7 @@ env_keys=(
   OBJECT_STORE_USE_SSL
   DLT_PIPELINE_NAME
   DLT_REFRESH_MODE
+  ICEBERG_CATALOG_NAME
   ICEBERG_NAMESPACE
   ICEBERG_CATALOG_TYPE
   ICEBERG_SQL_URI
@@ -95,6 +96,8 @@ if [ "${LOCAL_PLATFORM_SHARED_STACK:-false}" != "true" ]; then
   docker compose run --rm lakehouse-bucket-init
   docker compose up -d airflow-init
   docker compose up -d airflow-scheduler
+else
+  ensure_shared_airflow_services
 fi
 
 exec_env_args=()

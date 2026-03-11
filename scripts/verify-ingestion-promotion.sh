@@ -16,10 +16,7 @@ ARTIFACT_DIR="${ROOT_DIR}/artifacts/ingestion"
 rm -rf "${ARTIFACT_DIR}"
 mkdir -p "${ARTIFACT_DIR}"
 
-if [ -z "${AIRFLOW_SANDBOX_DAG_ID:-}" ]; then
-  export_dev_runtime_env
-fi
-
+iceberg_catalog_name="${ICEBERG_CATALOG_NAME:-default}"
 iceberg_namespace="${ICEBERG_NAMESPACE:-landing}"
 catalog_namespace="$(printf '%s' "${iceberg_namespace}" | tr '[:upper:]' '[:lower:]')"
 execution_date="${1:-2026-03-07}"
@@ -75,9 +72,10 @@ IFS=',' read -r customer_count order_count order_item_count raw_orders_count raw
 catalog_rows="$(
   docker compose exec -T airflow-metadata-db \
     psql -U "${AIRFLOW_METADATA_DB_USER}" -d iceberg_catalog -At -F ',' -c "
-      select table_namespace, table_name, metadata_location
+      select catalog_name, table_namespace, table_name, metadata_location
       from iceberg_tables
-      where table_namespace = '${catalog_namespace}'
+      where catalog_name = '${iceberg_catalog_name}'
+        and table_namespace = '${catalog_namespace}'
       order by table_name;
     "
 )"
@@ -85,8 +83,8 @@ printf '%s\n' "${catalog_rows}" | tee "${ARTIFACT_DIR}/iceberg_catalog.csv"
 
 catalog_count="$(printf '%s\n' "${catalog_rows}" | sed '/^$/d' | wc -l | tr -d ' ')"
 [ "${catalog_count}" = "2" ] || { echo "expected 2 Iceberg catalog entries, got ${catalog_count}" >&2; exit 1; }
-printf '%s\n' "${catalog_rows}" | grep -q "^${catalog_namespace},raw_order_items," || { echo "missing ${catalog_namespace}.raw_order_items catalog entry" >&2; exit 1; }
-printf '%s\n' "${catalog_rows}" | grep -q "^${catalog_namespace},raw_orders," || { echo "missing ${catalog_namespace}.raw_orders catalog entry" >&2; exit 1; }
+printf '%s\n' "${catalog_rows}" | grep -q "^${iceberg_catalog_name},${catalog_namespace},raw_order_items," || { echo "missing ${iceberg_catalog_name}.${catalog_namespace}.raw_order_items catalog entry" >&2; exit 1; }
+printf '%s\n' "${catalog_rows}" | grep -q "^${iceberg_catalog_name},${catalog_namespace},raw_orders," || { echo "missing ${iceberg_catalog_name}.${catalog_namespace}.raw_orders catalog entry" >&2; exit 1; }
 
 docker compose run --rm --no-deps dlt-extractor python - <<'PY' | tee "${ARTIFACT_DIR}/minio_iceberg_summary.txt"
 from io import BytesIO
@@ -113,17 +111,18 @@ s3 = boto3.client(
 )
 
 response = s3.list_objects_v2(Bucket=bucket, Prefix=f"{prefix}/{namespace}/")
-keys = [obj["Key"] for obj in response.get("Contents", [])]
+objects = response.get("Contents", [])
+keys = [obj["Key"] for obj in objects]
 metadata_keys = sorted(key for key in keys if "/metadata/" in key and key.endswith(".metadata.json"))
 parquet_keys = sorted(key for key in keys if key.endswith(".parquet"))
 
 if len(metadata_keys) < 4:
     raise SystemExit(f"expected at least 4 metadata files, found {len(metadata_keys)}")
-if len(parquet_keys) != 2:
-    raise SystemExit(f"expected 2 parquet data files, found {len(parquet_keys)}")
+if len(parquet_keys) < 2:
+    raise SystemExit(f"expected at least 2 parquet data files, found {len(parquet_keys)}")
 
 print(f"metadata_files={len(metadata_keys)}")
-print(f"parquet_files={len(parquet_keys)}")
+print(f"parquet_files_total={len(parquet_keys)}")
 
 for key in metadata_keys:
     body = s3.get_object(Bucket=bucket, Key=key)["Body"].read()
@@ -135,24 +134,31 @@ for key in metadata_keys:
         f"current_snapshot_id={doc.get('current-snapshot-id')}",
     )
 
-row_totals: dict[str, int] = {}
+latest_parquet_keys: dict[str, tuple[str, object]] = {}
 for key in parquet_keys:
-    payload = s3.get_object(Bucket=bucket, Key=key)["Body"].read()
-    row_count = pq.read_table(BytesIO(payload)).num_rows
     parts = key.split("/")
     try:
         namespace_index = parts.index(namespace)
         table_name = parts[namespace_index + 1]
     except (ValueError, IndexError) as exc:
         raise SystemExit(f"unable to resolve table name from object key: {key}") from exc
-    row_totals[table_name] = row_totals.get(table_name, 0) + row_count
+    matching_object = next(obj for obj in objects if obj["Key"] == key)
+    last_modified = matching_object["LastModified"]
+    current = latest_parquet_keys.get(table_name)
+    if current is None or last_modified > current[1]:
+        latest_parquet_keys[table_name] = (key, last_modified)
 
 expected = {"raw_orders": 30, "raw_order_items": 60}
 for table_name, expected_rows in expected.items():
-    actual_rows = row_totals.get(table_name)
-    if actual_rows != expected_rows:
-        raise SystemExit(f"expected {expected_rows} rows for {table_name}, found {actual_rows}")
-    print(f"parquet_rows {table_name}={actual_rows}")
+    latest_key = latest_parquet_keys.get(table_name)
+    if latest_key is None:
+        raise SystemExit(f"missing parquet data for {table_name}")
+    payload = s3.get_object(Bucket=bucket, Key=latest_key[0])["Body"].read()
+    current_rows = pq.read_table(BytesIO(payload)).num_rows
+    if current_rows != expected_rows:
+        raise SystemExit(f"expected {expected_rows} rows for latest {table_name} parquet, found {current_rows}")
+    print(f"parquet_latest_key {table_name}={latest_key[0]}")
+    print(f"parquet_rows_current {table_name}={current_rows}")
 
 print("ingestion_promotion=passed")
 sys.stdout.flush()
@@ -167,6 +173,7 @@ source.order_items=${order_item_count}
 source.raw_orders_export=${raw_orders_count}
 source.raw_order_items_export=${raw_order_items_count}
 iceberg.catalog_entries=${catalog_count}
+iceberg.catalog=${iceberg_catalog_name}
 iceberg.namespace=${catalog_namespace}
 object_store.bucket=${OBJECT_STORE_BUCKET}
 airflow.dag_id=${dag_id}
