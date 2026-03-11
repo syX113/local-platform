@@ -59,7 +59,7 @@ Meaning:
 
 ### EDP
 
-Database: `DB_EDP_ORDERS`
+Database target after first EDP deployment: `DB_EDP_ORDERS`
 
 Schemas:
 
@@ -286,7 +286,7 @@ The platform now supports a real deployment step for the sample products without
 - deployed artifacts are marked with explicit `DEV_` and `PRD_` targets or dedicated runtime image prefixes
 - the deployment target is stable, so repeated default-branch runs update the same DEV or PRD objects instead of creating more ephemeral services
 
-Current DEV targets:
+Current DEV targets after a fresh initialization:
 
 - Airflow DAG: `DEV_local_platform_ingest`
 - dlt pipeline name: `DEV_local_platform_ingest`
@@ -295,7 +295,7 @@ Current DEV targets:
 - MinIO/S3 prefix: `landing/dev`
 - resulting Iceberg layout: `landing/dev/postgres/{table_name}/...`
 - Snowflake SDP database: `DB_SDP_ORDERS`
-- Snowflake EDP database: `DB_EDP_ORDERS`
+- Snowflake EDP database target: `DB_EDP_ORDERS` (not created until the EDP CI/CD flow deploys it)
 - Snowflake dbt project objects after initialization: `DEV_DBT_PROJECT_SDP_ORDERS`
 - Snowflake EDP dbt project objects are deployed on demand by the EDP CI/CD flow, not by the base initialization
 - DEV SDP runtime image prefix: `local-platform-dev-sdp`
@@ -309,9 +309,9 @@ Current PRD targets:
 - Iceberg catalog name: `prd`
 - MinIO/S3 prefix: `landing/prd`
 - resulting Iceberg layout: `landing/prd/postgres/{table_name}/...`
-- Snowflake SDP database: `PRD_DB_SDP_ORDERS`
-- Snowflake EDP database: `PRD_DB_EDP_ORDERS`
-- Snowflake dbt project objects: `PRD_DBT_PROJECT_SDP_ORDERS`, `PRD_DBT_PROJECT_EDP_ORDERS`
+- Snowflake SDP database target: `PRD_DB_SDP_ORDERS` (created only by the PRD deployment flow)
+- Snowflake EDP database target: `PRD_DB_EDP_ORDERS` (created only by the PRD deployment flow)
+- Snowflake dbt project objects: `PRD_DBT_PROJECT_SDP_ORDERS`, `PRD_DBT_PROJECT_EDP_ORDERS` (both created on demand by PRD deployment)
 - PRD SDP runtime image prefix: `local-platform-prd-sdp`
 - PRD EDP runtime image prefix: `local-platform-prd-edp`
 
