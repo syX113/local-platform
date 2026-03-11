@@ -38,7 +38,12 @@ echo "dropping lingering Snowflake CI clone databases"
 bash ./scripts/cleanup-snowflake-ci-clones.sh
 
 echo "dropping Snowflake control, SDP, and EDP databases for a clean rebuild"
-docker compose run --rm --no-deps dbt-executor python - <<'PY'
+docker compose run --rm --no-deps \
+  -e "PRD_SNOWFLAKE_SDP_DATABASE=${PRD_SNOWFLAKE_SDP_DATABASE}" \
+  -e "PRD_SNOWFLAKE_EDP_DATABASE=${PRD_SNOWFLAKE_EDP_DATABASE}" \
+  -e "PRD_SNOWFLAKE_SDP_DBT_PROJECT=${PRD_SNOWFLAKE_SDP_DBT_PROJECT}" \
+  -e "PRD_SNOWFLAKE_EDP_DBT_PROJECT=${PRD_SNOWFLAKE_EDP_DBT_PROJECT}" \
+  dbt-executor python - <<'PY'
 import os
 
 import snowflake.connector
@@ -62,6 +67,8 @@ try:
         cursor.execute(f'use role {ident(os.environ["SNOWFLAKE_ROLE"])}')
         cursor.execute(f'use warehouse {ident(os.environ["SNOWFLAKE_WAREHOUSE"])}')
         cursor.execute(f'drop database if exists {ident(os.environ["SNOWFLAKE_CONTROL_DATABASE"])}')
+        cursor.execute(f'drop database if exists {ident(os.environ["PRD_SNOWFLAKE_EDP_DATABASE"])}')
+        cursor.execute(f'drop database if exists {ident(os.environ["PRD_SNOWFLAKE_SDP_DATABASE"])}')
         cursor.execute(f'drop database if exists {ident(os.environ["SNOWFLAKE_EDP_DATABASE"])}')
         cursor.execute(f'drop database if exists {ident(os.environ["SNOWFLAKE_SDP_DATABASE"])}')
 finally:
@@ -72,6 +79,8 @@ print(
         "dropped_control_database": os.environ["SNOWFLAKE_CONTROL_DATABASE"],
         "dropped_sdp_database": os.environ["SNOWFLAKE_SDP_DATABASE"],
         "dropped_edp_database": os.environ["SNOWFLAKE_EDP_DATABASE"],
+        "dropped_prd_sdp_database": os.environ["PRD_SNOWFLAKE_SDP_DATABASE"],
+        "dropped_prd_edp_database": os.environ["PRD_SNOWFLAKE_EDP_DATABASE"],
     }
 )
 PY
@@ -101,8 +110,13 @@ bash ./scripts/execute-snowflake-dbt-project.sh "${SNOWFLAKE_SDP_DBT_PROJECT}" b
 echo "verifying rebuilt SDP without rerunning dbt"
 ./scripts/verify-sdp-promotion.sh --skip-foundation --skip-raw-sync --skip-dbt
 
-echo "verifying EDP remains undeployed and empty after initialization"
-docker compose run --rm --no-deps dbt-executor python - <<'PY'
+echo "verifying only SDP exists after initialization"
+docker compose run --rm --no-deps \
+  -e "PRD_SNOWFLAKE_SDP_DATABASE=${PRD_SNOWFLAKE_SDP_DATABASE}" \
+  -e "PRD_SNOWFLAKE_EDP_DATABASE=${PRD_SNOWFLAKE_EDP_DATABASE}" \
+  -e "PRD_SNOWFLAKE_SDP_DBT_PROJECT=${PRD_SNOWFLAKE_SDP_DBT_PROJECT}" \
+  -e "PRD_SNOWFLAKE_EDP_DBT_PROJECT=${PRD_SNOWFLAKE_EDP_DBT_PROJECT}" \
+  dbt-executor python - <<'PY'
 import os
 
 import snowflake.connector
@@ -120,13 +134,14 @@ connection = snowflake.connector.connect(
     warehouse=os.environ["SNOWFLAKE_WAREHOUSE"],
 )
 
-edp_project_name = os.environ["SNOWFLAKE_EDP_DBT_PROJECT"]
+sdp_database = os.environ["SNOWFLAKE_SDP_DATABASE"]
 edp_database = os.environ["SNOWFLAKE_EDP_DATABASE"]
-edp_schemas = (
-    os.environ["SNOWFLAKE_EDP_IN_SCHEMA"],
-    os.environ["SNOWFLAKE_EDP_CORE_SCHEMA"],
-    os.environ["SNOWFLAKE_EDP_ACC_SCHEMA"],
-)
+prd_sdp_database = os.environ["PRD_SNOWFLAKE_SDP_DATABASE"]
+prd_edp_database = os.environ["PRD_SNOWFLAKE_EDP_DATABASE"]
+sdp_project_name = os.environ["SNOWFLAKE_SDP_DBT_PROJECT"]
+edp_project_name = os.environ["SNOWFLAKE_EDP_DBT_PROJECT"]
+prd_sdp_project_name = os.environ["PRD_SNOWFLAKE_SDP_DBT_PROJECT"]
+prd_edp_project_name = os.environ["PRD_SNOWFLAKE_EDP_DBT_PROJECT"]
 
 try:
     with connection.cursor() as cursor:
@@ -135,44 +150,32 @@ try:
         )
         cursor.execute("select \"name\" from table(result_scan(last_query_id()))")
         dbt_projects = {row[0] for row in cursor.fetchall()}
+        if sdp_project_name not in dbt_projects:
+            raise SystemExit(f"expected SDP dbt project object to exist after initialization: {sdp_project_name}")
         if edp_project_name in dbt_projects:
             raise SystemExit(f"unexpected EDP dbt project object present after initialization: {edp_project_name}")
+        if prd_sdp_project_name in dbt_projects:
+            raise SystemExit(f"unexpected PRD SDP dbt project object present after initialization: {prd_sdp_project_name}")
+        if prd_edp_project_name in dbt_projects:
+            raise SystemExit(f"unexpected PRD EDP dbt project object present after initialization: {prd_edp_project_name}")
 
-        for schema_name in edp_schemas:
-            cursor.execute(
-                f"""
-                select count(*)
-                from {ident(edp_database)}.information_schema.tables
-                where table_schema = %s
-                  and table_type in ('BASE TABLE', 'EXTERNAL TABLE', 'EVENT TABLE', 'MATERIALIZED VIEW')
-                """,
-                (schema_name,),
-            )
-            table_count = cursor.fetchone()[0]
-            if table_count != 0:
-                raise SystemExit(
-                    f"unexpected EDP table-like objects in {edp_database}.{schema_name}: {table_count}"
-                )
-
-            cursor.execute(
-                f"""
-                select count(*)
-                from {ident(edp_database)}.information_schema.views
-                where table_schema = %s
-                """,
-                (schema_name,),
-            )
-            view_count = cursor.fetchone()[0]
-            if view_count != 0:
-                raise SystemExit(
-                    f"unexpected EDP views in {edp_database}.{schema_name}: {view_count}"
-                )
+        cursor.execute("show databases")
+        databases = {row[1] for row in cursor.fetchall()}
+        if sdp_database not in databases:
+            raise SystemExit(f"expected SDP database to exist after initialization: {sdp_database}")
+        if edp_database in databases:
+            raise SystemExit(f"unexpected EDP database present after initialization: {edp_database}")
+        if prd_sdp_database in databases:
+            raise SystemExit(f"unexpected PRD SDP database present after initialization: {prd_sdp_database}")
+        if prd_edp_database in databases:
+            raise SystemExit(f"unexpected PRD EDP database present after initialization: {prd_edp_database}")
 
         print(
             {
-                "edp_dbt_project_present": False,
-                "edp_user_objects_present": False,
-                "edp_database_ready": edp_database,
+                "sdp_deployed": True,
+                "edp_deployed": False,
+                "prd_deployed": False,
+                "sdp_database_present": sdp_database,
             }
         )
 finally:

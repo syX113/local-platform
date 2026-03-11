@@ -20,11 +20,9 @@ $requiredVars = @(
     "SNOWFLAKE_PASSWORD",
     "SNOWFLAKE_ROLE",
     "SNOWFLAKE_WAREHOUSE",
-    "SNOWFLAKE_SDP_DATABASE",
-    "SNOWFLAKE_EDP_DATABASE",
-    "SNOWFLAKE_EDP_IN_SCHEMA",
-    "SNOWFLAKE_EDP_CORE_SCHEMA",
-    "SNOWFLAKE_EDP_ACC_SCHEMA"
+    "SNOWFLAKE_CONTROL_DATABASE",
+    "SNOWFLAKE_CONTROL_SCHEMA",
+    "SNOWFLAKE_DBT_STAGE"
 )
 
 foreach ($key in $requiredVars) {
@@ -75,4 +73,3 @@ else {
 $arguments = @("run", "--rm", "--no-deps", "dbt-executor", "python", "/opt/platform/dbt/scripts/apply_sql.py")
 $arguments += $sqlFiles
 Invoke-DockerCompose -Arguments $arguments
-

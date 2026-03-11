@@ -9,6 +9,9 @@ clean-targets:
   - target
   - dbt_packages
 
+on-run-start:
+  - "{{ ensure_target_database_and_schemas(env_var('SNOWFLAKE_EDP_DATABASE'), [env_var('SNOWFLAKE_EDP_IN_SCHEMA', 'INBOUND'), env_var('SNOWFLAKE_EDP_CORE_SCHEMA', 'CORE'), env_var('SNOWFLAKE_EDP_ACC_SCHEMA', 'ACCESS')]) }}"
+
 models:
   proj_edp_orders:
     inbound:

@@ -13,7 +13,7 @@ import snowflake.connector
 
 
 ENV_VAR_PATTERN = re.compile(
-    r"\{\{\s*env_var\(\s*'([^']+)'\s*(?:,\s*'([^']*)'\s*)?\)\s*\}\}"
+    r"env_var\(\s*'([^']+)'\s*(?:,\s*'([^']*)'\s*)?\)"
 )
 EXCLUDED_PATH_NAMES = {".git", "__pycache__", "target", "logs", "dbt_packages"}
 
@@ -102,7 +102,9 @@ def render_env_vars(raw_text: str) -> str:
     def replace(match: re.Match[str]) -> str:
         variable_name = match.group(1)
         default_value = match.group(2)
-        return env(variable_name, default_value)
+        rendered = env(variable_name, default_value)
+        escaped = rendered.replace("\\", "\\\\").replace("'", "\\'")
+        return f"'{escaped}'"
 
     return ENV_VAR_PATTERN.sub(replace, raw_text)
 

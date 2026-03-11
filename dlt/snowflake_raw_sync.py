@@ -104,12 +104,6 @@ def ensure_foundation(cursor) -> None:
     warehouse = os.environ["SNOWFLAKE_WAREHOUSE"]
     sdp_database = os.environ["SNOWFLAKE_SDP_DATABASE"]
     sdp_in_schema = os.environ.get("SNOWFLAKE_SDP_IN_SCHEMA", "INBOUND")
-    sdp_core_schema = os.environ.get("SNOWFLAKE_SDP_CORE_SCHEMA", "CORE")
-    sdp_acc_schema = os.environ.get("SNOWFLAKE_SDP_ACC_SCHEMA", "ACCESS")
-    edp_database = os.environ["SNOWFLAKE_EDP_DATABASE"]
-    edp_in_schema = os.environ.get("SNOWFLAKE_EDP_IN_SCHEMA", "INBOUND")
-    edp_core_schema = os.environ.get("SNOWFLAKE_EDP_CORE_SCHEMA", "CORE")
-    edp_acc_schema = os.environ.get("SNOWFLAKE_EDP_ACC_SCHEMA", "ACCESS")
 
     cursor.execute(f"use role {os.environ['SNOWFLAKE_ROLE']}")
     cursor.execute(
@@ -123,12 +117,6 @@ def ensure_foundation(cursor) -> None:
     cursor.execute(f"use warehouse {warehouse}")
     cursor.execute(f"create database if not exists {sdp_database}")
     cursor.execute(f"create schema if not exists {ident(sdp_database, sdp_in_schema)}")
-    cursor.execute(f"create schema if not exists {ident(sdp_database, sdp_core_schema)}")
-    cursor.execute(f"create schema if not exists {ident(sdp_database, sdp_acc_schema)}")
-    cursor.execute(f"create database if not exists {edp_database}")
-    cursor.execute(f"create schema if not exists {ident(edp_database, edp_in_schema)}")
-    cursor.execute(f"create schema if not exists {ident(edp_database, edp_core_schema)}")
-    cursor.execute(f"create schema if not exists {ident(edp_database, edp_acc_schema)}")
     cursor.execute(
         f"""
         create or replace transient table {ident(sdp_database, sdp_in_schema, 'EXT_ORDERS_RAW')} (
