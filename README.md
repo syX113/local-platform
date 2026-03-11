@@ -296,7 +296,8 @@ Current DEV targets:
 - resulting Iceberg layout: `landing/dev/postgres/{table_name}/...`
 - Snowflake SDP database: `DB_SDP_ORDERS`
 - Snowflake EDP database: `DB_EDP_ORDERS`
-- Snowflake dbt project objects: `DEV_DBT_PROJECT_SDP_ORDERS`, `DEV_DBT_PROJECT_EDP_ORDERS`
+- Snowflake dbt project objects after initialization: `DEV_DBT_PROJECT_SDP_ORDERS`
+- Snowflake EDP dbt project objects are deployed on demand by the EDP CI/CD flow, not by the base initialization
 - DEV SDP runtime image prefix: `local-platform-dev-sdp`
 - DEV EDP runtime image prefix: `local-platform-dev-edp`
 
@@ -380,7 +381,7 @@ bash ./scripts/ensure-snowflake-foundation.sh
 pwsh ./scripts/windows/ensure-snowflake-foundation.ps1
 ```
 
-Reset and rebuild only the Snowflake SDP and EDP products:
+Reset and rebuild the initialized Snowflake state:
 
 ```bash
 ./scripts/bootstrap-snowflake-products.sh
@@ -415,7 +416,7 @@ The Unix/macOS commands are the `.sh` entrypoints under `scripts/`. Windows host
   Finishes the GitLab setup: creates or resolves the SDP and EDP projects, configures branch webhooks, registers runners, publishes the rendered repos, and syncs GitLab CI variables.
   On a fresh bootstrap where the GitLab projects are newly created, each hosted repo is initialized with a single `main` commit named `init-artifacts` so users start from a clean history.
 - `./scripts/bootstrap-snowflake-products.sh`
-  Drops lingering Snowflake CI clone databases, recreates the sample SDP and EDP databases from scratch, reloads the raw inbound data, rebuilds both dbt products once, and then runs targeted post-build verification without repeating the same dbt work.
+  Drops lingering Snowflake CI clone databases, recreates the Snowflake foundation from scratch, reloads the raw inbound data, deploys and builds only the SDP dbt project, and verifies that EDP remains undeployed and empty until the EDP CI/CD flow promotes it.
 - `./scripts/cleanup-snowflake-ci-clones.sh`
   Drops all Snowflake CI clone databases for the registered data products, for example `DB_SDP_ORDERS_CI_CLO_*` and `DB_EDP_ORDERS_CI_CLO_*`, and purges Snowflake dbt project objects from the control schema.
 - `./scripts/print-setup-summary.sh`
@@ -427,7 +428,7 @@ The Unix/macOS commands are the `.sh` entrypoints under `scripts/`. Windows host
 - `pwsh ./scripts/windows/bootstrap-gitlab.ps1`
   Windows host equivalent of the GitLab bootstrap and repo publish flow.
 - `pwsh ./scripts/windows/bootstrap-snowflake-products.ps1`
-  Windows host equivalent of the Snowflake-only SDP/EDP rebuild flow.
+  Windows host equivalent of the Snowflake-only initialization flow with SDP deployed and EDP left undeployed.
 - `pwsh ./scripts/windows/print-setup-summary.ps1`
   Windows host equivalent of the access summary output.
 
@@ -436,11 +437,11 @@ The Unix/macOS commands are the `.sh` entrypoints under `scripts/`. Windows host
 - `./scripts/load-source-sample-data.sh`
   Reseeds the deterministic PostgreSQL sample data.
 - `./scripts/run-local-pipeline.sh`
-  Runs the default local sample flow end to end against the running platform using the explicit DEV Airflow DAG, DEV dlt settings, and Snowflake-native dbt project execution.
+  Runs the default local sample flow against the running platform using the explicit DEV Airflow DAG, DEV dlt settings, and Snowflake-native SDP dbt execution. EDP is intentionally left undeployed here.
 - `pwsh ./scripts/windows/load-source-sample-data.ps1`
   Windows host equivalent of the PostgreSQL sample-data reload.
 - `pwsh ./scripts/windows/run-local-pipeline.ps1`
-  Windows host equivalent of the one-command local sample flow.
+  Windows host equivalent of the one-command local sample flow with only SDP materialized in Snowflake.
 - `./scripts/test-airflow-dag.sh`
   Runs the Airflow DAG from the CLI for fast orchestration validation without using the UI.
 - `./scripts/verify-ingestion-promotion.sh`

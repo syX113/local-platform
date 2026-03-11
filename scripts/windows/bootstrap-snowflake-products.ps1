@@ -24,14 +24,9 @@ foreach ($key in $requiredVars) {
 }
 
 $sdpProjectDir = Resolve-ContainerDbtProjectDir -ProjectSlug "proj_sdp_orders" -RootDir $rootDir
-$edpProjectDir = Resolve-ContainerDbtProjectDir -ProjectSlug "proj_edp_orders" -RootDir $rootDir
 $sdpDbtProject = Get-EnvValue -Name "DEV_SNOWFLAKE_SDP_DBT_PROJECT"
 if ([string]::IsNullOrEmpty($sdpDbtProject)) {
     $sdpDbtProject = "DEV_DBT_PROJECT_SDP_ORDERS"
-}
-$edpDbtProject = Get-EnvValue -Name "DEV_SNOWFLAKE_EDP_DBT_PROJECT"
-if ([string]::IsNullOrEmpty($edpDbtProject)) {
-    $edpDbtProject = "DEV_DBT_PROJECT_EDP_ORDERS"
 }
 
 Write-Host "reloading deterministic source sample data"
@@ -89,18 +84,14 @@ Invoke-DockerCompose -Arguments @("run", "--rm", "--no-deps", "dlt-extractor", "
 
 Write-Host "deploying DEV Snowflake dbt projects"
 Invoke-DockerCompose -Arguments @("run", "--rm", "--no-deps", "dbt-executor", "python", "/opt/platform/dbt/scripts/snow_dbt_cli.py", "deploy", "--project-dir", $sdpProjectDir, "--project-name", $sdpDbtProject, "--database", (Get-EnvValue -Name "SNOWFLAKE_SDP_DATABASE"), "--schema", (Get-EnvValue -Name "SNOWFLAKE_SDP_CORE_SCHEMA"), "--target-name", "dev")
-Invoke-DockerCompose -Arguments @("run", "--rm", "--no-deps", "dbt-executor", "python", "/opt/platform/dbt/scripts/snow_dbt_cli.py", "deploy", "--project-dir", $edpProjectDir, "--project-name", $edpDbtProject, "--database", (Get-EnvValue -Name "SNOWFLAKE_EDP_DATABASE"), "--schema", (Get-EnvValue -Name "SNOWFLAKE_EDP_CORE_SCHEMA"), "--target-name", "dev")
 
 Write-Host "building SDP data product in Snowflake"
 Invoke-DockerCompose -Arguments @("run", "--rm", "--no-deps", "dbt-executor", "python", "/opt/platform/dbt/scripts/snow_dbt_cli.py", "execute", "--project-name", $sdpDbtProject, "build")
 
-Write-Host "building EDP data product in Snowflake"
-Invoke-DockerCompose -Arguments @("run", "--rm", "--no-deps", "dbt-executor", "python", "/opt/platform/dbt/scripts/snow_dbt_cli.py", "execute", "--project-name", $edpDbtProject, "build")
-
 Write-Host "validating zero-copy clone semantics"
 Invoke-DockerCompose -Arguments @("run", "--rm", "--no-deps", "dbt-executor", "python", "/opt/platform/dbt/scripts/zero_copy_clone_check.py")
 
-Write-Host "validating rebuilt SDP and EDP row counts"
+Write-Host "validating rebuilt SDP row counts and undeployed EDP state"
 $validationScript = @'
 import os
 import snowflake.connector
@@ -125,22 +116,6 @@ queries = {
         f"select count(*) from {ident(os.environ['SNOWFLAKE_SDP_DATABASE'], os.environ['SNOWFLAKE_SDP_ACC_SCHEMA'], 'T_ORDERS_CUSTOMER_GRAIN')}",
         12,
     ),
-    "edp_in_orders_order_grain": (
-        f"select count(*) from {ident(os.environ['SNOWFLAKE_EDP_DATABASE'], os.environ['SNOWFLAKE_EDP_IN_SCHEMA'], 'V_IN_ORDERS_ORDER_GRAIN')}",
-        30,
-    ),
-    "edp_core_dim_customers": (
-        f"select count(*) from {ident(os.environ['SNOWFLAKE_EDP_DATABASE'], os.environ['SNOWFLAKE_EDP_CORE_SCHEMA'], 'DIM_CUSTOMERS')}",
-        12,
-    ),
-    "edp_fact_order_revenue_star": (
-        f"select count(*) from {ident(os.environ['SNOWFLAKE_EDP_DATABASE'], os.environ['SNOWFLAKE_EDP_CORE_SCHEMA'], 'FCT_ORDER_REVENUE_STAR')}",
-        30,
-    ),
-    "edp_access_orders_fulfilled": (
-        f"select count(*) from {ident(os.environ['SNOWFLAKE_EDP_DATABASE'], os.environ['SNOWFLAKE_EDP_ACC_SCHEMA'], 'T_ORDERS_FULFILLED')}",
-        20,
-    ),
 }
 
 connection = snowflake.connector.connect(
@@ -159,6 +134,52 @@ try:
             if actual != expected:
                 raise SystemExit(f"expected {expected} rows for {name}, found {actual}")
             print(f"{name}={actual}")
+
+        cursor.execute(
+            f"show dbt projects in schema {ident(os.environ['SNOWFLAKE_CONTROL_DATABASE'], os.environ['SNOWFLAKE_CONTROL_SCHEMA'])}"
+        )
+        cursor.execute('select "name" from table(result_scan(last_query_id()))')
+        dbt_projects = {row[0] for row in cursor.fetchall()}
+        edp_project_name = os.environ["SNOWFLAKE_EDP_DBT_PROJECT"]
+        if edp_project_name in dbt_projects:
+            raise SystemExit(f"unexpected EDP dbt project object present after initialization: {edp_project_name}")
+
+        for schema_name in (
+            os.environ["SNOWFLAKE_EDP_IN_SCHEMA"],
+            os.environ["SNOWFLAKE_EDP_CORE_SCHEMA"],
+            os.environ["SNOWFLAKE_EDP_ACC_SCHEMA"],
+        ):
+            cursor.execute(
+                f"""
+                select count(*)
+                from {ident(os.environ['SNOWFLAKE_EDP_DATABASE'])}.information_schema.tables
+                where table_schema = %s
+                  and table_type in ('BASE TABLE', 'EXTERNAL TABLE', 'EVENT TABLE', 'MATERIALIZED VIEW')
+                """,
+                (schema_name,),
+            )
+            table_count = cursor.fetchone()[0]
+            if table_count != 0:
+                raise SystemExit(
+                    f"unexpected EDP table-like objects in {os.environ['SNOWFLAKE_EDP_DATABASE']}.{schema_name}: {table_count}"
+                )
+
+            cursor.execute(
+                f"""
+                select count(*)
+                from {ident(os.environ['SNOWFLAKE_EDP_DATABASE'])}.information_schema.views
+                where table_schema = %s
+                """,
+                (schema_name,),
+            )
+            view_count = cursor.fetchone()[0]
+            if view_count != 0:
+                raise SystemExit(
+                    f"unexpected EDP views in {os.environ['SNOWFLAKE_EDP_DATABASE']}.{schema_name}: {view_count}"
+                )
+
+        print("edp_dbt_project_present=False")
+        print("edp_user_objects_present=False")
 finally:
     connection.close()
 '@

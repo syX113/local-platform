@@ -22,14 +22,8 @@ if [ -n "${SNOWFLAKE_ACCOUNT:-}" ] && [ -n "${SNOWFLAKE_USER:-}" ] && [ -n "${SN
     "${SNOWFLAKE_SDP_DATABASE}" \
     "${SNOWFLAKE_SDP_CORE_SCHEMA}" \
     dev
-  bash ./scripts/deploy-snowflake-dbt-project.sh \
-    proj_edp_orders \
-    "${SNOWFLAKE_EDP_DBT_PROJECT}" \
-    "${SNOWFLAKE_EDP_DATABASE}" \
-    "${SNOWFLAKE_EDP_CORE_SCHEMA}" \
-    dev
   bash ./scripts/execute-snowflake-dbt-project.sh "${SNOWFLAKE_SDP_DBT_PROJECT}" build
-  bash ./scripts/execute-snowflake-dbt-project.sh "${SNOWFLAKE_EDP_DBT_PROJECT}" build
+  echo "EDP deploy/build is intentionally skipped here; use the EDP CI/CD pipeline or ./scripts/deploy-edp-dev.sh"
 else
   echo "Skipping dbt build because Snowflake credentials are not set in .env"
 fi
