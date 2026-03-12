@@ -12,7 +12,7 @@ cd "${ROOT_DIR}"
 source "${SCRIPT_DIR}/common.sh"
 ensure_platform_env
 
-ARTIFACT_DIR="${ROOT_DIR}/artifacts/deploy-edp-prd"
+ARTIFACT_DIR="${ROOT_DIR}/artifacts/deploy-edp-customers-prd"
 rm -rf "${ARTIFACT_DIR}"
 mkdir -p "${ARTIFACT_DIR}"
 

@@ -181,4 +181,4 @@ while ! clone_databases_exist "${required_databases[@]}"; do
   elapsed=$((elapsed + wait_interval))
 done
 
-printf 'resolved deterministic branch sandbox context for %s:%s\\n' "${project_kind}" "${branch_name_raw}"
+printf 'resolved deterministic branch sandbox context for %s:%s\n' "${project_kind}" "${branch_name_raw}"

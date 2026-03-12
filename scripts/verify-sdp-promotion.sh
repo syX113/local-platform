@@ -162,13 +162,13 @@ if [ "${skip_dbt}" != "true" ]; then
     "${SNOWFLAKE_SDP_DBT_PROJECT}" \
     parse | tee "${ARTIFACT_DIR}/dbt_parse.log"
 
-  bash "${SCRIPT_DIR}/execute-snowflake-dbt-project.sh" \
-    "${SNOWFLAKE_SDP_DBT_PROJECT}" \
-    run "${dbt_select_args[@]}" | tee "${ARTIFACT_DIR}/dbt_run.log"
+  bash "${SCRIPT_DIR}/prepare-snowflake-dbt-target.sh" \
+    proj_source_finnova \
+    "${SNOWFLAKE_SDP_DBT_PROJECT}" | tee "${ARTIFACT_DIR}/dbt_prepare.log"
 
   bash "${SCRIPT_DIR}/execute-snowflake-dbt-project.sh" \
     "${SNOWFLAKE_SDP_DBT_PROJECT}" \
-    test "${dbt_select_args[@]}" | tee "${ARTIFACT_DIR}/dbt_test.log"
+    build "${dbt_select_args[@]}" | tee "${ARTIFACT_DIR}/dbt_build.log"
 fi
 
 docker compose run --rm --no-deps -e SOURCE_SCOPE="${scope}" dbt-executor python - <<'PY' | tee "${ARTIFACT_DIR}/snowflake_validation.txt"

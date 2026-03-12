@@ -120,13 +120,13 @@ if [ "${skip_dbt}" != "true" ]; then
     "${SNOWFLAKE_EDP_DBT_PROJECT}" \
     parse | tee "${ARTIFACT_DIR}/dbt_parse.log"
 
-  bash "${SCRIPT_DIR}/execute-snowflake-dbt-project.sh" \
-    "${SNOWFLAKE_EDP_DBT_PROJECT}" \
-    run | tee "${ARTIFACT_DIR}/dbt_run.log"
+  bash "${SCRIPT_DIR}/prepare-snowflake-dbt-target.sh" \
+    proj_edp_orders \
+    "${SNOWFLAKE_EDP_DBT_PROJECT}" | tee "${ARTIFACT_DIR}/dbt_prepare.log"
 
   bash "${SCRIPT_DIR}/execute-snowflake-dbt-project.sh" \
     "${SNOWFLAKE_EDP_DBT_PROJECT}" \
-    test | tee "${ARTIFACT_DIR}/dbt_test.log"
+    build | tee "${ARTIFACT_DIR}/dbt_build.log"
 fi
 
 docker compose run --rm --no-deps dbt-executor \

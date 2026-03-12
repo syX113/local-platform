@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import re
 import shutil
@@ -125,6 +126,7 @@ def build_profiles_yml(project_dir: Path, *, database: str, schema: str, target_
         "      type: snowflake\n"
         f"      account: \"{env('SNOWFLAKE_ACCOUNT')}\"\n"
         f"      user: \"{env('SNOWFLAKE_USER')}\"\n"
+        f"      password: \"{env('SNOWFLAKE_PASSWORD')}\"\n"
         f"      role: \"{env('SNOWFLAKE_ROLE')}\"\n"
         f"      warehouse: \"{env('SNOWFLAKE_WAREHOUSE')}\"\n"
         f"      database: \"{database}\"\n"
@@ -185,6 +187,45 @@ def execute_project(*, project_name: str, dbt_command: str, command_args: list[s
         fully_qualified_project_name(project_name),
         dbt_command,
         *command_args,
+    )
+
+
+def run_local_dbt(*, project_dir: Path, database: str, schema: str, target_name: str, dbt_args: list[str]) -> None:
+    prepared_dir = prepare_project_source(project_dir, database=database, schema=schema, target_name=target_name)
+    try:
+        completed = subprocess.run(
+            [
+                shutil.which("dbt") or "dbt",
+                *dbt_args,
+                "--profiles-dir",
+                str(prepared_dir),
+                "--project-dir",
+                str(prepared_dir),
+                "--target",
+                target_name,
+            ],
+            check=False,
+            text=True,
+            env=snow_env(),
+        )
+        if completed.returncode != 0:
+            raise SystemExit(completed.returncode)
+    finally:
+        shutil.rmtree(prepared_dir.parent, ignore_errors=True)
+
+
+def prepare_target(*, project_dir: Path, database: str, schema: str, target_name: str, schemas: list[str]) -> None:
+    run_local_dbt(
+        project_dir=project_dir,
+        database=database,
+        schema=schema,
+        target_name=target_name,
+        dbt_args=[
+            "run-operation",
+            "ensure_target_database_and_schemas",
+            "--args",
+            json.dumps({"database_name": database, "schemas": schemas}),
+        ],
     )
 
 
@@ -272,6 +313,13 @@ def build_parser() -> argparse.ArgumentParser:
     deploy_parser.add_argument("--schema")
     deploy_parser.add_argument("--target-name", default="dev")
 
+    prepare_parser = subparsers.add_parser("prepare-target")
+    prepare_parser.add_argument("--project-dir", required=True)
+    prepare_parser.add_argument("--database", required=True)
+    prepare_parser.add_argument("--schema", required=True)
+    prepare_parser.add_argument("--target-name", default="dev")
+    prepare_parser.add_argument("--schemas", nargs="+", required=True)
+
     execute_parser = subparsers.add_parser("execute")
     execute_parser.add_argument("--project-name", required=True)
     execute_parser.add_argument("dbt_command")
@@ -295,6 +343,16 @@ def main() -> int:
             database=args.database or default_database_for_project(project_dir),
             schema=args.schema or default_schema_for_project(project_dir),
             target_name=args.target_name,
+        )
+        return 0
+
+    if args.command == "prepare-target":
+        prepare_target(
+            project_dir=Path(args.project_dir),
+            database=args.database,
+            schema=args.schema,
+            target_name=args.target_name,
+            schemas=args.schemas,
         )
         return 0
 

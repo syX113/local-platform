@@ -504,6 +504,9 @@ def edp_customers_ci_yaml() -> str:
         .replace("./ci/scripts/verify-edp-promotion.sh", "./ci/scripts/verify-edp-customers-promotion.sh")
         .replace("./ci/scripts/deploy-edp-dev.sh", "./ci/scripts/deploy-edp-customers-dev.sh")
         .replace("./ci/scripts/deploy-edp-prd.sh", "./ci/scripts/deploy-edp-customers-prd.sh")
+        .replace("artifacts/edp/", "artifacts/edp_customers/")
+        .replace("artifacts/deploy-edp-dev/", "artifacts/deploy-edp-customers-dev/")
+        .replace("artifacts/deploy-edp-prd/", "artifacts/deploy-edp-customers-prd/")
         .replace("name: DEV/EDP", "name: DEV/EDP_CUSTOMERS")
         .replace("name: PRD/EDP", "name: PRD/EDP_CUSTOMERS")
         .replace("resource_group: edp-dev", "resource_group: edp-customers-dev")
@@ -933,6 +936,7 @@ def render_sdp_repo(project_path: str) -> None:
         "scripts/deploy-airflow-dag.sh",
         "scripts/deploy-snowflake-dbt-project.sh",
         "scripts/execute-snowflake-dbt-project.sh",
+        "scripts/prepare-snowflake-dbt-target.sh",
         "scripts/drop-snowflake-dbt-project.sh",
         "scripts/deploy-sdp-dev.sh",
         "scripts/deploy-sdp-prd.sh",
@@ -1040,6 +1044,7 @@ def render_edp_repo(project_path: str) -> None:
         "scripts/require-approver-match-commit.sh",
         "scripts/deploy-snowflake-dbt-project.sh",
         "scripts/execute-snowflake-dbt-project.sh",
+        "scripts/prepare-snowflake-dbt-target.sh",
         "scripts/drop-snowflake-dbt-project.sh",
         "scripts/deploy-edp-dev.sh",
         "scripts/deploy-edp-prd.sh",
@@ -1131,6 +1136,7 @@ def render_edp_customers_repo(project_path: str) -> None:
         "scripts/require-approver-match-commit.sh",
         "scripts/deploy-snowflake-dbt-project.sh",
         "scripts/execute-snowflake-dbt-project.sh",
+        "scripts/prepare-snowflake-dbt-target.sh",
         "scripts/drop-snowflake-dbt-project.sh",
         "scripts/deploy-edp-customers-dev.sh",
         "scripts/deploy-edp-customers-prd.sh",
