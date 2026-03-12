@@ -623,7 +623,7 @@ Each generated project ships its own `.gitlab-ci.yml` with isolated CI/CD verifi
 - merging the merge request to `main` triggers the post-merge CD pipeline automatically; it deploys directly into the shared DEV target
 - the same post-merge pipeline then stops at a manual PRD approval gate that must be played by the commit identity, and only then deploys into the shared PRD target
 - non-default branch pipelines preserve the branch sandbox after the pipeline
-- branch sandboxes can be destroyed explicitly with the manual cleanup jobs in GitLab and are also destroyed automatically when the branch itself is deleted in GitLab
+- branch sandboxes are destroyed automatically only when the branch itself is deleted in GitLab
 - if the source branch is kept after merge, the branch sandbox also stays in place until that branch is explicitly deleted
 
 The SDP project pipeline is intentionally split into two CI validation steps so cold-start GitLab runs stay stable:

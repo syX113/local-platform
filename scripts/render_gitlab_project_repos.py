@@ -295,18 +295,6 @@ def sdp_ci_yaml() -> str:
           script:
             - ./ci/scripts/cleanup-ci-sandbox.sh artifacts/context/sdp.env
 
-        destroy_sdp_branch_sandbox:
-          stage: cleanup
-          rules:
-            - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
-              when: never
-            - if: '$CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH != $CI_DEFAULT_BRANCH'
-              when: manual
-            - when: never
-          allow_failure: true
-          script:
-            - bash ./ci/scripts/resolve-existing-sandbox.sh sdp artifacts/context/sdp.env
-            - ./ci/scripts/cleanup-ci-sandbox.sh --destroy artifacts/context/sdp.env
         """
     )
 
@@ -505,18 +493,6 @@ def edp_ci_yaml() -> str:
           script:
             - ./ci/scripts/cleanup-ci-sandbox.sh artifacts/context/edp.env
 
-        destroy_edp_branch_sandbox:
-          stage: cleanup
-          rules:
-            - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
-              when: never
-            - if: '$CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH != $CI_DEFAULT_BRANCH'
-              when: manual
-            - when: never
-          allow_failure: true
-          script:
-            - bash ./ci/scripts/resolve-existing-sandbox.sh edp artifacts/context/edp.env
-            - ./ci/scripts/cleanup-ci-sandbox.sh --destroy artifacts/context/edp.env
         """
     )
 
