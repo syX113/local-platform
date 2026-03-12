@@ -104,8 +104,6 @@ def sdp_ci_yaml() -> str:
             - export COMPOSE_FILE="compose.yaml:compose.ci.yaml"
             - export COMPOSE_PROJECT_NAME="${LOCAL_PLATFORM_PROJECT_NAME}"
             - export PLATFORM_DOCKER_NETWORK="${PLATFORM_DOCKER_NETWORK:-${LOCAL_PLATFORM_PROJECT_NAME}-net}"
-          after_script:
-            - docker compose ps || true
 
         stages:
           - build
@@ -336,8 +334,6 @@ def edp_ci_yaml() -> str:
             - export COMPOSE_FILE="compose.yaml:compose.ci.yaml"
             - export COMPOSE_PROJECT_NAME="${LOCAL_PLATFORM_PROJECT_NAME}"
             - export PLATFORM_DOCKER_NETWORK="${PLATFORM_DOCKER_NETWORK:-${LOCAL_PLATFORM_PROJECT_NAME}-net}"
-          after_script:
-            - docker compose ps || true
 
         stages:
           - build
