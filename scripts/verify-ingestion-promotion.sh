@@ -39,7 +39,21 @@ if [ -n "${2:-}" ]; then
 elif [ -n "${AIRFLOW_SANDBOX_DAG_ID:-}" ]; then
   dag_id="${AIRFLOW_SANDBOX_DAG_ID}"
 else
-  dag_id="${DEV_AIRFLOW_DAG_ID:-DEV_local_platform_ingest}"
+  case "${scope}" in
+    orders)
+      dag_id="${DEV_ORDERS_AIRFLOW_DAG_ID:-DEV_local_platform_orders_ingest}"
+      ;;
+    customers)
+      dag_id="${DEV_CUSTOMERS_AIRFLOW_DAG_ID:-DEV_local_platform_customers_ingest}"
+      ;;
+    all)
+      dag_id="${DEV_ORDERS_AIRFLOW_DAG_ID:-DEV_local_platform_orders_ingest}"
+      ;;
+    *)
+      echo "unsupported ingestion scope: ${scope}" >&2
+      exit 1
+      ;;
+  esac
 fi
 
 if [ -n "${3:-}" ]; then
@@ -47,7 +61,18 @@ if [ -n "${3:-}" ]; then
 elif [ -n "${AIRFLOW_SANDBOX_DAG_ID:-}" ]; then
   dag_subdir="/opt/airflow/dags/deployed/$(sanitize_branch_token "${AIRFLOW_SANDBOX_DAG_ID}").py"
 else
-  dag_subdir="/opt/airflow/dags/deployed/${AIRFLOW_ACTIVE_DAG_FILENAME:-${DEV_AIRFLOW_DAG_FILENAME:-dev_local_platform_ingest.py}}"
+  case "${scope}" in
+    orders|all)
+      dag_subdir="/opt/airflow/dags/deployed/${AIRFLOW_ACTIVE_DAG_FILENAME:-dev_local_platform_orders_ingest.py}"
+      ;;
+    customers)
+      dag_subdir="/opt/airflow/dags/deployed/${AIRFLOW_ACTIVE_DAG_FILENAME:-dev_local_platform_customers_ingest.py}"
+      ;;
+    *)
+      echo "unsupported ingestion scope: ${scope}" >&2
+      exit 1
+      ;;
+  esac
 fi
 
 # The ingestion promotion validates the PostgreSQL -> Airflow/dlt -> MinIO/Iceberg path only.
@@ -117,7 +142,7 @@ case "${scope}" in
     ;;
 esac
 
-docker compose run --rm --no-deps dlt-extractor python - <<'PY' | tee "${ARTIFACT_DIR}/minio_iceberg_summary.txt"
+docker compose run --rm --no-deps -e SOURCE_SCOPE="${scope}" dlt-extractor python - <<'PY' | tee "${ARTIFACT_DIR}/minio_iceberg_summary.txt"
 from io import BytesIO
 import json
 import os
@@ -147,10 +172,25 @@ keys = [obj["Key"] for obj in objects]
 metadata_keys = sorted(key for key in keys if "/metadata/" in key and key.endswith(".metadata.json"))
 parquet_keys = sorted(key for key in keys if key.endswith(".parquet"))
 
-if len(metadata_keys) < 6:
-    raise SystemExit(f"expected at least 6 metadata files, found {len(metadata_keys)}")
-if len(parquet_keys) < 3:
-    raise SystemExit(f"expected at least 3 parquet data files, found {len(parquet_keys)}")
+scope = os.environ.get("SOURCE_SCOPE", "all").strip().lower()
+if scope == "orders":
+    expected = {"raw_orders": 30, "raw_order_items": 60}
+elif scope == "customers":
+    expected = {"raw_customers": 12}
+else:
+    expected = {"raw_orders": 30, "raw_order_items": 60, "raw_customers": 12}
+
+minimum_metadata_files = len(expected)
+minimum_parquet_files = len(expected)
+
+if len(metadata_keys) < minimum_metadata_files:
+    raise SystemExit(
+        f"expected at least {minimum_metadata_files} metadata files for scope '{scope}', found {len(metadata_keys)}"
+    )
+if len(parquet_keys) < minimum_parquet_files:
+    raise SystemExit(
+        f"expected at least {minimum_parquet_files} parquet data files for scope '{scope}', found {len(parquet_keys)}"
+    )
 
 print(f"metadata_files={len(metadata_keys)}")
 print(f"parquet_files_total={len(parquet_keys)}")
@@ -179,13 +219,6 @@ for key in parquet_keys:
     if current is None or last_modified > current[1]:
         latest_parquet_keys[table_name] = (key, last_modified)
 
-scope = os.environ.get("SOURCE_SCOPE", "all").strip().lower()
-if scope == "orders":
-    expected = {"raw_orders": 30, "raw_order_items": 60}
-elif scope == "customers":
-    expected = {"raw_customers": 12}
-else:
-    expected = {"raw_orders": 30, "raw_order_items": 60, "raw_customers": 12}
 for table_name, expected_rows in expected.items():
     latest_key = latest_parquet_keys.get(table_name)
     if latest_key is None:

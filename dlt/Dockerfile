@@ -12,4 +12,3 @@ RUN pip install --upgrade pip \
 COPY dlt /opt/platform/dlt
 
 ENTRYPOINT ["/bin/sh", "/opt/platform/dlt/entrypoint.sh"]
-CMD ["python", "/opt/platform/dlt/pipeline.py"]

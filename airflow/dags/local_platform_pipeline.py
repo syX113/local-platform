@@ -29,7 +29,7 @@ def build_ingest_dag(
     tags: list[str] | None = None,
 ) -> DAG:
     runtime_environment = docker_environment(runtime_overrides or {})
-    dlt_command = runtime_environment.get("DLT_COMMAND", "python /opt/platform/dlt/pipeline.py")
+    dlt_command = runtime_environment.get("DLT_COMMAND", "python /opt/platform/dlt/pipeline_orders.py")
     raw_sync_scope = runtime_environment.get("SNOWFLAKE_RAW_SYNC_SCOPE", "").strip().lower()
     sdp_dbt_select = runtime_environment.get("SNOWFLAKE_SDP_DBT_SELECT", "").strip()
 

@@ -17,8 +17,10 @@ Invoke-DockerCompose -Arguments @("up", "-d", "airflow-metadata-db", "source-pos
 Invoke-DockerCompose -Arguments @("up", "-d", "lakehouse-bucket-init", "airflow-init")
 & (Join-Path $PSScriptRoot "load-source-sample-data.ps1")
 Invoke-DockerCompose -Arguments @("up", "-d", "airflow-webserver", "airflow-scheduler")
-& (Join-Path $PSScriptRoot "deploy-airflow-dag.ps1") "dev"
-& (Join-Path $PSScriptRoot "deploy-airflow-dag.ps1") "prd"
+& (Join-Path $PSScriptRoot "deploy-airflow-dag.ps1") "dev" "orders"
+& (Join-Path $PSScriptRoot "deploy-airflow-dag.ps1") "dev" "customers"
+& (Join-Path $PSScriptRoot "deploy-airflow-dag.ps1") "prd" "orders"
+& (Join-Path $PSScriptRoot "deploy-airflow-dag.ps1") "prd" "customers"
 
 Write-Host "stack is starting"
 Write-Host "next:"

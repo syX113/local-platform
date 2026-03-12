@@ -83,7 +83,7 @@ if [ "${skip_raw_sync}" != "true" ] && [ "${SNOWFLAKE_LOCAL_RAW_SYNC:-false}" = 
     bash -lc "RAW_SYNC_SCOPE=${scope} python /opt/platform/dlt/snowflake_raw_sync.py" | tee "${ARTIFACT_DIR}/snowflake_raw_sync.log"
 fi
 
-docker compose run --rm --no-deps dbt-executor python - <<'PY' | tee "${ARTIFACT_DIR}/sdp_inbound_contract.txt"
+docker compose run --rm --no-deps -e SOURCE_SCOPE="${scope}" dbt-executor python - <<'PY' | tee "${ARTIFACT_DIR}/sdp_inbound_contract.txt"
 import os
 
 import snowflake.connector
@@ -171,7 +171,7 @@ if [ "${skip_dbt}" != "true" ]; then
     test "${dbt_select_args[@]}" | tee "${ARTIFACT_DIR}/dbt_test.log"
 fi
 
-docker compose run --rm --no-deps dbt-executor python - <<'PY' | tee "${ARTIFACT_DIR}/snowflake_validation.txt"
+docker compose run --rm --no-deps -e SOURCE_SCOPE="${scope}" dbt-executor python - <<'PY' | tee "${ARTIFACT_DIR}/snowflake_validation.txt"
 import os
 
 import snowflake.connector

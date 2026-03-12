@@ -133,10 +133,12 @@ Write-Host "recreating Snowflake foundation"
 Set-RuntimeTarget -Target "dev"
 
 Write-Host "refreshing DEV Iceberg artifacts"
-Invoke-DockerCompose -Arguments @("run", "--rm", "--no-deps", "dlt-extractor", "python", "/opt/platform/dlt/pipeline.py")
+Invoke-DockerCompose -Arguments @("run", "--rm", "--no-deps", "dlt-extractor", "python", "/opt/platform/dlt/pipeline_orders.py")
+Invoke-DockerCompose -Arguments @("run", "--rm", "--no-deps", "dlt-extractor", "python", "/opt/platform/dlt/pipeline_customers.py")
 
 Write-Host "syncing inbound Snowflake raw tables"
-Invoke-DockerCompose -Arguments @("run", "--rm", "--no-deps", "dlt-extractor", "python", "/opt/platform/dlt/snowflake_raw_sync.py")
+Invoke-DockerCompose -Arguments @("run", "--rm", "--no-deps", "dlt-extractor", "bash", "-lc", "RAW_SYNC_SCOPE=orders python /opt/platform/dlt/snowflake_raw_sync.py")
+Invoke-DockerCompose -Arguments @("run", "--rm", "--no-deps", "dlt-extractor", "bash", "-lc", "RAW_SYNC_SCOPE=customers python /opt/platform/dlt/snowflake_raw_sync.py")
 
 Write-Host "deploying DEV Snowflake dbt projects"
 Invoke-DockerCompose -Arguments @("run", "--rm", "--no-deps", "dbt-executor", "python", "/opt/platform/dbt/scripts/snow_dbt_cli.py", "deploy", "--project-dir", $sdpProjectDir, "--project-name", $sdpDbtProject, "--database", (Get-EnvValue -Name "SNOWFLAKE_CONTROL_DATABASE"), "--schema", (Get-EnvValue -Name "SNOWFLAKE_CONTROL_SCHEMA"), "--target-name", "dev")
@@ -145,14 +147,17 @@ Write-Host "building SDP data product in Snowflake"
 Invoke-DockerCompose -Arguments @("run", "--rm", "--no-deps", "dbt-executor", "python", "/opt/platform/dbt/scripts/snow_dbt_cli.py", "execute", "--project-name", $sdpDbtProject, "build")
 
 Write-Host "deploying PRD Airflow DAG and PRD SDP objects"
-& (Join-Path $PSScriptRoot "deploy-airflow-dag.ps1") "prd" | Out-Null
+& (Join-Path $PSScriptRoot "deploy-airflow-dag.ps1") "prd" "orders" | Out-Null
+& (Join-Path $PSScriptRoot "deploy-airflow-dag.ps1") "prd" "customers" | Out-Null
 Set-RuntimeTarget -Target "prd"
 $prdSdpDbtProject = Get-EnvValue -Name "PRD_SNOWFLAKE_SDP_DBT_PROJECT"
 if ([string]::IsNullOrEmpty($prdSdpDbtProject)) {
     $prdSdpDbtProject = "PRD_DBT_PROJECT_SOURCE_FINNOVA"
 }
-Invoke-DockerCompose -Arguments @("run", "--rm", "--no-deps", "dlt-extractor", "python", "/opt/platform/dlt/pipeline.py")
-Invoke-DockerCompose -Arguments @("run", "--rm", "--no-deps", "dlt-extractor", "python", "/opt/platform/dlt/snowflake_raw_sync.py")
+Invoke-DockerCompose -Arguments @("run", "--rm", "--no-deps", "dlt-extractor", "python", "/opt/platform/dlt/pipeline_orders.py")
+Invoke-DockerCompose -Arguments @("run", "--rm", "--no-deps", "dlt-extractor", "python", "/opt/platform/dlt/pipeline_customers.py")
+Invoke-DockerCompose -Arguments @("run", "--rm", "--no-deps", "dlt-extractor", "bash", "-lc", "RAW_SYNC_SCOPE=orders python /opt/platform/dlt/snowflake_raw_sync.py")
+Invoke-DockerCompose -Arguments @("run", "--rm", "--no-deps", "dlt-extractor", "bash", "-lc", "RAW_SYNC_SCOPE=customers python /opt/platform/dlt/snowflake_raw_sync.py")
 Invoke-DockerCompose -Arguments @("run", "--rm", "--no-deps", "dbt-executor", "python", "/opt/platform/dbt/scripts/snow_dbt_cli.py", "deploy", "--project-dir", $sdpProjectDir, "--project-name", $prdSdpDbtProject, "--database", (Get-EnvValue -Name "SNOWFLAKE_CONTROL_DATABASE"), "--schema", (Get-EnvValue -Name "SNOWFLAKE_CONTROL_SCHEMA"), "--target-name", "prd")
 Invoke-DockerCompose -Arguments @("run", "--rm", "--no-deps", "dbt-executor", "python", "/opt/platform/dbt/scripts/snow_dbt_cli.py", "execute", "--project-name", $prdSdpDbtProject, "build")
 

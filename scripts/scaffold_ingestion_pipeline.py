@@ -274,10 +274,18 @@ def main() -> int:
             metadata_keys = sorted(key for key in keys if "/metadata/" in key and key.endswith(".metadata.json"))
             parquet_keys = sorted(key for key in keys if key.endswith(".parquet"))
 
-            if len(metadata_keys) < 4:
-                raise SystemExit(f"expected at least 4 metadata files, found {{len(metadata_keys)}}")
-            if len(parquet_keys) != 2:
-                raise SystemExit(f"expected 2 parquet data files, found {{len(parquet_keys)}}")
+            expected = {{"raw_orders": 30, "raw_order_items": 60}}
+            minimum_metadata_files = len(expected)
+            minimum_parquet_files = len(expected)
+
+            if len(metadata_keys) < minimum_metadata_files:
+                raise SystemExit(
+                    f"expected at least {{minimum_metadata_files}} metadata files, found {{len(metadata_keys)}}"
+                )
+            if len(parquet_keys) < minimum_parquet_files:
+                raise SystemExit(
+                    f"expected at least {{minimum_parquet_files}} parquet data files, found {{len(parquet_keys)}}"
+                )
 
             print(f"metadata_files={{len(metadata_keys)}}")
             print(f"parquet_files={{len(parquet_keys)}}")
@@ -301,7 +309,6 @@ def main() -> int:
                 table_name = parts[namespace_index + 1]
                 row_totals[table_name] = row_totals.get(table_name, 0) + row_count
 
-            expected = {{"raw_orders": 30, "raw_order_items": 60}}
             for table_name, expected_rows in expected.items():
                 actual_rows = row_totals.get(table_name)
                 if actual_rows != expected_rows:

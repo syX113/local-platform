@@ -128,7 +128,7 @@ dag = build_ingest_dag(
         "SNOWFLAKE_CONTROL_DATABASE": $(python_literal "${SNOWFLAKE_CONTROL_DATABASE}"),
         "SNOWFLAKE_CONTROL_SCHEMA": $(python_literal "${SNOWFLAKE_CONTROL_SCHEMA}"),
         "SNOWFLAKE_DBT_STAGE": $(python_literal "${SNOWFLAKE_DBT_STAGE}"),
-        "DLT_COMMAND": $(python_literal "${DLT_COMMAND:-python /opt/platform/dlt/pipeline.py}"),
+        "DLT_COMMAND": $(python_literal "${DLT_COMMAND:-python /opt/platform/dlt/pipeline_${scope}.py}"),
         "SNOWFLAKE_RAW_SYNC_SCOPE": $(python_literal "${SNOWFLAKE_RAW_SYNC_SCOPE:-}"),
         "SNOWFLAKE_SDP_DBT_SELECT": $(python_literal "${SNOWFLAKE_SDP_DBT_SELECT:-}"),
         "SNOWFLAKE_SDP_DATABASE": $(python_literal "${SNOWFLAKE_SDP_DATABASE}"),

@@ -13,12 +13,24 @@ source "${SCRIPT_DIR}/common.sh"
 ensure_platform_env
 
 execution_date="${1:-2026-03-07}"
+source_scope="${SOURCE_SCOPE:-orders}"
 if [ -n "${2:-}" ]; then
   dag_id="${2}"
 elif [ -n "${AIRFLOW_SANDBOX_DAG_ID:-}" ]; then
   dag_id="${AIRFLOW_SANDBOX_DAG_ID}"
 else
-  dag_id="${DEV_AIRFLOW_DAG_ID:-DEV_local_platform_ingest}"
+  case "${source_scope}" in
+    orders)
+      dag_id="${DEV_ORDERS_AIRFLOW_DAG_ID:-DEV_local_platform_orders_ingest}"
+      ;;
+    customers)
+      dag_id="${DEV_CUSTOMERS_AIRFLOW_DAG_ID:-DEV_local_platform_customers_ingest}"
+      ;;
+    *)
+      echo "unsupported source scope for DAG test: ${source_scope}" >&2
+      exit 1
+      ;;
+  esac
 fi
 
 if [ -n "${3:-}" ]; then
@@ -26,7 +38,18 @@ if [ -n "${3:-}" ]; then
 elif [ -n "${AIRFLOW_SANDBOX_DAG_ID:-}" ]; then
   dag_subdir="/opt/airflow/dags/deployed/$(sanitize_branch_token "${AIRFLOW_SANDBOX_DAG_ID}").py"
 else
-  dag_subdir="/opt/airflow/dags/deployed/${DEV_AIRFLOW_DAG_FILENAME:-dev_local_platform_ingest.py}"
+  case "${source_scope}" in
+    orders)
+      dag_subdir="/opt/airflow/dags/deployed/dev_local_platform_orders_ingest.py"
+      ;;
+    customers)
+      dag_subdir="/opt/airflow/dags/deployed/dev_local_platform_customers_ingest.py"
+      ;;
+    *)
+      echo "unsupported source scope for DAG subdir: ${source_scope}" >&2
+      exit 1
+      ;;
+  esac
 fi
 env_keys=(
   PLATFORM_DOCKER_NETWORK
