@@ -42,6 +42,14 @@ if [ "${should_destroy}" != "true" ]; then
   exit 0
 fi
 
+if [ -n "${AIRFLOW_SANDBOX_ORDERS_DAG_ID:-}" ]; then
+  remove_deployed_airflow_dag "${AIRFLOW_SANDBOX_ORDERS_DAG_ID}"
+fi
+
+if [ -n "${AIRFLOW_SANDBOX_CUSTOMERS_DAG_ID:-}" ]; then
+  remove_deployed_airflow_dag "${AIRFLOW_SANDBOX_CUSTOMERS_DAG_ID}"
+fi
+
 if [ -n "${AIRFLOW_SANDBOX_DAG_ID:-}" ]; then
   remove_deployed_airflow_dag "${AIRFLOW_SANDBOX_DAG_ID}"
 fi

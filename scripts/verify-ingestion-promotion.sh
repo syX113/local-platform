@@ -16,6 +16,20 @@ ARTIFACT_DIR="${ROOT_DIR}/artifacts/ingestion"
 rm -rf "${ARTIFACT_DIR}"
 mkdir -p "${ARTIFACT_DIR}"
 
+scope="${SOURCE_SCOPE:-all}"
+while [ $# -gt 0 ]; do
+  case "${1}" in
+    --scope)
+      scope="${2:?scope value is required}"
+      shift 2
+      ;;
+    *)
+      break
+      ;;
+  esac
+done
+export SOURCE_SCOPE="${scope}"
+
 iceberg_catalog_name="${ICEBERG_CATALOG_NAME:-default}"
 iceberg_namespace="${ICEBERG_NAMESPACE:-landing}"
 catalog_namespace="$(printf '%s' "${iceberg_namespace}" | tr '[:upper:]' '[:lower:]')"
@@ -33,7 +47,7 @@ if [ -n "${3:-}" ]; then
 elif [ -n "${AIRFLOW_SANDBOX_DAG_ID:-}" ]; then
   dag_subdir="/opt/airflow/dags/deployed/$(sanitize_branch_token "${AIRFLOW_SANDBOX_DAG_ID}").py"
 else
-  dag_subdir="/opt/airflow/dags/deployed/${DEV_AIRFLOW_DAG_FILENAME:-dev_local_platform_ingest.py}"
+  dag_subdir="/opt/airflow/dags/deployed/${AIRFLOW_ACTIVE_DAG_FILENAME:-${DEV_AIRFLOW_DAG_FILENAME:-dev_local_platform_ingest.py}}"
 fi
 
 # The ingestion promotion validates the PostgreSQL -> Airflow/dlt -> MinIO/Iceberg path only.
@@ -84,10 +98,24 @@ catalog_rows="$(
 printf '%s\n' "${catalog_rows}" | tee "${ARTIFACT_DIR}/iceberg_catalog.csv"
 
 catalog_count="$(printf '%s\n' "${catalog_rows}" | sed '/^$/d' | wc -l | tr -d ' ')"
-[ "${catalog_count}" = "3" ] || { echo "expected 3 Iceberg catalog entries, got ${catalog_count}" >&2; exit 1; }
-printf '%s\n' "${catalog_rows}" | grep -q "^${iceberg_catalog_name},${catalog_namespace},raw_customers," || { echo "missing ${iceberg_catalog_name}.${catalog_namespace}.raw_customers catalog entry" >&2; exit 1; }
-printf '%s\n' "${catalog_rows}" | grep -q "^${iceberg_catalog_name},${catalog_namespace},raw_order_items," || { echo "missing ${iceberg_catalog_name}.${catalog_namespace}.raw_order_items catalog entry" >&2; exit 1; }
-printf '%s\n' "${catalog_rows}" | grep -q "^${iceberg_catalog_name},${catalog_namespace},raw_orders," || { echo "missing ${iceberg_catalog_name}.${catalog_namespace}.raw_orders catalog entry" >&2; exit 1; }
+case "${scope}" in
+  orders)
+    printf '%s\n' "${catalog_rows}" | grep -q "^${iceberg_catalog_name},${catalog_namespace},raw_order_items," || { echo "missing ${iceberg_catalog_name}.${catalog_namespace}.raw_order_items catalog entry" >&2; exit 1; }
+    printf '%s\n' "${catalog_rows}" | grep -q "^${iceberg_catalog_name},${catalog_namespace},raw_orders," || { echo "missing ${iceberg_catalog_name}.${catalog_namespace}.raw_orders catalog entry" >&2; exit 1; }
+    ;;
+  customers)
+    printf '%s\n' "${catalog_rows}" | grep -q "^${iceberg_catalog_name},${catalog_namespace},raw_customers," || { echo "missing ${iceberg_catalog_name}.${catalog_namespace}.raw_customers catalog entry" >&2; exit 1; }
+    ;;
+  all)
+    printf '%s\n' "${catalog_rows}" | grep -q "^${iceberg_catalog_name},${catalog_namespace},raw_customers," || { echo "missing ${iceberg_catalog_name}.${catalog_namespace}.raw_customers catalog entry" >&2; exit 1; }
+    printf '%s\n' "${catalog_rows}" | grep -q "^${iceberg_catalog_name},${catalog_namespace},raw_order_items," || { echo "missing ${iceberg_catalog_name}.${catalog_namespace}.raw_order_items catalog entry" >&2; exit 1; }
+    printf '%s\n' "${catalog_rows}" | grep -q "^${iceberg_catalog_name},${catalog_namespace},raw_orders," || { echo "missing ${iceberg_catalog_name}.${catalog_namespace}.raw_orders catalog entry" >&2; exit 1; }
+    ;;
+  *)
+    echo "unsupported ingestion scope: ${scope}" >&2
+    exit 1
+    ;;
+esac
 
 docker compose run --rm --no-deps dlt-extractor python - <<'PY' | tee "${ARTIFACT_DIR}/minio_iceberg_summary.txt"
 from io import BytesIO
@@ -151,7 +179,13 @@ for key in parquet_keys:
     if current is None or last_modified > current[1]:
         latest_parquet_keys[table_name] = (key, last_modified)
 
-expected = {"raw_orders": 30, "raw_order_items": 60, "raw_customers": 12}
+scope = os.environ.get("SOURCE_SCOPE", "all").strip().lower()
+if scope == "orders":
+    expected = {"raw_orders": 30, "raw_order_items": 60}
+elif scope == "customers":
+    expected = {"raw_customers": 12}
+else:
+    expected = {"raw_orders": 30, "raw_order_items": 60, "raw_customers": 12}
 for table_name, expected_rows in expected.items():
     latest_key = latest_parquet_keys.get(table_name)
     if latest_key is None:
@@ -179,6 +213,7 @@ source.raw_order_items_export=${raw_order_items_count}
 iceberg.catalog_entries=${catalog_count}
 iceberg.catalog=${iceberg_catalog_name}
 iceberg.namespace=${catalog_namespace}
+ingestion.scope=${scope}
 object_store.bucket=${OBJECT_STORE_BUCKET}
 airflow.dag_id=${dag_id}
 EOF

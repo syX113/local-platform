@@ -69,6 +69,8 @@ object_store_bucket="s3://${MINIO_BUCKET}/${object_prefix}"
 source_dbt_project="DBT_PROJECT_SOURCE_FINNOVA_${db_suffix}"
 edp_orders_dbt_project="DBT_PROJECT_EDP_ORDERS_${db_suffix}"
 edp_customers_dbt_project="DBT_PROJECT_EDP_CUSTOMERS_${db_suffix}"
+source_orders_pipeline_name="${project_kind}_${sandbox_kind}_${namespace_suffix}_orders"
+source_customers_pipeline_name="${project_kind}_${sandbox_kind}_${namespace_suffix}_customers"
 
 base_sdp_database="${SNOWFLAKE_SDP_ORDERS_DATABASE:-${SNOWFLAKE_SDP_DATABASE}}"
 base_sdp_customers_database="${SNOWFLAKE_SDP_CUSTOMERS_DATABASE}"
@@ -121,9 +123,13 @@ SNOWFLAKE_EDP_CUSTOMERS_DBT_PROJECT=${edp_customers_dbt_project}
 MINIO_PREFIX=${object_prefix}
 OBJECT_STORE_BUCKET=${object_store_bucket}
 DLT_PIPELINE_NAME=${project_kind}_${sandbox_kind}_${namespace_suffix}
+SOURCE_ORDERS_DLT_PIPELINE_NAME=${source_orders_pipeline_name}
+SOURCE_CUSTOMERS_DLT_PIPELINE_NAME=${source_customers_pipeline_name}
 ICEBERG_NAMESPACE=${namespace_suffix}
 SNOW_DBT_TARGET_NAME=${sandbox_kind}
 AIRFLOW_SANDBOX_DAG_ID=$( [ "${sandbox_kind}" = "merge_request" ] && printf 'MR_%s_%s' "${project_kind}" "${namespace_suffix}" || printf 'DEV_%s_%s' "${project_kind}" "${namespace_suffix}" )
+AIRFLOW_SANDBOX_ORDERS_DAG_ID=$( [ "${sandbox_kind}" = "merge_request" ] && printf 'MR_%s_%s_orders' "${project_kind}" "${namespace_suffix}" || printf 'DEV_%s_%s_orders' "${project_kind}" "${namespace_suffix}" )
+AIRFLOW_SANDBOX_CUSTOMERS_DAG_ID=$( [ "${sandbox_kind}" = "merge_request" ] && printf 'MR_%s_%s_customers' "${project_kind}" "${namespace_suffix}" || printf 'DEV_%s_%s_customers' "${project_kind}" "${namespace_suffix}" )
 EOF
 
 bash "${SCRIPT_DIR}/ensure-snowflake-foundation.sh" | tee "${base_bootstrap_log}"

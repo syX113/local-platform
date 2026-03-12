@@ -121,6 +121,65 @@ object_store_config_prefix() {
   printf '%s' "${OBJECT_STORE_CONFIG_PREFIX:-config}"
 }
 
+source_orders_pipeline_basename() {
+  printf '%s' "${SOURCE_ORDERS_PIPELINE_BASENAME:-local_platform_orders_ingest}"
+}
+
+source_customers_pipeline_basename() {
+  printf '%s' "${SOURCE_CUSTOMERS_PIPELINE_BASENAME:-local_platform_customers_ingest}"
+}
+
+activate_source_scope_runtime() {
+  local scope="${1:?source scope is required (orders|customers)}"
+  local scope_upper base_pipeline_name dlt_pipeline_name dag_id dag_id_var dlt_name_var
+
+  scope_upper="$(printf '%s' "${scope}" | tr '[:lower:]' '[:upper:]')"
+
+  case "${scope}" in
+    orders)
+      base_pipeline_name="$(source_orders_pipeline_basename)"
+      export DLT_COMMAND="python /opt/platform/dlt/pipeline_orders.py"
+      export SNOWFLAKE_RAW_SYNC_SCOPE="orders"
+      export SNOWFLAKE_SDP_DBT_SELECT="orders"
+      ;;
+    customers)
+      base_pipeline_name="$(source_customers_pipeline_basename)"
+      export DLT_COMMAND="python /opt/platform/dlt/pipeline_customers.py"
+      export SNOWFLAKE_RAW_SYNC_SCOPE="customers"
+      export SNOWFLAKE_SDP_DBT_SELECT="customers"
+      ;;
+    *)
+      echo "unsupported source scope: ${scope}" >&2
+      return 1
+      ;;
+  esac
+
+  if [ -n "${CI_SANDBOX_KIND:-}" ]; then
+    dlt_name_var="SOURCE_${scope_upper}_DLT_PIPELINE_NAME"
+    dag_id_var="AIRFLOW_SANDBOX_${scope_upper}_DAG_ID"
+    dlt_pipeline_name="${!dlt_name_var:-${DLT_PIPELINE_NAME}_${scope}}"
+    dag_id="${!dag_id_var:-${AIRFLOW_SANDBOX_DAG_ID}_${scope}}"
+  elif [ "${ACTIVE_RUNTIME_ENV:-}" = "prd" ]; then
+    dlt_name_var="PRD_SOURCE_${scope_upper}_DLT_PIPELINE_NAME"
+    dag_id_var="PRD_${scope_upper}_AIRFLOW_DAG_ID"
+    dlt_pipeline_name="${!dlt_name_var:-$(prefixed_identifier "${base_pipeline_name}" "${PRD_DEPLOYMENT_PREFIX:-PRD}")}"
+    dag_id="${!dag_id_var:-$(prefixed_identifier "${base_pipeline_name}" "${PRD_DEPLOYMENT_PREFIX:-PRD}")}"
+  else
+    dlt_name_var="DEV_SOURCE_${scope_upper}_DLT_PIPELINE_NAME"
+    dag_id_var="DEV_${scope_upper}_AIRFLOW_DAG_ID"
+    dlt_pipeline_name="${!dlt_name_var:-$(prefixed_identifier "${base_pipeline_name}" "${DEV_DEPLOYMENT_PREFIX:-DEV}")}"
+    dag_id="${!dag_id_var:-$(prefixed_identifier "${base_pipeline_name}" "${DEV_DEPLOYMENT_PREFIX:-DEV}")}"
+  fi
+
+  export ACTIVE_SOURCE_SCOPE="${scope}"
+  export SOURCE_SCOPE="${scope}"
+  export SOURCE_PIPELINE_BASENAME="${base_pipeline_name}"
+  export DLT_PIPELINE_NAME="${dlt_pipeline_name}"
+  export AIRFLOW_ACTIVE_DAG_ID="${dag_id}"
+  export AIRFLOW_ACTIVE_MODULE_PREFIX="$(sanitize_branch_token "${AIRFLOW_ACTIVE_DAG_ID}")"
+  export AIRFLOW_ACTIVE_DAG_FILENAME="${AIRFLOW_ACTIVE_MODULE_PREFIX}.py"
+}
+
 build_clone_database_name() {
   local base_name="${1:?base name is required}"
   local owner_token="${2:?owner token is required}"
@@ -341,10 +400,13 @@ export_prd_runtime_env() {
   source_edp_customers_database="${PRD_SOURCE_EDP_CUSTOMERS_DATABASE:-${SNOWFLAKE_EDP_CUSTOMERS_DATABASE_BASE:-${SNOWFLAKE_EDP_CUSTOMERS_DATABASE}}}"
 
   export PRD_DEPLOYMENT_PREFIX="${prd_prefix}"
+  export ACTIVE_RUNTIME_ENV="prd"
   export SNOWFLAKE_CONTROL_DATABASE="${SNOWFLAKE_CONTROL_DATABASE:-$(snowflake_control_database)}"
   export SNOWFLAKE_CONTROL_SCHEMA="${SNOWFLAKE_CONTROL_SCHEMA:-$(snowflake_control_schema)}"
   export SNOWFLAKE_DBT_STAGE="${SNOWFLAKE_DBT_STAGE:-$(snowflake_dbt_stage_name)}"
   export PRD_SOURCE_DLT_PIPELINE_NAME="${source_dlt_pipeline}"
+  export PRD_SOURCE_ORDERS_DLT_PIPELINE_NAME="${PRD_SOURCE_ORDERS_DLT_PIPELINE_NAME:-$(prefixed_identifier "$(source_orders_pipeline_basename)" "${prd_prefix}")}"
+  export PRD_SOURCE_CUSTOMERS_DLT_PIPELINE_NAME="${PRD_SOURCE_CUSTOMERS_DLT_PIPELINE_NAME:-$(prefixed_identifier "$(source_customers_pipeline_basename)" "${prd_prefix}")}"
   export PRD_SOURCE_ICEBERG_NAMESPACE="${source_iceberg_namespace}"
   export PRD_SOURCE_MINIO_PREFIX="${source_minio_prefix}"
   export PRD_SOURCE_SDP_DATABASE="${source_sdp_database}"
@@ -353,6 +415,8 @@ export_prd_runtime_env() {
   export PRD_SOURCE_EDP_CUSTOMERS_DATABASE="${source_edp_customers_database}"
 
   export PRD_AIRFLOW_DAG_ID="${PRD_AIRFLOW_DAG_ID:-$(prefixed_identifier "${source_dlt_pipeline}" "${prd_prefix}")}"
+  export PRD_ORDERS_AIRFLOW_DAG_ID="${PRD_ORDERS_AIRFLOW_DAG_ID:-$(prefixed_identifier "$(source_orders_pipeline_basename)" "${prd_prefix}")}"
+  export PRD_CUSTOMERS_AIRFLOW_DAG_ID="${PRD_CUSTOMERS_AIRFLOW_DAG_ID:-$(prefixed_identifier "$(source_customers_pipeline_basename)" "${prd_prefix}")}"
   export PRD_AIRFLOW_MODULE_PREFIX="${PRD_AIRFLOW_MODULE_PREFIX:-$(sanitize_branch_token "${PRD_AIRFLOW_DAG_ID}")}"
   export PRD_AIRFLOW_DAG_FILENAME="${PRD_AIRFLOW_DAG_FILENAME:-${PRD_AIRFLOW_MODULE_PREFIX}.py}"
   export PRD_DLT_PIPELINE_NAME="${PRD_DLT_PIPELINE_NAME:-$(prefixed_identifier "${source_dlt_pipeline}" "${prd_prefix}")}"
@@ -412,10 +476,13 @@ export_dev_runtime_env() {
   source_edp_customers_database="${DEV_SOURCE_EDP_CUSTOMERS_DATABASE:-${SNOWFLAKE_EDP_CUSTOMERS_DATABASE_BASE:-${SNOWFLAKE_EDP_CUSTOMERS_DATABASE}}}"
 
   export DEV_DEPLOYMENT_PREFIX="${dev_prefix}"
+  export ACTIVE_RUNTIME_ENV="dev"
   export SNOWFLAKE_CONTROL_DATABASE="${SNOWFLAKE_CONTROL_DATABASE:-$(snowflake_control_database)}"
   export SNOWFLAKE_CONTROL_SCHEMA="${SNOWFLAKE_CONTROL_SCHEMA:-$(snowflake_control_schema)}"
   export SNOWFLAKE_DBT_STAGE="${SNOWFLAKE_DBT_STAGE:-$(snowflake_dbt_stage_name)}"
   export DEV_SOURCE_DLT_PIPELINE_NAME="${source_dlt_pipeline}"
+  export DEV_SOURCE_ORDERS_DLT_PIPELINE_NAME="${DEV_SOURCE_ORDERS_DLT_PIPELINE_NAME:-$(prefixed_identifier "$(source_orders_pipeline_basename)" "${dev_prefix}")}"
+  export DEV_SOURCE_CUSTOMERS_DLT_PIPELINE_NAME="${DEV_SOURCE_CUSTOMERS_DLT_PIPELINE_NAME:-$(prefixed_identifier "$(source_customers_pipeline_basename)" "${dev_prefix}")}"
   export DEV_SOURCE_ICEBERG_NAMESPACE="${source_iceberg_namespace}"
   export DEV_SOURCE_MINIO_PREFIX="${source_minio_prefix}"
   export DEV_SOURCE_SDP_DATABASE="${source_sdp_database}"
@@ -424,6 +491,8 @@ export_dev_runtime_env() {
   export DEV_SOURCE_EDP_CUSTOMERS_DATABASE="${source_edp_customers_database}"
 
   export DEV_AIRFLOW_DAG_ID="${DEV_AIRFLOW_DAG_ID:-$(prefixed_identifier "${source_dlt_pipeline}" "${dev_prefix}")}"
+  export DEV_ORDERS_AIRFLOW_DAG_ID="${DEV_ORDERS_AIRFLOW_DAG_ID:-$(prefixed_identifier "$(source_orders_pipeline_basename)" "${dev_prefix}")}"
+  export DEV_CUSTOMERS_AIRFLOW_DAG_ID="${DEV_CUSTOMERS_AIRFLOW_DAG_ID:-$(prefixed_identifier "$(source_customers_pipeline_basename)" "${dev_prefix}")}"
   export DEV_AIRFLOW_MODULE_PREFIX="${DEV_AIRFLOW_MODULE_PREFIX:-$(sanitize_branch_token "${DEV_AIRFLOW_DAG_ID}")}"
   export DEV_AIRFLOW_DAG_FILENAME="${DEV_AIRFLOW_DAG_FILENAME:-${DEV_AIRFLOW_MODULE_PREFIX}.py}"
   export DEV_DLT_PIPELINE_NAME="${DEV_DLT_PIPELINE_NAME:-$(prefixed_identifier "${source_dlt_pipeline}" "${dev_prefix}")}"

@@ -13,6 +13,7 @@ source "${SCRIPT_DIR}/common.sh"
 ensure_platform_env
 
 dbt_target_name="${SNOW_DBT_TARGET_NAME:-dev}"
+scope="${SOURCE_SCOPE:-all}"
 
 skip_foundation="false"
 skip_raw_sync="false"
@@ -20,6 +21,10 @@ skip_dbt="false"
 
 while [ $# -gt 0 ]; do
   case "${1}" in
+    --scope)
+      scope="${2:?scope value is required}"
+      shift
+      ;;
     --skip-foundation)
       skip_foundation="true"
       ;;
@@ -36,6 +41,7 @@ while [ $# -gt 0 ]; do
   esac
   shift
 done
+export SOURCE_SCOPE="${scope}"
 
 ARTIFACT_DIR="${ROOT_DIR}/artifacts/sdp"
 rm -rf "${ARTIFACT_DIR}"
@@ -74,7 +80,7 @@ fi
 
 if [ "${skip_raw_sync}" != "true" ] && [ "${SNOWFLAKE_LOCAL_RAW_SYNC:-false}" = "true" ]; then
   docker compose run --rm --no-deps dlt-extractor \
-    python /opt/platform/dlt/snowflake_raw_sync.py | tee "${ARTIFACT_DIR}/snowflake_raw_sync.log"
+    bash -lc "RAW_SYNC_SCOPE=${scope} python /opt/platform/dlt/snowflake_raw_sync.py" | tee "${ARTIFACT_DIR}/snowflake_raw_sync.log"
 fi
 
 docker compose run --rm --no-deps dbt-executor python - <<'PY' | tee "${ARTIFACT_DIR}/sdp_inbound_contract.txt"
@@ -87,20 +93,30 @@ def ident(*parts: str) -> str:
     return ".".join(f'"{part}"' for part in parts)
 
 
-queries = {
-    "sdp_ext_raw_orders": (
-        f"select count(*) from {ident(os.environ['SNOWFLAKE_SDP_DATABASE'], os.environ['SNOWFLAKE_SDP_IN_SCHEMA'], 'EXT_ORDERS_RAW')}",
-        30,
-    ),
-    "sdp_ext_raw_order_items": (
-        f"select count(*) from {ident(os.environ['SNOWFLAKE_SDP_DATABASE'], os.environ['SNOWFLAKE_SDP_IN_SCHEMA'], 'EXT_ORDER_ITEMS_RAW')}",
-        60,
-    ),
-    "sdp_customers_ext_customers_raw": (
-        f"select count(*) from {ident(os.environ['SNOWFLAKE_SDP_CUSTOMERS_DATABASE'], os.environ['SNOWFLAKE_SDP_IN_SCHEMA'], 'EXT_CUSTOMERS_RAW')}",
-        12,
-    ),
-}
+scope = os.environ.get("SOURCE_SCOPE", "all").strip().lower()
+queries = {}
+if scope in {"all", "orders"}:
+    queries.update(
+        {
+            "sdp_ext_raw_orders": (
+                f"select count(*) from {ident(os.environ['SNOWFLAKE_SDP_DATABASE'], os.environ['SNOWFLAKE_SDP_IN_SCHEMA'], 'EXT_ORDERS_RAW')}",
+                30,
+            ),
+            "sdp_ext_raw_order_items": (
+                f"select count(*) from {ident(os.environ['SNOWFLAKE_SDP_DATABASE'], os.environ['SNOWFLAKE_SDP_IN_SCHEMA'], 'EXT_ORDER_ITEMS_RAW')}",
+                60,
+            ),
+        }
+    )
+if scope in {"all", "customers"}:
+    queries.update(
+        {
+            "sdp_customers_ext_customers_raw": (
+                f"select count(*) from {ident(os.environ['SNOWFLAKE_SDP_CUSTOMERS_DATABASE'], os.environ['SNOWFLAKE_SDP_IN_SCHEMA'], 'EXT_CUSTOMERS_RAW')}",
+                12,
+            ),
+        }
+    )
 
 connection = snowflake.connector.connect(
     account=os.environ["SNOWFLAKE_ACCOUNT"],
@@ -130,6 +146,11 @@ print("sdp_inbound_contract=passed")
 PY
 
 if [ "${skip_dbt}" != "true" ]; then
+  dbt_select_args=()
+  if [ "${scope}" != "all" ]; then
+    dbt_select_args=(--select "${scope}")
+  fi
+
   bash "${SCRIPT_DIR}/deploy-snowflake-dbt-project.sh" \
     proj_source_finnova \
     "${SNOWFLAKE_SDP_DBT_PROJECT}" \
@@ -143,11 +164,11 @@ if [ "${skip_dbt}" != "true" ]; then
 
   bash "${SCRIPT_DIR}/execute-snowflake-dbt-project.sh" \
     "${SNOWFLAKE_SDP_DBT_PROJECT}" \
-    run | tee "${ARTIFACT_DIR}/dbt_run.log"
+    run "${dbt_select_args[@]}" | tee "${ARTIFACT_DIR}/dbt_run.log"
 
   bash "${SCRIPT_DIR}/execute-snowflake-dbt-project.sh" \
     "${SNOWFLAKE_SDP_DBT_PROJECT}" \
-    test | tee "${ARTIFACT_DIR}/dbt_test.log"
+    test "${dbt_select_args[@]}" | tee "${ARTIFACT_DIR}/dbt_test.log"
 fi
 
 docker compose run --rm --no-deps dbt-executor python - <<'PY' | tee "${ARTIFACT_DIR}/snowflake_validation.txt"
@@ -160,64 +181,74 @@ def ident(*parts: str) -> str:
     return ".".join(f'"{part}"' for part in parts)
 
 
-queries = {
-    "sdp_ext_raw_orders": (
-        f"select count(*) from {ident(os.environ['SNOWFLAKE_SDP_DATABASE'], os.environ['SNOWFLAKE_SDP_IN_SCHEMA'], 'EXT_ORDERS_RAW')}",
-        30,
-    ),
-    "sdp_ext_raw_order_items": (
-        f"select count(*) from {ident(os.environ['SNOWFLAKE_SDP_DATABASE'], os.environ['SNOWFLAKE_SDP_IN_SCHEMA'], 'EXT_ORDER_ITEMS_RAW')}",
-        60,
-    ),
-    "sdp_core_orders_clean": (
-        f"select count(*) from {ident(os.environ['SNOWFLAKE_SDP_DATABASE'], os.environ['SNOWFLAKE_SDP_CORE_SCHEMA'], 'T_ORDERS_CLEAN')}",
-        30,
-    ),
-    "sdp_core_order_items_clean": (
-        f"select count(*) from {ident(os.environ['SNOWFLAKE_SDP_DATABASE'], os.environ['SNOWFLAKE_SDP_CORE_SCHEMA'], 'T_ORDER_ITEMS_CLEAN')}",
-        60,
-    ),
-    "sdp_access_orders_order_grain": (
-        f"select count(*) from {ident(os.environ['SNOWFLAKE_SDP_DATABASE'], os.environ['SNOWFLAKE_SDP_ACC_SCHEMA'], 'T_ORDERS_ORDER_GRAIN')}",
-        30,
-    ),
-    "sdp_access_orders_customer_grain": (
-        f"select count(*) from {ident(os.environ['SNOWFLAKE_SDP_DATABASE'], os.environ['SNOWFLAKE_SDP_ACC_SCHEMA'], 'T_ORDERS_CUSTOMER_GRAIN')}",
-        12,
-    ),
-    "sdp_access_order_lines_order_grain": (
-        f"select count(*) from {ident(os.environ['SNOWFLAKE_SDP_DATABASE'], os.environ['SNOWFLAKE_SDP_ACC_SCHEMA'], 'T_ORDER_LINES_ORDER_GRAIN')}",
-        60,
-    ),
-    "sdp_customers_ext_customers_raw": (
-        f"select count(*) from {ident(os.environ['SNOWFLAKE_SDP_CUSTOMERS_DATABASE'], os.environ['SNOWFLAKE_SDP_IN_SCHEMA'], 'EXT_CUSTOMERS_RAW')}",
-        12,
-    ),
-    "sdp_customers_core_customers_clean": (
-        f"select count(*) from {ident(os.environ['SNOWFLAKE_SDP_CUSTOMERS_DATABASE'], os.environ['SNOWFLAKE_SDP_CORE_SCHEMA'], 'T_CUSTOMERS_CLEAN')}",
-        12,
-    ),
-    "sdp_customers_core_customer_region_summary": (
-        f"select count(*) from {ident(os.environ['SNOWFLAKE_SDP_CUSTOMERS_DATABASE'], os.environ['SNOWFLAKE_SDP_CORE_SCHEMA'], 'T_CUSTOMER_REGION_SUMMARY')}",
-        3,
-    ),
-    "sdp_customers_core_customer_segment_summary": (
-        f"select count(*) from {ident(os.environ['SNOWFLAKE_SDP_CUSTOMERS_DATABASE'], os.environ['SNOWFLAKE_SDP_CORE_SCHEMA'], 'T_CUSTOMER_SEGMENT_SUMMARY')}",
-        3,
-    ),
-    "sdp_customers_access_entity_grain": (
-        f"select count(*) from {ident(os.environ['SNOWFLAKE_SDP_CUSTOMERS_DATABASE'], os.environ['SNOWFLAKE_SDP_ACC_SCHEMA'], 'T_CUSTOMERS_ENTITY_GRAIN')}",
-        12,
-    ),
-    "sdp_customers_access_region_grain": (
-        f"select count(*) from {ident(os.environ['SNOWFLAKE_SDP_CUSTOMERS_DATABASE'], os.environ['SNOWFLAKE_SDP_ACC_SCHEMA'], 'T_CUSTOMERS_REGION_GRAIN')}",
-        3,
-    ),
-    "sdp_customers_access_segment_grain": (
-        f"select count(*) from {ident(os.environ['SNOWFLAKE_SDP_CUSTOMERS_DATABASE'], os.environ['SNOWFLAKE_SDP_ACC_SCHEMA'], 'T_CUSTOMERS_SEGMENT_GRAIN')}",
-        3,
-    ),
-}
+scope = os.environ.get("SOURCE_SCOPE", "all").strip().lower()
+queries = {}
+if scope in {"all", "orders"}:
+    queries.update(
+        {
+            "sdp_ext_raw_orders": (
+                f"select count(*) from {ident(os.environ['SNOWFLAKE_SDP_DATABASE'], os.environ['SNOWFLAKE_SDP_IN_SCHEMA'], 'EXT_ORDERS_RAW')}",
+                30,
+            ),
+            "sdp_ext_raw_order_items": (
+                f"select count(*) from {ident(os.environ['SNOWFLAKE_SDP_DATABASE'], os.environ['SNOWFLAKE_SDP_IN_SCHEMA'], 'EXT_ORDER_ITEMS_RAW')}",
+                60,
+            ),
+            "sdp_core_orders_clean": (
+                f"select count(*) from {ident(os.environ['SNOWFLAKE_SDP_DATABASE'], os.environ['SNOWFLAKE_SDP_CORE_SCHEMA'], 'T_ORDERS_CLEAN')}",
+                30,
+            ),
+            "sdp_core_order_items_clean": (
+                f"select count(*) from {ident(os.environ['SNOWFLAKE_SDP_DATABASE'], os.environ['SNOWFLAKE_SDP_CORE_SCHEMA'], 'T_ORDER_ITEMS_CLEAN')}",
+                60,
+            ),
+            "sdp_access_orders_order_grain": (
+                f"select count(*) from {ident(os.environ['SNOWFLAKE_SDP_DATABASE'], os.environ['SNOWFLAKE_SDP_ACC_SCHEMA'], 'T_ORDERS_ORDER_GRAIN')}",
+                30,
+            ),
+            "sdp_access_orders_customer_grain": (
+                f"select count(*) from {ident(os.environ['SNOWFLAKE_SDP_DATABASE'], os.environ['SNOWFLAKE_SDP_ACC_SCHEMA'], 'T_ORDERS_CUSTOMER_GRAIN')}",
+                12,
+            ),
+            "sdp_access_order_lines_order_grain": (
+                f"select count(*) from {ident(os.environ['SNOWFLAKE_SDP_DATABASE'], os.environ['SNOWFLAKE_SDP_ACC_SCHEMA'], 'T_ORDER_LINES_ORDER_GRAIN')}",
+                60,
+            ),
+        }
+    )
+if scope in {"all", "customers"}:
+    queries.update(
+        {
+            "sdp_customers_ext_customers_raw": (
+                f"select count(*) from {ident(os.environ['SNOWFLAKE_SDP_CUSTOMERS_DATABASE'], os.environ['SNOWFLAKE_SDP_IN_SCHEMA'], 'EXT_CUSTOMERS_RAW')}",
+                12,
+            ),
+            "sdp_customers_core_customers_clean": (
+                f"select count(*) from {ident(os.environ['SNOWFLAKE_SDP_CUSTOMERS_DATABASE'], os.environ['SNOWFLAKE_SDP_CORE_SCHEMA'], 'T_CUSTOMERS_CLEAN')}",
+                12,
+            ),
+            "sdp_customers_core_customer_region_summary": (
+                f"select count(*) from {ident(os.environ['SNOWFLAKE_SDP_CUSTOMERS_DATABASE'], os.environ['SNOWFLAKE_SDP_CORE_SCHEMA'], 'T_CUSTOMER_REGION_SUMMARY')}",
+                3,
+            ),
+            "sdp_customers_core_customer_segment_summary": (
+                f"select count(*) from {ident(os.environ['SNOWFLAKE_SDP_CUSTOMERS_DATABASE'], os.environ['SNOWFLAKE_SDP_CORE_SCHEMA'], 'T_CUSTOMER_SEGMENT_SUMMARY')}",
+                3,
+            ),
+            "sdp_customers_access_entity_grain": (
+                f"select count(*) from {ident(os.environ['SNOWFLAKE_SDP_CUSTOMERS_DATABASE'], os.environ['SNOWFLAKE_SDP_ACC_SCHEMA'], 'T_CUSTOMERS_ENTITY_GRAIN')}",
+                12,
+            ),
+            "sdp_customers_access_region_grain": (
+                f"select count(*) from {ident(os.environ['SNOWFLAKE_SDP_CUSTOMERS_DATABASE'], os.environ['SNOWFLAKE_SDP_ACC_SCHEMA'], 'T_CUSTOMERS_REGION_GRAIN')}",
+                3,
+            ),
+            "sdp_customers_access_segment_grain": (
+                f"select count(*) from {ident(os.environ['SNOWFLAKE_SDP_CUSTOMERS_DATABASE'], os.environ['SNOWFLAKE_SDP_ACC_SCHEMA'], 'T_CUSTOMERS_SEGMENT_GRAIN')}",
+                3,
+            ),
+        }
+    )
 
 connection = snowflake.connector.connect(
     account=os.environ["SNOWFLAKE_ACCOUNT"],
@@ -243,20 +274,7 @@ PY
 
 cat > "${ARTIFACT_DIR}/summary.txt" <<EOF
 SDP promotion succeeded.
-snowflake.sdp_ext_raw_orders=30
-snowflake.sdp_ext_raw_order_items=60
-snowflake.sdp_core_orders_clean=30
-snowflake.sdp_core_order_items_clean=60
-snowflake.sdp_access_orders_order_grain=30
-snowflake.sdp_access_orders_customer_grain=12
-snowflake.sdp_access_order_lines_order_grain=60
-snowflake.sdp_customers_ext_customers_raw=12
-snowflake.sdp_customers_core_customers_clean=12
-snowflake.sdp_customers_core_customer_region_summary=3
-snowflake.sdp_customers_core_customer_segment_summary=3
-snowflake.sdp_customers_access_entity_grain=12
-snowflake.sdp_customers_access_region_grain=3
-snowflake.sdp_customers_access_segment_grain=3
+source.scope=${scope}
 snowflake.sdp_dbt_project=${SNOWFLAKE_SDP_DBT_PROJECT}
 snowflake.dbt_target=${dbt_target_name}
 EOF

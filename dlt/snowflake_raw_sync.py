@@ -54,6 +54,18 @@ order by customer_id
 """
 
 
+def active_scope() -> str:
+    return os.environ.get("RAW_SYNC_SCOPE", "all").strip().lower() or "all"
+
+
+def sync_orders(scope: str) -> bool:
+    return scope in {"all", "orders"}
+
+
+def sync_customers(scope: str) -> bool:
+    return scope in {"all", "customers"}
+
+
 def env_flag(name: str, default: bool = False) -> bool:
     value = os.environ.get(name)
     if value is None:
@@ -116,7 +128,7 @@ def rows_to_tuples(rows: Iterable[dict[str, Any]], columns: list[str]) -> list[t
     ]
 
 
-def ensure_foundation(cursor) -> None:
+def ensure_foundation(cursor, scope: str) -> None:
     warehouse = os.environ["SNOWFLAKE_WAREHOUSE"]
     sdp_database = os.environ["SNOWFLAKE_SDP_DATABASE"]
     sdp_customers_database = os.environ["SNOWFLAKE_SDP_CUSTOMERS_DATABASE"]
@@ -132,63 +144,67 @@ def ensure_foundation(cursor) -> None:
         """
     )
     cursor.execute(f"use warehouse {warehouse}")
-    cursor.execute(f"create database if not exists {sdp_database}")
-    cursor.execute(f"create schema if not exists {ident(sdp_database, sdp_in_schema)}")
-    cursor.execute(
-        f"""
-        create or replace transient table {ident(sdp_database, sdp_in_schema, 'EXT_ORDERS_RAW')} (
-          ORDER_ID varchar,
-          CUSTOMER_ID varchar,
-          STATUS varchar,
-          ITEM_COUNT number(38, 0),
-          ORDER_TOTAL number(38, 2),
-          ORDER_CREATED_AT varchar,
-          LOAD_BATCH varchar
+    if sync_orders(scope):
+        cursor.execute(f"create database if not exists {sdp_database}")
+        cursor.execute(f"create schema if not exists {ident(sdp_database, sdp_in_schema)}")
+        cursor.execute(
+            f"""
+            create or replace transient table {ident(sdp_database, sdp_in_schema, 'EXT_ORDERS_RAW')} (
+              ORDER_ID varchar,
+              CUSTOMER_ID varchar,
+              STATUS varchar,
+              ITEM_COUNT number(38, 0),
+              ORDER_TOTAL number(38, 2),
+              ORDER_CREATED_AT varchar,
+              LOAD_BATCH varchar
+            )
+            """
         )
-        """
-    )
-    cursor.execute(
-        f"""
-        create or replace transient table {ident(sdp_database, sdp_in_schema, 'EXT_ORDER_ITEMS_RAW')} (
-          ORDER_ID varchar,
-          ITEM_ID varchar,
-          SKU varchar,
-          QUANTITY number(38, 0),
-          UNIT_PRICE number(38, 2),
-          LINE_TOTAL number(38, 2),
-          LOADED_AT varchar
+        cursor.execute(
+            f"""
+            create or replace transient table {ident(sdp_database, sdp_in_schema, 'EXT_ORDER_ITEMS_RAW')} (
+              ORDER_ID varchar,
+              ITEM_ID varchar,
+              SKU varchar,
+              QUANTITY number(38, 0),
+              UNIT_PRICE number(38, 2),
+              LINE_TOTAL number(38, 2),
+              LOADED_AT varchar
+            )
+            """
         )
-        """
-    )
-    cursor.execute(f"create database if not exists {sdp_customers_database}")
-    cursor.execute(f"create schema if not exists {ident(sdp_customers_database, sdp_in_schema)}")
-    cursor.execute(
-        f"""
-        create or replace transient table {ident(sdp_customers_database, sdp_in_schema, 'EXT_CUSTOMERS_RAW')} (
-          CUSTOMER_ID varchar,
-          CUSTOMER_NAME varchar,
-          REGION varchar,
-          SEGMENT varchar,
-          ORDER_COUNT number(38, 0),
-          TOTAL_ORDER_VALUE number(38, 2),
-          FIRST_ORDER_AT varchar,
-          LATEST_ORDER_AT varchar,
-          CUSTOMER_CREATED_AT varchar,
-          LOAD_BATCH varchar
+
+    if sync_customers(scope):
+        cursor.execute(f"create database if not exists {sdp_customers_database}")
+        cursor.execute(f"create schema if not exists {ident(sdp_customers_database, sdp_in_schema)}")
+        cursor.execute(
+            f"""
+            create or replace transient table {ident(sdp_customers_database, sdp_in_schema, 'EXT_CUSTOMERS_RAW')} (
+              CUSTOMER_ID varchar,
+              CUSTOMER_NAME varchar,
+              REGION varchar,
+              SEGMENT varchar,
+              ORDER_COUNT number(38, 0),
+              TOTAL_ORDER_VALUE number(38, 2),
+              FIRST_ORDER_AT varchar,
+              LATEST_ORDER_AT varchar,
+              CUSTOMER_CREATED_AT varchar,
+              LOAD_BATCH varchar
+            )
+            """
         )
-        """
-    )
 
 
 def load_raw_tables() -> None:
+    scope = active_scope()
     sdp_database = os.environ["SNOWFLAKE_SDP_DATABASE"]
     sdp_customers_database = os.environ["SNOWFLAKE_SDP_CUSTOMERS_DATABASE"]
     sdp_in_schema = os.environ.get("SNOWFLAKE_SDP_IN_SCHEMA", "INBOUND")
     load_batch = datetime.utcnow().strftime("postgres-seed-%Y%m%dT%H%M%SZ")
 
-    orders = fetch_rows(ORDERS_EXPORT_SQL, {"load_batch": load_batch})
-    order_items = fetch_rows(ORDER_ITEMS_EXPORT_SQL)
-    customers = fetch_rows(CUSTOMERS_EXPORT_SQL, {"load_batch": load_batch})
+    orders = fetch_rows(ORDERS_EXPORT_SQL, {"load_batch": load_batch}) if sync_orders(scope) else []
+    order_items = fetch_rows(ORDER_ITEMS_EXPORT_SQL) if sync_orders(scope) else []
+    customers = fetch_rows(CUSTOMERS_EXPORT_SQL, {"load_batch": load_batch}) if sync_customers(scope) else []
 
     order_columns = [
         "order_id",
@@ -224,35 +240,38 @@ def load_raw_tables() -> None:
     connection = connect_snowflake()
     try:
         with connection.cursor() as cursor:
-            ensure_foundation(cursor)
-            cursor.executemany(
-                f"""
-                insert into {ident(sdp_database, sdp_in_schema, 'EXT_ORDERS_RAW')}
-                (ORDER_ID, CUSTOMER_ID, STATUS, ITEM_COUNT, ORDER_TOTAL, ORDER_CREATED_AT, LOAD_BATCH)
-                values (%s, %s, %s, %s, %s, %s, %s)
-                """,
-                rows_to_tuples(orders, order_columns),
-            )
-            cursor.executemany(
-                f"""
-                insert into {ident(sdp_database, sdp_in_schema, 'EXT_ORDER_ITEMS_RAW')}
-                (ORDER_ID, ITEM_ID, SKU, QUANTITY, UNIT_PRICE, LINE_TOTAL, LOADED_AT)
-                values (%s, %s, %s, %s, %s, %s, %s)
-                """,
-                rows_to_tuples(order_items, item_columns),
-            )
-            cursor.executemany(
-                f"""
-                insert into {ident(sdp_customers_database, sdp_in_schema, 'EXT_CUSTOMERS_RAW')}
-                (CUSTOMER_ID, CUSTOMER_NAME, REGION, SEGMENT, ORDER_COUNT, TOTAL_ORDER_VALUE, FIRST_ORDER_AT, LATEST_ORDER_AT, CUSTOMER_CREATED_AT, LOAD_BATCH)
-                values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                """,
-                rows_to_tuples(customers, customer_columns),
-            )
+            ensure_foundation(cursor, scope)
+            if sync_orders(scope):
+                cursor.executemany(
+                    f"""
+                    insert into {ident(sdp_database, sdp_in_schema, 'EXT_ORDERS_RAW')}
+                    (ORDER_ID, CUSTOMER_ID, STATUS, ITEM_COUNT, ORDER_TOTAL, ORDER_CREATED_AT, LOAD_BATCH)
+                    values (%s, %s, %s, %s, %s, %s, %s)
+                    """,
+                    rows_to_tuples(orders, order_columns),
+                )
+                cursor.executemany(
+                    f"""
+                    insert into {ident(sdp_database, sdp_in_schema, 'EXT_ORDER_ITEMS_RAW')}
+                    (ORDER_ID, ITEM_ID, SKU, QUANTITY, UNIT_PRICE, LINE_TOTAL, LOADED_AT)
+                    values (%s, %s, %s, %s, %s, %s, %s)
+                    """,
+                    rows_to_tuples(order_items, item_columns),
+                )
+            if sync_customers(scope):
+                cursor.executemany(
+                    f"""
+                    insert into {ident(sdp_customers_database, sdp_in_schema, 'EXT_CUSTOMERS_RAW')}
+                    (CUSTOMER_ID, CUSTOMER_NAME, REGION, SEGMENT, ORDER_COUNT, TOTAL_ORDER_VALUE, FIRST_ORDER_AT, LATEST_ORDER_AT, CUSTOMER_CREATED_AT, LOAD_BATCH)
+                    values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    """,
+                    rows_to_tuples(customers, customer_columns),
+                )
             connection.commit()
 
         print(
             {
+                "scope": scope,
                 "snowflake_sdp_database": sdp_database,
                 "snowflake_sdp_customers_database": sdp_customers_database,
                 "snowflake_sdp_in_schema": sdp_in_schema,

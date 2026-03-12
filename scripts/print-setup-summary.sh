@@ -81,7 +81,8 @@ printf '  Airflow metadata DSN: %s\n' "${airflow_metadata_dsn}"
 printf '  MinIO internal endpoint: %s\n' "${MINIO_ENDPOINT}"
 printf '  Object store URI: %s\n' "${OBJECT_STORE_BUCKET}"
 printf '  Iceberg SQL catalog URI: %s\n' "${ICEBERG_SQL_URI}"
-printf '  dlt pipeline script: %s/dlt/pipeline.py\n' "${ROOT_DIR}"
+printf '  dlt orders pipeline script: %s/dlt/pipeline_orders.py\n' "${ROOT_DIR}"
+printf '  dlt customers pipeline script: %s/dlt/pipeline_customers.py\n' "${ROOT_DIR}"
 printf '  Source dbt project dir: %s/dbt/projects/proj_source_finnova\n' "${ROOT_DIR}"
 printf '  EDP orders dbt project dir: %s/dbt/projects/proj_edp_orders\n' "${ROOT_DIR}"
 printf '  EDP customers dbt project dir: %s/dbt/projects/proj_edp_customers\n' "${ROOT_DIR}"
@@ -98,8 +99,10 @@ printf '\n'
 printf 'Runtime Services\n'
 printf '  dlt runtime service: dlt-extractor\n'
 printf '  Snowflake dbt trigger runtime service: dbt-executor\n'
-printf '  Airflow DEV DAG id: %s\n' "${DEV_AIRFLOW_DAG_ID:-DEV_local_platform_ingest}"
-printf '  Airflow PRD DAG id: %s\n' "${PRD_AIRFLOW_DAG_ID:-PRD_local_platform_ingest}"
+printf '  Airflow DEV orders DAG id: %s\n' "${DEV_ORDERS_AIRFLOW_DAG_ID:-DEV_local_platform_orders_ingest}"
+printf '  Airflow DEV customers DAG id: %s\n' "${DEV_CUSTOMERS_AIRFLOW_DAG_ID:-DEV_local_platform_customers_ingest}"
+printf '  Airflow PRD orders DAG id: %s\n' "${PRD_ORDERS_AIRFLOW_DAG_ID:-PRD_local_platform_orders_ingest}"
+printf '  Airflow PRD customers DAG id: %s\n' "${PRD_CUSTOMERS_AIRFLOW_DAG_ID:-PRD_local_platform_customers_ingest}"
 printf '  GitLab runner service: gitlab-fargate-runner\n'
 printf '  GitLab branch provisioner service: gitlab-branch-provisioner\n'
 printf '\n'

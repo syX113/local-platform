@@ -13,32 +13,36 @@ source "${SCRIPT_DIR}/common.sh"
 ensure_platform_env
 
 target_env="${1:?target environment is required (dev|prd|current)}"
+scope="${2:?source scope is required (orders|customers)}"
 case "${target_env}" in
   dev)
     export_dev_runtime_env
+    activate_source_scope_runtime "${scope}"
     export DLT_RUNNER_IMAGE="${DLT_RUNNER_IMAGE:-${DEV_SDP_RUNTIME_IMAGE_PREFIX}/dlt-extractor:dev}"
     export DBT_RUNNER_IMAGE="${DBT_RUNNER_IMAGE:-${DEV_SDP_RUNTIME_IMAGE_PREFIX}/dbt-executor:dev}"
     export SNOW_DBT_RUNNER_IMAGE="${SNOW_DBT_RUNNER_IMAGE:-${DBT_RUNNER_IMAGE}}"
-    airflow_dag_id="${DEV_AIRFLOW_DAG_ID}"
-    airflow_module_prefix="${DEV_AIRFLOW_MODULE_PREFIX}"
-    airflow_dag_filename="${DEV_AIRFLOW_DAG_FILENAME}"
-    target_label="dev"
+    airflow_dag_id="${AIRFLOW_ACTIVE_DAG_ID}"
+    airflow_module_prefix="${AIRFLOW_ACTIVE_MODULE_PREFIX}"
+    airflow_dag_filename="${AIRFLOW_ACTIVE_DAG_FILENAME}"
+    target_label="dev-${scope}"
     ;;
   prd)
     export_prd_runtime_env
+    activate_source_scope_runtime "${scope}"
     export DLT_RUNNER_IMAGE="${DLT_RUNNER_IMAGE:-${PRD_SDP_RUNTIME_IMAGE_PREFIX}/dlt-extractor:dev}"
     export DBT_RUNNER_IMAGE="${DBT_RUNNER_IMAGE:-${PRD_SDP_RUNTIME_IMAGE_PREFIX}/dbt-executor:dev}"
     export SNOW_DBT_RUNNER_IMAGE="${SNOW_DBT_RUNNER_IMAGE:-${DBT_RUNNER_IMAGE}}"
-    airflow_dag_id="${PRD_AIRFLOW_DAG_ID}"
-    airflow_module_prefix="${PRD_AIRFLOW_MODULE_PREFIX}"
-    airflow_dag_filename="${PRD_AIRFLOW_DAG_FILENAME}"
-    target_label="prd"
+    airflow_dag_id="${AIRFLOW_ACTIVE_DAG_ID}"
+    airflow_module_prefix="${AIRFLOW_ACTIVE_MODULE_PREFIX}"
+    airflow_dag_filename="${AIRFLOW_ACTIVE_DAG_FILENAME}"
+    target_label="prd-${scope}"
     ;;
   current)
-    airflow_dag_id="${2:?dag id is required for current target mode}"
-    airflow_module_prefix="$(sanitize_branch_token "${airflow_dag_id}")"
-    airflow_dag_filename="${airflow_module_prefix}.py"
-    target_label="${3:-current}"
+    activate_source_scope_runtime "${scope}"
+    airflow_dag_id="${AIRFLOW_ACTIVE_DAG_ID}"
+    airflow_module_prefix="${AIRFLOW_ACTIVE_MODULE_PREFIX}"
+    airflow_dag_filename="${AIRFLOW_ACTIVE_DAG_FILENAME}"
+    target_label="${3:-current-${scope}}"
     ;;
   *)
     echo "unsupported target environment: ${target_env}" >&2
@@ -124,6 +128,9 @@ dag = build_ingest_dag(
         "SNOWFLAKE_CONTROL_DATABASE": $(python_literal "${SNOWFLAKE_CONTROL_DATABASE}"),
         "SNOWFLAKE_CONTROL_SCHEMA": $(python_literal "${SNOWFLAKE_CONTROL_SCHEMA}"),
         "SNOWFLAKE_DBT_STAGE": $(python_literal "${SNOWFLAKE_DBT_STAGE}"),
+        "DLT_COMMAND": $(python_literal "${DLT_COMMAND:-python /opt/platform/dlt/pipeline.py}"),
+        "SNOWFLAKE_RAW_SYNC_SCOPE": $(python_literal "${SNOWFLAKE_RAW_SYNC_SCOPE:-}"),
+        "SNOWFLAKE_SDP_DBT_SELECT": $(python_literal "${SNOWFLAKE_SDP_DBT_SELECT:-}"),
         "SNOWFLAKE_SDP_DATABASE": $(python_literal "${SNOWFLAKE_SDP_DATABASE}"),
         "SNOWFLAKE_SDP_CUSTOMERS_DATABASE": $(python_literal "${SNOWFLAKE_SDP_CUSTOMERS_DATABASE:-}"),
         "SNOWFLAKE_EDP_DATABASE": $(python_literal "${SNOWFLAKE_EDP_DATABASE}"),
@@ -135,7 +142,7 @@ dag = build_ingest_dag(
         "DBT_RUNNER_IMAGE": $(python_literal "${DBT_RUNNER_IMAGE:-}"),
         "SNOW_DBT_RUNNER_IMAGE": $(python_literal "${SNOW_DBT_RUNNER_IMAGE:-${DBT_RUNNER_IMAGE:-}}"),
     },
-    tags=DEFAULT_TAGS + [$(python_literal "${target_label}"), "deployment"],
+    tags=DEFAULT_TAGS + [$(python_literal "${target_label}"), $(python_literal "${scope}"), "deployment"],
 )
 EOF
 
@@ -168,6 +175,7 @@ grep -q "${airflow_dag_id}" "${ARTIFACT_DIR}/${target_label}_airflow_dags.log" |
 cat > "${ARTIFACT_DIR}/${target_label}_airflow_summary.txt" <<EOF
 airflow.${target_label}_dag_id=${airflow_dag_id}
 airflow.${target_label}_dag_subdir=${wrapper_path}
+airflow.${target_label}_scope=${scope}
 runtime.dlt_image=${DLT_RUNNER_IMAGE}
 runtime.snow_dbt_image=${SNOW_DBT_RUNNER_IMAGE:-${DBT_RUNNER_IMAGE:-}}
 snowflake.sdp_dbt_project=${SNOWFLAKE_SDP_DBT_PROJECT}

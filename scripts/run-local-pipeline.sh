@@ -11,11 +11,17 @@ export_dev_runtime_env
 docker compose up -d --no-build airflow-metadata-db source-postgres-db lakehouse-object-store
 docker compose run --rm --no-deps lakehouse-bucket-init
 ./scripts/load-source-sample-data.sh
-docker compose run --rm --no-deps dlt-extractor python /opt/platform/dlt/pipeline.py
+
+for scope in orders customers; do
+  activate_source_scope_runtime "${scope}"
+  docker compose run --rm --no-deps dlt-extractor python "/opt/platform/dlt/pipeline_${scope}.py"
+done
 
 if [ -n "${SNOWFLAKE_ACCOUNT:-}" ] && [ -n "${SNOWFLAKE_USER:-}" ] && [ -n "${SNOWFLAKE_PASSWORD:-}" ]; then
   bash ./scripts/ensure-snowflake-foundation.sh
-  docker compose run --rm --no-deps dlt-extractor python /opt/platform/dlt/snowflake_raw_sync.py
+  for scope in orders customers; do
+    docker compose run --rm --no-deps dlt-extractor bash -lc "RAW_SYNC_SCOPE=${scope} python /opt/platform/dlt/snowflake_raw_sync.py"
+  done
   bash ./scripts/deploy-snowflake-dbt-project.sh \
     proj_source_finnova \
     "${SNOWFLAKE_SDP_DBT_PROJECT}" \

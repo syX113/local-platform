@@ -336,8 +336,8 @@ The platform now supports a real deployment step for the sample products without
 
 Current DEV targets after a fresh initialization:
 
-- Airflow DAG: `DEV_local_platform_ingest`
-- dlt pipeline name: `DEV_local_platform_ingest`
+- Airflow DAGs: `DEV_local_platform_orders_ingest`, `DEV_local_platform_customers_ingest`
+- dlt pipeline names: `DEV_local_platform_orders_ingest`, `DEV_local_platform_customers_ingest`
 - source system namespace: `postgres`
 - Iceberg catalog name: `dev`
 - MinIO/S3 prefix: `landing/dev`
@@ -353,8 +353,8 @@ Current DEV targets after a fresh initialization:
 
 Current PRD targets:
 
-- Airflow DAG: `PRD_local_platform_ingest`
-- dlt pipeline name: `PRD_local_platform_ingest`
+- Airflow DAGs: `PRD_local_platform_orders_ingest`, `PRD_local_platform_customers_ingest`
+- dlt pipeline names: `PRD_local_platform_orders_ingest`, `PRD_local_platform_customers_ingest`
 - source system namespace: `postgres`
 - Iceberg catalog name: `prd`
 - MinIO/S3 prefix: `landing/prd`
@@ -503,8 +503,8 @@ The Unix/macOS commands are the `.sh` entrypoints under `scripts/`. Windows host
   Validates the SDP Snowflake/dbt promotion path. It deploys the SDP Snowflake dbt project object and executes `parse`, `run`, and `test` inside Snowflake. Internal `--skip-foundation`, `--skip-raw-sync`, and `--skip-dbt` flags exist for bootstrap and CI reuse.
 - `./scripts/verify-edp-promotion.sh`
   Validates the EDP Snowflake/dbt promotion path. It deploys the EDP Snowflake dbt project object and executes `parse`, `run`, and `test` inside Snowflake. Internal `--skip-foundation` and `--skip-dbt` flags exist for bootstrap and CI reuse.
-- `./scripts/deploy-airflow-dag.sh dev|prd`
-  Deploys the selected Airflow DAG wrapper into the shared Airflow service so the ingestion pipeline is available as `DEV_local_platform_ingest` or `PRD_local_platform_ingest`.
+- `./scripts/deploy-airflow-dag.sh dev|prd|current orders|customers`
+  Deploys the selected scoped Airflow DAG wrapper into the shared Airflow service so the source ingestion pipelines are available separately for `orders` and `customers` in DEV, PRD, or CI sandbox mode.
 - `./scripts/deploy-snowflake-dbt-project.sh`
   Packages a dbt project, uploads it to the Snowflake control stage, and creates or replaces the target Snowflake dbt project object.
 - `./scripts/execute-snowflake-dbt-project.sh`
@@ -512,7 +512,7 @@ The Unix/macOS commands are the `.sh` entrypoints under `scripts/`. Windows host
 - `./scripts/drop-snowflake-dbt-project.sh`
   Drops a Snowflake dbt project object and removes its staged project files from the Snowflake control stage.
 - `./scripts/deploy-sdp-dev.sh`  
-  Deploys the owned SDP artifacts into the shared DEV target automatically after merge: refreshes the shared Airflow services in place, deploys the `DEV_` Airflow DAG, validates ingestion again, and deploys plus executes the SDP dbt project object natively in Snowflake.
+  Deploys the owned SDP artifacts into the shared DEV target automatically after merge: refreshes the shared Airflow services in place, deploys both `DEV_` source DAGs (`orders` and `customers`), validates both ingestion paths again, and deploys plus executes the shared source dbt project object natively in Snowflake.
 - `./scripts/deploy-edp-dev.sh`  
   Deploys the owned EDP artifacts into the shared DEV target automatically after merge by deploying plus executing the EDP dbt project object natively in Snowflake.
 - `./scripts/deploy-sdp-prd.sh`

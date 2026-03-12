@@ -182,8 +182,10 @@ def sdp_ci_yaml() -> str:
             - when: never
           script:
             - set -a; . artifacts/context/runtime.env; . artifacts/context/sdp.env; set +a
-            - ./ci/scripts/deploy-airflow-dag.sh current "${AIRFLOW_SANDBOX_DAG_ID}" "current-sdp-ci"
-            - ./ci/scripts/verify-ingestion-promotion.sh
+            - ./ci/scripts/deploy-airflow-dag.sh current orders "current-sdp-orders-ci"
+            - SOURCE_SCOPE=orders ./ci/scripts/verify-ingestion-promotion.sh
+            - ./ci/scripts/deploy-airflow-dag.sh current customers "current-sdp-customers-ci"
+            - SOURCE_SCOPE=customers ./ci/scripts/verify-ingestion-promotion.sh
           artifacts:
             when: always
             expire_in: 7 days
@@ -205,7 +207,8 @@ def sdp_ci_yaml() -> str:
             - when: never
           script:
             - set -a; . artifacts/context/runtime.env; . artifacts/context/sdp.env; set +a
-            - ./ci/scripts/verify-sdp-promotion.sh
+            - SOURCE_SCOPE=orders ./ci/scripts/verify-sdp-promotion.sh
+            - SOURCE_SCOPE=customers ./ci/scripts/verify-sdp-promotion.sh
           artifacts:
             when: always
             expire_in: 7 days
@@ -895,6 +898,26 @@ def project_readme(project_name: str, body: str) -> str:
     )
 
 
+def source_repo_dag_file(*, dag_id: str, scope: str, description: str) -> str:
+    return dedent(
+        f"""\
+        from local_platform_pipeline import build_ingest_dag
+
+
+        {dag_id} = build_ingest_dag(
+            dag_id="{dag_id}",
+            description="{description}",
+            runtime_overrides={{
+                "DLT_COMMAND": "python /opt/platform/dlt/pipeline_{scope}.py",
+                "SNOWFLAKE_RAW_SYNC_SCOPE": "{scope}",
+                "SNOWFLAKE_SDP_DBT_SELECT": "{scope}",
+            }},
+            tags=["source-finnova", "sdp", "{scope}", "postgres", "dlt", "snowflake"],
+        )
+        """
+    )
+
+
 def render_sdp_repo(project_path: str) -> None:
     repo_dir = GENERATED_ROOT / project_path
     reset_repo(repo_dir)
@@ -946,6 +969,22 @@ def render_sdp_repo(project_path: str) -> None:
 
     copy_path("dbt/projects/proj_source_finnova/dbt_project.yml", repo_dir, "dbt/dbt_project.yml")
     copy_path("dbt/projects/proj_source_finnova/models", repo_dir, "dbt/models")
+    write_file(
+        repo_dir / "airflow/dags/source_finnova_orders_ingest.py",
+        source_repo_dag_file(
+            dag_id="source_finnova_orders_ingest",
+            scope="orders",
+            description="Finnova source ingestion pipeline for orders into the SDP orders product.",
+        ),
+    )
+    write_file(
+        repo_dir / "airflow/dags/source_finnova_customers_ingest.py",
+        source_repo_dag_file(
+            dag_id="source_finnova_customers_ingest",
+            scope="customers",
+            description="Finnova source ingestion pipeline for customers into the SDP customers product.",
+        ),
+    )
 
     write_file(repo_dir / "compose.yaml", sdp_compose_yaml())
     write_file(repo_dir / "compose.ci.yaml", sdp_compose_ci_yaml())
@@ -961,8 +1000,8 @@ def render_sdp_repo(project_path: str) -> None:
 
                 Managed artifacts:
 
-                - Airflow DAG for PostgreSQL -> MinIO/Iceberg ingestion
-                - dlt ingestion runtime code
+                - Two Airflow DAGs for PostgreSQL -> MinIO/Iceberg ingestion: one for `orders`, one for `customers`
+                - Two dlt ingestion entrypoints: one for `orders`, one for `customers`
                 - One combined source dbt project for Snowflake `INBOUND`, `CORE`, and `ACCESS`, executed natively in Snowflake
                 - Two SDPs inside the same repository: `orders` and `customers`
                 - `ci/scripts/` contains only CI helper scripts

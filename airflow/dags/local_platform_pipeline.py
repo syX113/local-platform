@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 import os
+import shlex
 
 from airflow import DAG
 from airflow.operators.empty import EmptyOperator
@@ -28,6 +29,23 @@ def build_ingest_dag(
     tags: list[str] | None = None,
 ) -> DAG:
     runtime_environment = docker_environment(runtime_overrides or {})
+    dlt_command = runtime_environment.get("DLT_COMMAND", "python /opt/platform/dlt/pipeline.py")
+    raw_sync_scope = runtime_environment.get("SNOWFLAKE_RAW_SYNC_SCOPE", "").strip().lower()
+    sdp_dbt_select = runtime_environment.get("SNOWFLAKE_SDP_DBT_SELECT", "").strip()
+
+    raw_sync_command = "python /opt/platform/dlt/snowflake_raw_sync.py"
+    if raw_sync_scope:
+        raw_sync_command = (
+            f"RAW_SYNC_SCOPE={shlex.quote(raw_sync_scope)} "
+            "python /opt/platform/dlt/snowflake_raw_sync.py"
+        )
+
+    run_dbt_command = (
+        "python /opt/platform/dbt/scripts/snow_dbt_cli.py "
+        f"execute --project-name {runtime_environment.get('SNOWFLAKE_SDP_DBT_PROJECT', 'DBT_PROJECT_SOURCE_FINNOVA')} build"
+    )
+    if sdp_dbt_select:
+        run_dbt_command += f" --select {shlex.quote(sdp_dbt_select)}"
 
     with DAG(
         dag_id=dag_id,
@@ -48,7 +66,7 @@ def build_ingest_dag(
             task_id="run_dlt_pipeline",
             image=runtime_environment.get("DLT_RUNNER_IMAGE", "local-platform/dlt-extractor:dev"),
             docker_url=os.environ.get("DOCKER_URL", "unix:///var/run/docker.sock"),
-            command="python /opt/platform/dlt/pipeline.py",
+            command=dlt_command,
             network_mode=os.environ.get("PLATFORM_DOCKER_NETWORK", "local-platform-net"),
             mount_tmp_dir=False,
             auto_remove="force",
@@ -65,7 +83,7 @@ def build_ingest_dag(
             task_id="sync_snowflake_raw_tables",
             image=runtime_environment.get("DLT_RUNNER_IMAGE", "local-platform/dlt-extractor:dev"),
             docker_url=os.environ.get("DOCKER_URL", "unix:///var/run/docker.sock"),
-            command="python /opt/platform/dlt/snowflake_raw_sync.py",
+            command=["bash", "-lc", raw_sync_command],
             network_mode=os.environ.get("PLATFORM_DOCKER_NETWORK", "local-platform-net"),
             mount_tmp_dir=False,
             auto_remove="force",
@@ -107,10 +125,7 @@ def build_ingest_dag(
                 runtime_environment.get("DBT_RUNNER_IMAGE", "local-platform/dbt-executor:dev"),
             ),
             docker_url=os.environ.get("DOCKER_URL", "unix:///var/run/docker.sock"),
-            command=(
-                "python /opt/platform/dbt/scripts/snow_dbt_cli.py "
-                f"execute --project-name {runtime_environment.get('SNOWFLAKE_SDP_DBT_PROJECT', 'DBT_PROJECT_SOURCE_FINNOVA')} build"
-            ),
+            command=run_dbt_command,
             network_mode=os.environ.get("PLATFORM_DOCKER_NETWORK", "local-platform-net"),
             mount_tmp_dir=False,
             auto_remove="force",

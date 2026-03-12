@@ -37,18 +37,21 @@ export DLT_RUNNER_IMAGE="${DEV_SDP_RUNTIME_IMAGE_PREFIX}/dlt-extractor:dev"
 export DBT_RUNNER_IMAGE="${DEV_SDP_RUNTIME_IMAGE_PREFIX}/dbt-executor:dev"
 export SNOW_DBT_RUNNER_IMAGE="${DBT_RUNNER_IMAGE}"
 
-bash "${SCRIPT_DIR}/deploy-airflow-dag.sh" dev | tee "${ARTIFACT_DIR}/deploy_airflow_dev.log"
-
-bash "${SCRIPT_DIR}/verify-ingestion-promotion.sh" "${1:-2026-03-07}" \
-  "${DEV_AIRFLOW_DAG_ID}" \
-  "/opt/airflow/dags/deployed/${DEV_AIRFLOW_DAG_FILENAME}" \
-  | tee "${ARTIFACT_DIR}/verify_ingestion_dev.log"
-
-bash "${SCRIPT_DIR}/verify-sdp-promotion.sh" | tee "${ARTIFACT_DIR}/verify_sdp_dev.log"
+for scope in orders customers; do
+  activate_source_scope_runtime "${scope}"
+  bash "${SCRIPT_DIR}/deploy-airflow-dag.sh" dev "${scope}" | tee "${ARTIFACT_DIR}/deploy_airflow_dev_${scope}.log"
+  SOURCE_SCOPE="${scope}" bash "${SCRIPT_DIR}/verify-ingestion-promotion.sh" \
+    "${1:-2026-03-07}" \
+    "${AIRFLOW_ACTIVE_DAG_ID}" \
+    "/opt/airflow/dags/deployed/${AIRFLOW_ACTIVE_DAG_FILENAME}" \
+    | tee "${ARTIFACT_DIR}/verify_ingestion_dev_${scope}.log"
+  SOURCE_SCOPE="${scope}" bash "${SCRIPT_DIR}/verify-sdp-promotion.sh" | tee "${ARTIFACT_DIR}/verify_sdp_dev_${scope}.log"
+done
 
 cat > "${ARTIFACT_DIR}/summary.txt" <<EOF
 sdp_dev_deploy=passed
-airflow.dev_dag_id=${DEV_AIRFLOW_DAG_ID}
+airflow.dev_orders_dag_id=${DEV_ORDERS_AIRFLOW_DAG_ID}
+airflow.dev_customers_dag_id=${DEV_CUSTOMERS_AIRFLOW_DAG_ID}
 snowflake.dev_sdp_database=${SNOWFLAKE_SDP_DATABASE}
 snowflake.dev_edp_database=${SNOWFLAKE_EDP_DATABASE}
 runtime.airflow_image=${shared_runtime_prefix}/airflow:dev

@@ -15,8 +15,10 @@ docker compose up -d airflow-metadata-db source-postgres-db lakehouse-object-sto
 docker compose up -d lakehouse-bucket-init airflow-init
 ./scripts/load-source-sample-data.sh
 docker compose up -d airflow-webserver airflow-scheduler
-./scripts/deploy-airflow-dag.sh dev
-./scripts/deploy-airflow-dag.sh prd
+./scripts/deploy-airflow-dag.sh dev orders
+./scripts/deploy-airflow-dag.sh dev customers
+./scripts/deploy-airflow-dag.sh prd orders
+./scripts/deploy-airflow-dag.sh prd customers
 
 echo "stack is starting"
 echo "next:"

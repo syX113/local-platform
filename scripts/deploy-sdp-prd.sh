@@ -32,19 +32,21 @@ docker image inspect "${source_dbt_image}" >/dev/null 2>&1
 docker tag "${source_dlt_image}" "${DLT_RUNNER_IMAGE}"
 docker tag "${source_dbt_image}" "${DBT_RUNNER_IMAGE}"
 
-bash "${SCRIPT_DIR}/deploy-airflow-dag.sh" prd | tee "${ARTIFACT_DIR}/deploy_airflow_prd.log"
-
-airflow_prd_subdir="/opt/airflow/dags/deployed/${PRD_AIRFLOW_DAG_FILENAME}"
-bash "${SCRIPT_DIR}/verify-ingestion-promotion.sh" \
-  "${1:-2026-03-07}" \
-  "${PRD_AIRFLOW_DAG_ID}" \
-  "${airflow_prd_subdir}" | tee "${ARTIFACT_DIR}/verify_ingestion_prd.log"
-
-bash "${SCRIPT_DIR}/verify-sdp-promotion.sh" | tee "${ARTIFACT_DIR}/verify_sdp_prd.log"
+for scope in orders customers; do
+  activate_source_scope_runtime "${scope}"
+  bash "${SCRIPT_DIR}/deploy-airflow-dag.sh" prd "${scope}" | tee "${ARTIFACT_DIR}/deploy_airflow_prd_${scope}.log"
+  airflow_prd_subdir="/opt/airflow/dags/deployed/${AIRFLOW_ACTIVE_DAG_FILENAME}"
+  SOURCE_SCOPE="${scope}" bash "${SCRIPT_DIR}/verify-ingestion-promotion.sh" \
+    "${1:-2026-03-07}" \
+    "${AIRFLOW_ACTIVE_DAG_ID}" \
+    "${airflow_prd_subdir}" | tee "${ARTIFACT_DIR}/verify_ingestion_prd_${scope}.log"
+  SOURCE_SCOPE="${scope}" bash "${SCRIPT_DIR}/verify-sdp-promotion.sh" | tee "${ARTIFACT_DIR}/verify_sdp_prd_${scope}.log"
+done
 
 cat > "${ARTIFACT_DIR}/summary.txt" <<EOF
 sdp_prd_deploy=passed
-airflow.prd_dag_id=${PRD_AIRFLOW_DAG_ID}
+airflow.prd_orders_dag_id=${PRD_ORDERS_AIRFLOW_DAG_ID}
+airflow.prd_customers_dag_id=${PRD_CUSTOMERS_AIRFLOW_DAG_ID}
 snowflake.prd_sdp_database=${SNOWFLAKE_SDP_DATABASE}
 snowflake.prd_edp_database=${SNOWFLAKE_EDP_DATABASE}
 iceberg.prd_namespace=${ICEBERG_NAMESPACE}
