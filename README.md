@@ -14,6 +14,8 @@ The platform repo is the control plane. During GitLab bootstrap it renders and p
 - `proj_edp_orders`: owns the orders EDP dbt project
 - `proj_edp_customers`: owns the customers EDP dbt project
 
+The dbt source-of-truth now lives only under `dbt/projects/*`. The old flat `dbt/models` and root `dbt/dbt_project.yml` layout is not used anymore.
+
 ## Services
 
 - `gitlab-platform`: local GitLab UI and API

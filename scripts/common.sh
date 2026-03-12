@@ -357,11 +357,6 @@ resolve_host_dbt_project_dir() {
     return 0
   fi
 
-  if [ -f "${ROOT_DIR}/dbt/dbt_project.yml" ]; then
-    printf '%s/dbt\n' "${ROOT_DIR}"
-    return 0
-  fi
-
   echo "unable to resolve dbt project dir for ${project_slug}" >&2
   return 1
 }
@@ -371,11 +366,6 @@ resolve_container_dbt_project_dir() {
 
   if [ -f "${ROOT_DIR}/dbt/projects/${project_slug}/dbt_project.yml" ]; then
     printf '/opt/platform/dbt/projects/%s\n' "${project_slug}"
-    return 0
-  fi
-
-  if [ -f "${ROOT_DIR}/dbt/dbt_project.yml" ]; then
-    printf '/opt/platform/dbt\n'
     return 0
   fi
 

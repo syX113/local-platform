@@ -955,7 +955,6 @@ def render_sdp_repo(project_path: str) -> None:
         "dbt/.sqlfluff",
         "dbt/Dockerfile",
         "dbt/requirements.txt",
-        "dbt/macros",
         "dbt/scripts/apply_sql.py",
         "dbt/scripts/ensure_target_databases.py",
         "dbt/scripts/manage_ci_clones.py",
@@ -967,6 +966,7 @@ def render_sdp_repo(project_path: str) -> None:
     copy_path("snowflake/sql/01_snowflake_foundation.sql.tpl", repo_dir, "ci/snowflake/sql/01_snowflake_foundation.sql.tpl")
     copy_path("snowflake/data_products.json", repo_dir, "ci/snowflake/data_products.json")
 
+    copy_path("dbt/projects/proj_source_finnova/macros", repo_dir, "dbt/macros")
     copy_path("dbt/projects/proj_source_finnova/dbt_project.yml", repo_dir, "dbt/dbt_project.yml")
     copy_path("dbt/projects/proj_source_finnova/models", repo_dir, "dbt/models")
     write_file(
@@ -1060,7 +1060,6 @@ def render_edp_repo(project_path: str) -> None:
         "dbt/.sqlfluff",
         "dbt/Dockerfile",
         "dbt/requirements.txt",
-        "dbt/macros",
         "dbt/scripts/apply_sql.py",
         "dbt/scripts/ensure_target_databases.py",
         "dbt/scripts/manage_ci_clones.py",
@@ -1073,6 +1072,7 @@ def render_edp_repo(project_path: str) -> None:
     copy_path("snowflake/sql/01_snowflake_foundation.sql.tpl", repo_dir, "ci/snowflake/sql/01_snowflake_foundation.sql.tpl")
     copy_path("snowflake/data_products.json", repo_dir, "ci/snowflake/data_products.json")
 
+    copy_path("dbt/projects/proj_edp_orders/macros", repo_dir, "dbt/macros")
     copy_path("dbt/projects/proj_edp_orders/dbt_project.yml", repo_dir, "dbt/dbt_project.yml")
     copy_path("dbt/projects/proj_edp_orders/models", repo_dir, "dbt/models")
 
@@ -1150,7 +1150,6 @@ def render_edp_customers_repo(project_path: str) -> None:
         "dbt/.sqlfluff",
         "dbt/Dockerfile",
         "dbt/requirements.txt",
-        "dbt/macros",
         "dbt/scripts/apply_sql.py",
         "dbt/scripts/ensure_target_databases.py",
         "dbt/scripts/manage_ci_clones.py",
@@ -1163,6 +1162,7 @@ def render_edp_customers_repo(project_path: str) -> None:
     copy_path("snowflake/sql/01_snowflake_foundation.sql.tpl", repo_dir, "ci/snowflake/sql/01_snowflake_foundation.sql.tpl")
     copy_path("snowflake/data_products.json", repo_dir, "ci/snowflake/data_products.json")
 
+    copy_path("dbt/projects/proj_edp_customers/macros", repo_dir, "dbt/macros")
     copy_path("dbt/projects/proj_edp_customers/dbt_project.yml", repo_dir, "dbt/dbt_project.yml")
     copy_path("dbt/projects/proj_edp_customers/models", repo_dir, "dbt/models")
 

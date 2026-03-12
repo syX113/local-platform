@@ -405,7 +405,7 @@ def main() -> int:
 
             docker compose run --rm --no-deps dlt-extractor python /opt/platform/dlt/snowflake_raw_sync.py | tee "${{ARTIFACT_DIR}}/snowflake_raw_sync.log"
             bash ./scripts/deploy-snowflake-dbt-project.sh \\
-              proj_sdp_orders \\
+              proj_source_finnova \\
               "${{SNOWFLAKE_SDP_DBT_PROJECT}}" \\
               "${{SNOWFLAKE_SDP_DATABASE}}" \\
               "CORE" \\

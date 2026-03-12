@@ -91,6 +91,7 @@ x-airflow-build: &airflow-build
 
 x-airflow-env: &airflow-env
   <<: *common-env
+  PYTHONDONTWRITEBYTECODE: "1"
   AIRFLOW__CORE__EXECUTOR: LocalExecutor
   AIRFLOW__CORE__LOAD_EXAMPLES: "False"
   AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: "True"
