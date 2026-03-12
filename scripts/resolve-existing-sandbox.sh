@@ -112,4 +112,73 @@ AIRFLOW_SANDBOX_ORDERS_DAG_ID=DEV_${project_kind}_${namespace_suffix}_orders
 AIRFLOW_SANDBOX_CUSTOMERS_DAG_ID=DEV_${project_kind}_${namespace_suffix}_customers
 EOF
 
+required_databases=()
+if [ "${project_kind}" = "sdp" ]; then
+  required_databases+=("${branch_sdp_database}" "${branch_sdp_customers_database}")
+elif printf '%s' "${project_path_slug}" | grep -qi 'customers'; then
+  required_databases+=("${branch_sdp_customers_database}" "${branch_edp_customers_database}")
+else
+  required_databases+=("${branch_sdp_database}" "${branch_edp_orders_database}")
+fi
+
+clone_databases_exist() {
+  local -a databases=("$@")
+
+  if [ "${#databases[@]}" -eq 0 ]; then
+    return 0
+  fi
+
+  docker compose run --rm --no-deps \
+    -e "SNOWFLAKE_ACCOUNT=${SNOWFLAKE_ACCOUNT}" \
+    -e "SNOWFLAKE_USER=${SNOWFLAKE_USER}" \
+    -e "SNOWFLAKE_PASSWORD=${SNOWFLAKE_PASSWORD}" \
+    -e "SNOWFLAKE_ROLE=${SNOWFLAKE_ROLE}" \
+    -e "SNOWFLAKE_WAREHOUSE=${SNOWFLAKE_WAREHOUSE}" \
+    dbt-executor python - "${databases[@]}" <<'PY' >/dev/null
+from __future__ import annotations
+
+import os
+import sys
+
+import snowflake.connector
+
+
+def main() -> int:
+    connection = snowflake.connector.connect(
+        account=os.environ["SNOWFLAKE_ACCOUNT"],
+        user=os.environ["SNOWFLAKE_USER"],
+        password=os.environ["SNOWFLAKE_PASSWORD"],
+        role=os.environ["SNOWFLAKE_ROLE"],
+        warehouse=os.environ["SNOWFLAKE_WAREHOUSE"],
+    )
+    try:
+        with connection.cursor() as cursor:
+            for database_name in sys.argv[1:]:
+                cursor.execute(f"show databases like '{database_name}'")
+                if cursor.fetchone() is None:
+                    return 1
+    finally:
+        connection.close()
+    return 0
+
+
+raise SystemExit(main())
+PY
+}
+
+wait_seconds="${CI_BRANCH_SANDBOX_WAIT_SECONDS:-20}"
+wait_interval="${CI_BRANCH_SANDBOX_WAIT_INTERVAL_SECONDS:-4}"
+elapsed=0
+
+while ! clone_databases_exist "${required_databases[@]}"; do
+  if [ "${elapsed}" -ge "${wait_seconds}" ]; then
+    printf 'branch sandbox missing for %s:%s after %ss; provisioning deterministic fallback\\n' "${project_kind}" "${branch_name_raw}" "${wait_seconds}" >&2
+    bash "${SCRIPT_DIR}/prepare-ci-sandbox.sh" "${project_kind}" "${dotenv_path}"
+    break
+  fi
+
+  sleep "${wait_interval}"
+  elapsed=$((elapsed + wait_interval))
+done
+
 printf 'resolved deterministic branch sandbox context for %s:%s\\n' "${project_kind}" "${branch_name_raw}"

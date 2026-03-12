@@ -615,10 +615,12 @@ The ownership split is:
 Each generated project ships its own `.gitlab-ci.yml` with isolated CI/CD verification:
 
 - the platform auto-provisions a branch sandbox from GitLab webhook events when a new non-default branch appears in GitLab
+- the branch provisioner also runs a periodic reconciliation loop, so branch sandboxes are still created if GitLab misses or delays a webhook
 - branch-creation pushes do not run the heavy validation pipeline; they only create the isolated developer sandbox
 - later non-default branch push pipelines reuse one stable branch-scoped Snowflake zero-copy environment so developers do not touch the shared DEV databases
 - the SDP pipeline also reuses one stable branch-scoped MinIO/S3 prefix, dlt pipeline name, and Iceberg namespace
 - branch CI runs `sqlfluff lint` plus repeated Snowflake-native `dbt parse`, `dbt run`, and `dbt test` validations against that preserved sandbox
+- if a branch CI pipeline starts before the branch sandbox has finished provisioning, the CI bootstrap waits briefly for the sandbox and then deterministically provisions the same branch-scoped clone names as a fallback
 - opening a merge request creates one MR-scoped zero-copy environment; MR pipelines validate there in detail and that MR sandbox stays alive until the merge request is merged or closed
 - merging the merge request to `main` triggers the post-merge CD pipeline automatically; it deploys directly into the shared DEV target
 - the same post-merge pipeline then stops at a manual PRD approval gate that must be played by the commit identity, and only then deploys into the shared PRD target

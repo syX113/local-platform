@@ -30,6 +30,7 @@ GITLAB_URL = os.environ.get("GITLAB_URL_INTERNAL", "http://gitlab").rstrip("/")
 WEBHOOK_HOST = os.environ.get("GITLAB_BRANCH_PROVISIONER_HOST", "0.0.0.0")
 WEBHOOK_PORT = int(os.environ.get("GITLAB_BRANCH_PROVISIONER_PORT", "8090"))
 WEBHOOK_TOKEN = os.environ.get("GITLAB_BRANCH_PROVISIONER_WEBHOOK_TOKEN", "")
+RECONCILE_SECONDS = max(5, int(os.environ.get("GITLAB_BRANCH_PROVISIONER_POLL_SECONDS", "15")))
 ZERO_SHA = "0" * 40
 STATE_LOCK = threading.Lock()
 
@@ -446,18 +447,20 @@ def reconcile_once() -> tuple[str, list[dict[str, str]]]:
     with STATE_LOCK:
         persist_mr_state(known_mrs)
 
-    log("startup reconciliation complete")
     return token, projects
 
 
 def reconcile_forever() -> None:
+    first_cycle = True
     while True:
         try:
             reconcile_once()
-            return
+            if first_cycle:
+                log("startup reconciliation complete")
+                first_cycle = False
         except Exception as exc:  # noqa: BLE001
-            log(f"startup reconciliation failed: {exc}")
-            time.sleep(5)
+            log(f"branch reconciliation failed: {exc}")
+        time.sleep(RECONCILE_SECONDS)
 
 
 def branch_name_from_ref(ref: str) -> str:
@@ -467,34 +470,41 @@ def branch_name_from_ref(ref: str) -> str:
     return ref[len(prefix):]
 
 
-def project_lookup(projects: list[dict[str, str]], payload: dict[str, Any]) -> dict[str, str] | None:
+def project_lookup(token: str, projects: list[dict[str, str]], payload: dict[str, Any]) -> dict[str, str] | None:
     project = payload.get("project", {})
     payload_project_id = str(project.get("id") or payload.get("project_id") or "")
-    payload_path = project.get("path_with_namespace", "")
+    payload_paths = [
+        str(project.get("path_with_namespace") or ""),
+        str(payload.get("path_with_namespace") or ""),
+        str(project.get("path") or ""),
+        str(payload.get("project_path") or ""),
+    ]
+    payload_paths = [path for path in payload_paths if path]
 
     for candidate in projects:
         if payload_project_id and payload_project_id == candidate["id"]:
-            details = project_details(wait_for_bootstrap()[0], candidate["id"])
+            details = project_details(token, candidate["id"])
             return {
                 "project_id": candidate["id"],
                 "project_kind": candidate["kind"],
                 "project_path": candidate["path"],
-                "project_slug": gitlab_slug(details.get("path_with_namespace", payload_path or f"root/{candidate['path']}")),
+                "project_slug": gitlab_slug(details.get("path_with_namespace", payload_paths[0] if payload_paths else f"root/{candidate['path']}")),
                 "default_branch": details.get("default_branch") or "main",
             }
 
-    payload_slug = gitlab_slug(payload_path)
-    for candidate in projects:
-        candidate_slug = gitlab_slug(f"root/{candidate['path']}")
-        if payload_slug == candidate_slug:
-            details = project_details(wait_for_bootstrap()[0], candidate["id"])
-            return {
-                "project_id": candidate["id"],
-                "project_kind": candidate["kind"],
-                "project_path": candidate["path"],
-                "project_slug": gitlab_slug(details.get("path_with_namespace", payload_path or f"root/{candidate['path']}")),
-                "default_branch": details.get("default_branch") or "main",
-            }
+    for payload_path in payload_paths:
+        payload_slug = gitlab_slug(payload_path if "/" in payload_path else f"root/{payload_path}")
+        for candidate in projects:
+            candidate_slug = gitlab_slug(f"root/{candidate['path']}")
+            if payload_slug == candidate_slug:
+                details = project_details(token, candidate["id"])
+                return {
+                    "project_id": candidate["id"],
+                    "project_kind": candidate["kind"],
+                    "project_path": candidate["path"],
+                    "project_slug": gitlab_slug(details.get("path_with_namespace", payload_path or f"root/{candidate['path']}")),
+                    "default_branch": details.get("default_branch") or "main",
+                }
 
     return None
 
@@ -582,10 +592,9 @@ def process_webhook_payload(payload: dict[str, Any]) -> None:
     try:
         object_kind = payload.get("object_kind", "") or payload.get("event_name", "")
         token, projects = wait_for_bootstrap()
-        _ = token
 
         if object_kind == "push":
-            project_info = project_lookup(projects, payload)
+            project_info = project_lookup(token, projects, payload)
             if not project_info:
                 log("ignoring webhook for unmanaged GitLab project")
                 return
@@ -600,7 +609,7 @@ def process_webhook_payload(payload: dict[str, Any]) -> None:
             return
 
         if object_kind == "repository_update":
-            project_info = project_lookup(projects, payload)
+            project_info = project_lookup(token, projects, payload)
             if not project_info:
                 log("ignoring repository_update webhook for unmanaged GitLab project")
                 return
@@ -623,7 +632,7 @@ def process_webhook_payload(payload: dict[str, Any]) -> None:
             return
 
         if object_kind == "merge_request":
-            project_info = project_lookup(projects, payload)
+            project_info = project_lookup(token, projects, payload)
             if not project_info:
                 log("ignoring merge request webhook for unmanaged GitLab project")
                 return
