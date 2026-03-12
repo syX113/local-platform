@@ -326,7 +326,8 @@ resolve_container_dbt_project_dir() {
 
 export_prd_runtime_env() {
   local prd_prefix source_dlt_pipeline source_iceberg_namespace source_minio_prefix
-  local source_sdp_database source_edp_database
+  local source_sdp_database source_sdp_customers_database
+  local source_edp_database source_edp_customers_database
   local source_system_slug_value
 
   prd_prefix="${PRD_DEPLOYMENT_PREFIX:-PRD}"
@@ -335,7 +336,9 @@ export_prd_runtime_env() {
   source_iceberg_namespace="${PRD_SOURCE_ICEBERG_NAMESPACE:-${source_system_slug_value}}"
   source_minio_prefix="${PRD_SOURCE_MINIO_PREFIX:-landing/prd}"
   source_sdp_database="${PRD_SOURCE_SDP_DATABASE:-${SNOWFLAKE_SDP_DATABASE_BASE:-${SNOWFLAKE_SDP_DATABASE}}}"
+  source_sdp_customers_database="${PRD_SOURCE_SDP_CUSTOMERS_DATABASE:-${SNOWFLAKE_SDP_CUSTOMERS_DATABASE_BASE:-${SNOWFLAKE_SDP_CUSTOMERS_DATABASE}}}"
   source_edp_database="${PRD_SOURCE_EDP_DATABASE:-${SNOWFLAKE_EDP_DATABASE_BASE:-${SNOWFLAKE_EDP_DATABASE}}}"
+  source_edp_customers_database="${PRD_SOURCE_EDP_CUSTOMERS_DATABASE:-${SNOWFLAKE_EDP_CUSTOMERS_DATABASE_BASE:-${SNOWFLAKE_EDP_CUSTOMERS_DATABASE}}}"
 
   export PRD_DEPLOYMENT_PREFIX="${prd_prefix}"
   export SNOWFLAKE_CONTROL_DATABASE="${SNOWFLAKE_CONTROL_DATABASE:-$(snowflake_control_database)}"
@@ -345,7 +348,9 @@ export_prd_runtime_env() {
   export PRD_SOURCE_ICEBERG_NAMESPACE="${source_iceberg_namespace}"
   export PRD_SOURCE_MINIO_PREFIX="${source_minio_prefix}"
   export PRD_SOURCE_SDP_DATABASE="${source_sdp_database}"
+  export PRD_SOURCE_SDP_CUSTOMERS_DATABASE="${source_sdp_customers_database}"
   export PRD_SOURCE_EDP_DATABASE="${source_edp_database}"
+  export PRD_SOURCE_EDP_CUSTOMERS_DATABASE="${source_edp_customers_database}"
 
   export PRD_AIRFLOW_DAG_ID="${PRD_AIRFLOW_DAG_ID:-$(prefixed_identifier "${source_dlt_pipeline}" "${prd_prefix}")}"
   export PRD_AIRFLOW_MODULE_PREFIX="${PRD_AIRFLOW_MODULE_PREFIX:-$(sanitize_branch_token "${PRD_AIRFLOW_DAG_ID}")}"
@@ -355,19 +360,33 @@ export_prd_runtime_env() {
   export PRD_ICEBERG_NAMESPACE="${PRD_ICEBERG_NAMESPACE:-${source_iceberg_namespace}}"
   export PRD_MINIO_PREFIX="${PRD_MINIO_PREFIX:-${source_minio_prefix}}"
   export PRD_SNOWFLAKE_SDP_DATABASE="${PRD_SNOWFLAKE_SDP_DATABASE:-$(prefixed_identifier "${source_sdp_database}" "${prd_prefix}")}"
+  export PRD_SNOWFLAKE_SDP_ORDERS_DATABASE="${PRD_SNOWFLAKE_SDP_ORDERS_DATABASE:-${PRD_SNOWFLAKE_SDP_DATABASE}}"
+  export PRD_SNOWFLAKE_SDP_CUSTOMERS_DATABASE="${PRD_SNOWFLAKE_SDP_CUSTOMERS_DATABASE:-$(prefixed_identifier "${source_sdp_customers_database}" "${prd_prefix}")}"
   export PRD_SNOWFLAKE_EDP_DATABASE="${PRD_SNOWFLAKE_EDP_DATABASE:-$(prefixed_identifier "${source_edp_database}" "${prd_prefix}")}"
+  export PRD_SNOWFLAKE_EDP_ORDERS_DATABASE="${PRD_SNOWFLAKE_EDP_ORDERS_DATABASE:-${PRD_SNOWFLAKE_EDP_DATABASE}}"
+  export PRD_SNOWFLAKE_EDP_CUSTOMERS_DATABASE="${PRD_SNOWFLAKE_EDP_CUSTOMERS_DATABASE:-$(prefixed_identifier "${source_edp_customers_database}" "${prd_prefix}")}"
   export PRD_SDP_RUNTIME_IMAGE_PREFIX="${PRD_SDP_RUNTIME_IMAGE_PREFIX:-local-platform-prd-sdp}"
   export PRD_EDP_RUNTIME_IMAGE_PREFIX="${PRD_EDP_RUNTIME_IMAGE_PREFIX:-local-platform-prd-edp}"
-  export PRD_SNOWFLAKE_SDP_DBT_PROJECT="${PRD_SNOWFLAKE_SDP_DBT_PROJECT:-$(snowflake_dbt_project_object_name sdp_orders "${prd_prefix}")}"
+  export PRD_SNOWFLAKE_SDP_DBT_PROJECT="${PRD_SNOWFLAKE_SDP_DBT_PROJECT:-$(snowflake_dbt_project_object_name source_finnova "${prd_prefix}")}"
   export PRD_SNOWFLAKE_EDP_DBT_PROJECT="${PRD_SNOWFLAKE_EDP_DBT_PROJECT:-$(snowflake_dbt_project_object_name edp_orders "${prd_prefix}")}"
+  export PRD_SNOWFLAKE_EDP_CUSTOMERS_DBT_PROJECT="${PRD_SNOWFLAKE_EDP_CUSTOMERS_DBT_PROJECT:-$(snowflake_dbt_project_object_name edp_customers "${prd_prefix}")}"
   export PRD_SNOW_DBT_TARGET_NAME="${PRD_SNOW_DBT_TARGET_NAME:-prd}"
 
   export SNOWFLAKE_SDP_DATABASE_BASE="${source_sdp_database}"
+  export SNOWFLAKE_SDP_ORDERS_DATABASE_BASE="${source_sdp_database}"
+  export SNOWFLAKE_SDP_CUSTOMERS_DATABASE_BASE="${source_sdp_customers_database}"
   export SNOWFLAKE_EDP_DATABASE_BASE="${source_edp_database}"
+  export SNOWFLAKE_EDP_ORDERS_DATABASE_BASE="${source_edp_database}"
+  export SNOWFLAKE_EDP_CUSTOMERS_DATABASE_BASE="${source_edp_customers_database}"
   export SNOWFLAKE_SDP_DATABASE="${PRD_SNOWFLAKE_SDP_DATABASE}"
+  export SNOWFLAKE_SDP_ORDERS_DATABASE="${PRD_SNOWFLAKE_SDP_ORDERS_DATABASE}"
+  export SNOWFLAKE_SDP_CUSTOMERS_DATABASE="${PRD_SNOWFLAKE_SDP_CUSTOMERS_DATABASE}"
   export SNOWFLAKE_EDP_DATABASE="${PRD_SNOWFLAKE_EDP_DATABASE}"
+  export SNOWFLAKE_EDP_ORDERS_DATABASE="${PRD_SNOWFLAKE_EDP_ORDERS_DATABASE}"
+  export SNOWFLAKE_EDP_CUSTOMERS_DATABASE="${PRD_SNOWFLAKE_EDP_CUSTOMERS_DATABASE}"
   export SNOWFLAKE_SDP_DBT_PROJECT="${PRD_SNOWFLAKE_SDP_DBT_PROJECT}"
   export SNOWFLAKE_EDP_DBT_PROJECT="${PRD_SNOWFLAKE_EDP_DBT_PROJECT}"
+  export SNOWFLAKE_EDP_CUSTOMERS_DBT_PROJECT="${PRD_SNOWFLAKE_EDP_CUSTOMERS_DBT_PROJECT}"
   export SNOW_DBT_TARGET_NAME="${PRD_SNOW_DBT_TARGET_NAME}"
   export DLT_PIPELINE_NAME="${PRD_DLT_PIPELINE_NAME}"
   export ICEBERG_CATALOG_NAME="${PRD_ICEBERG_CATALOG_NAME}"
@@ -378,7 +397,8 @@ export_prd_runtime_env() {
 
 export_dev_runtime_env() {
   local dev_prefix source_dlt_pipeline source_iceberg_namespace source_minio_prefix
-  local source_sdp_database source_edp_database
+  local source_sdp_database source_sdp_customers_database
+  local source_edp_database source_edp_customers_database
   local source_system_slug_value
 
   dev_prefix="${DEV_DEPLOYMENT_PREFIX:-DEV}"
@@ -387,7 +407,9 @@ export_dev_runtime_env() {
   source_iceberg_namespace="${DEV_SOURCE_ICEBERG_NAMESPACE:-${source_system_slug_value}}"
   source_minio_prefix="${DEV_SOURCE_MINIO_PREFIX:-landing/dev}"
   source_sdp_database="${DEV_SOURCE_SDP_DATABASE:-${SNOWFLAKE_SDP_DATABASE_BASE:-${SNOWFLAKE_SDP_DATABASE}}}"
+  source_sdp_customers_database="${DEV_SOURCE_SDP_CUSTOMERS_DATABASE:-${SNOWFLAKE_SDP_CUSTOMERS_DATABASE_BASE:-${SNOWFLAKE_SDP_CUSTOMERS_DATABASE}}}"
   source_edp_database="${DEV_SOURCE_EDP_DATABASE:-${SNOWFLAKE_EDP_DATABASE_BASE:-${SNOWFLAKE_EDP_DATABASE}}}"
+  source_edp_customers_database="${DEV_SOURCE_EDP_CUSTOMERS_DATABASE:-${SNOWFLAKE_EDP_CUSTOMERS_DATABASE_BASE:-${SNOWFLAKE_EDP_CUSTOMERS_DATABASE}}}"
 
   export DEV_DEPLOYMENT_PREFIX="${dev_prefix}"
   export SNOWFLAKE_CONTROL_DATABASE="${SNOWFLAKE_CONTROL_DATABASE:-$(snowflake_control_database)}"
@@ -397,7 +419,9 @@ export_dev_runtime_env() {
   export DEV_SOURCE_ICEBERG_NAMESPACE="${source_iceberg_namespace}"
   export DEV_SOURCE_MINIO_PREFIX="${source_minio_prefix}"
   export DEV_SOURCE_SDP_DATABASE="${source_sdp_database}"
+  export DEV_SOURCE_SDP_CUSTOMERS_DATABASE="${source_sdp_customers_database}"
   export DEV_SOURCE_EDP_DATABASE="${source_edp_database}"
+  export DEV_SOURCE_EDP_CUSTOMERS_DATABASE="${source_edp_customers_database}"
 
   export DEV_AIRFLOW_DAG_ID="${DEV_AIRFLOW_DAG_ID:-$(prefixed_identifier "${source_dlt_pipeline}" "${dev_prefix}")}"
   export DEV_AIRFLOW_MODULE_PREFIX="${DEV_AIRFLOW_MODULE_PREFIX:-$(sanitize_branch_token "${DEV_AIRFLOW_DAG_ID}")}"
@@ -407,19 +431,33 @@ export_dev_runtime_env() {
   export DEV_ICEBERG_NAMESPACE="${DEV_ICEBERG_NAMESPACE:-${source_iceberg_namespace}}"
   export DEV_MINIO_PREFIX="${DEV_MINIO_PREFIX:-${source_minio_prefix}}"
   export DEV_SNOWFLAKE_SDP_DATABASE="${DEV_SNOWFLAKE_SDP_DATABASE:-${source_sdp_database}}"
+  export DEV_SNOWFLAKE_SDP_ORDERS_DATABASE="${DEV_SNOWFLAKE_SDP_ORDERS_DATABASE:-${DEV_SNOWFLAKE_SDP_DATABASE}}"
+  export DEV_SNOWFLAKE_SDP_CUSTOMERS_DATABASE="${DEV_SNOWFLAKE_SDP_CUSTOMERS_DATABASE:-${source_sdp_customers_database}}"
   export DEV_SNOWFLAKE_EDP_DATABASE="${DEV_SNOWFLAKE_EDP_DATABASE:-${source_edp_database}}"
+  export DEV_SNOWFLAKE_EDP_ORDERS_DATABASE="${DEV_SNOWFLAKE_EDP_ORDERS_DATABASE:-${DEV_SNOWFLAKE_EDP_DATABASE}}"
+  export DEV_SNOWFLAKE_EDP_CUSTOMERS_DATABASE="${DEV_SNOWFLAKE_EDP_CUSTOMERS_DATABASE:-${source_edp_customers_database}}"
   export DEV_SDP_RUNTIME_IMAGE_PREFIX="${DEV_SDP_RUNTIME_IMAGE_PREFIX:-local-platform-dev-sdp}"
   export DEV_EDP_RUNTIME_IMAGE_PREFIX="${DEV_EDP_RUNTIME_IMAGE_PREFIX:-local-platform-dev-edp}"
-  export DEV_SNOWFLAKE_SDP_DBT_PROJECT="${DEV_SNOWFLAKE_SDP_DBT_PROJECT:-$(snowflake_dbt_project_object_name sdp_orders "${dev_prefix}")}"
+  export DEV_SNOWFLAKE_SDP_DBT_PROJECT="${DEV_SNOWFLAKE_SDP_DBT_PROJECT:-$(snowflake_dbt_project_object_name source_finnova "${dev_prefix}")}"
   export DEV_SNOWFLAKE_EDP_DBT_PROJECT="${DEV_SNOWFLAKE_EDP_DBT_PROJECT:-$(snowflake_dbt_project_object_name edp_orders "${dev_prefix}")}"
+  export DEV_SNOWFLAKE_EDP_CUSTOMERS_DBT_PROJECT="${DEV_SNOWFLAKE_EDP_CUSTOMERS_DBT_PROJECT:-$(snowflake_dbt_project_object_name edp_customers "${dev_prefix}")}"
   export DEV_SNOW_DBT_TARGET_NAME="${DEV_SNOW_DBT_TARGET_NAME:-dev}"
 
   export SNOWFLAKE_SDP_DATABASE_BASE="${source_sdp_database}"
+  export SNOWFLAKE_SDP_ORDERS_DATABASE_BASE="${source_sdp_database}"
+  export SNOWFLAKE_SDP_CUSTOMERS_DATABASE_BASE="${source_sdp_customers_database}"
   export SNOWFLAKE_EDP_DATABASE_BASE="${source_edp_database}"
+  export SNOWFLAKE_EDP_ORDERS_DATABASE_BASE="${source_edp_database}"
+  export SNOWFLAKE_EDP_CUSTOMERS_DATABASE_BASE="${source_edp_customers_database}"
   export SNOWFLAKE_SDP_DATABASE="${DEV_SNOWFLAKE_SDP_DATABASE}"
+  export SNOWFLAKE_SDP_ORDERS_DATABASE="${DEV_SNOWFLAKE_SDP_ORDERS_DATABASE}"
+  export SNOWFLAKE_SDP_CUSTOMERS_DATABASE="${DEV_SNOWFLAKE_SDP_CUSTOMERS_DATABASE}"
   export SNOWFLAKE_EDP_DATABASE="${DEV_SNOWFLAKE_EDP_DATABASE}"
+  export SNOWFLAKE_EDP_ORDERS_DATABASE="${DEV_SNOWFLAKE_EDP_ORDERS_DATABASE}"
+  export SNOWFLAKE_EDP_CUSTOMERS_DATABASE="${DEV_SNOWFLAKE_EDP_CUSTOMERS_DATABASE}"
   export SNOWFLAKE_SDP_DBT_PROJECT="${DEV_SNOWFLAKE_SDP_DBT_PROJECT}"
   export SNOWFLAKE_EDP_DBT_PROJECT="${DEV_SNOWFLAKE_EDP_DBT_PROJECT}"
+  export SNOWFLAKE_EDP_CUSTOMERS_DBT_PROJECT="${DEV_SNOWFLAKE_EDP_CUSTOMERS_DBT_PROJECT}"
   export SNOW_DBT_TARGET_NAME="${DEV_SNOW_DBT_TARGET_NAME}"
   export DLT_PIPELINE_NAME="${DEV_DLT_PIPELINE_NAME}"
   export ICEBERG_CATALOG_NAME="${DEV_ICEBERG_CATALOG_NAME}"

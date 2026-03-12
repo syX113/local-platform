@@ -14,8 +14,8 @@ from platform_support import docker_environment, seed_source_postgres as seed_so
 DEFAULT_DAG_ID = "local_platform_ingest"
 DEFAULT_DESCRIPTION = (
     "Seeds PostgreSQL sample data, writes Iceberg tables to object storage, mirrors "
-    "the SDP inbound layer into Snowflake for local mode, and triggers the SDP dbt "
-    "project inside Snowflake."
+    "the source inbound layer into Snowflake for local mode, and triggers the source "
+    "dbt project inside Snowflake."
 )
 DEFAULT_TAGS = ["local-platform", "postgres", "dlt", "dbt", "snowflake"]
 
@@ -80,14 +80,19 @@ def build_ingest_dag(
                 runtime_environment.get("DBT_RUNNER_IMAGE", "local-platform/dbt-executor:dev"),
             ),
             docker_url=os.environ.get("DOCKER_URL", "unix:///var/run/docker.sock"),
-            command=(
-                "python /opt/platform/dbt/scripts/snow_dbt_cli.py "
-                f"deploy --project-dir /opt/platform/dbt/projects/proj_sdp_orders "
-                f"--project-name {runtime_environment.get('SNOWFLAKE_SDP_DBT_PROJECT', 'DBT_PROJECT_SDP_ORDERS')} "
-                f"--database {runtime_environment.get('SNOWFLAKE_SDP_DATABASE', 'DB_SDP_ORDERS')} "
-                f"--schema {runtime_environment.get('SNOWFLAKE_SDP_CORE_SCHEMA', 'CORE')} "
-                f"--target-name {runtime_environment.get('SNOW_DBT_TARGET_NAME', 'dev')}"
-            ),
+            command=[
+                "bash",
+                "-lc",
+                (
+                    "python /opt/platform/dbt/scripts/ensure_target_databases.py source && "
+                    "python /opt/platform/dbt/scripts/snow_dbt_cli.py "
+                    f"deploy --project-dir /opt/platform/dbt/projects/proj_source_finnova "
+                    f"--project-name {runtime_environment.get('SNOWFLAKE_SDP_DBT_PROJECT', 'DBT_PROJECT_SOURCE_FINNOVA')} "
+                    f"--database {runtime_environment.get('SNOWFLAKE_SDP_DATABASE', 'DB_SDP_ORDERS')} "
+                    f"--schema {runtime_environment.get('SNOWFLAKE_SDP_CORE_SCHEMA', 'CORE')} "
+                    f"--target-name {runtime_environment.get('SNOW_DBT_TARGET_NAME', 'dev')}"
+                ),
+            ],
             network_mode=os.environ.get("PLATFORM_DOCKER_NETWORK", "local-platform-net"),
             mount_tmp_dir=False,
             auto_remove="force",
@@ -104,7 +109,7 @@ def build_ingest_dag(
             docker_url=os.environ.get("DOCKER_URL", "unix:///var/run/docker.sock"),
             command=(
                 "python /opt/platform/dbt/scripts/snow_dbt_cli.py "
-                f"execute --project-name {runtime_environment.get('SNOWFLAKE_SDP_DBT_PROJECT', 'DBT_PROJECT_SDP_ORDERS')} build"
+                f"execute --project-name {runtime_environment.get('SNOWFLAKE_SDP_DBT_PROJECT', 'DBT_PROJECT_SOURCE_FINNOVA')} build"
             ),
             network_mode=os.environ.get("PLATFORM_DOCKER_NETWORK", "local-platform-net"),
             mount_tmp_dir=False,

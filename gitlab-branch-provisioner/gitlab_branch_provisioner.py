@@ -113,6 +113,11 @@ def wait_for_bootstrap() -> tuple[str, list[dict[str, str]]]:
                 "id": projects_env.get("GITLAB_EDP_PROJECT_ID", ""),
                 "path": projects_env.get("GITLAB_EDP_PROJECT_PATH", ""),
             },
+            {
+                "kind": "edp",
+                "id": projects_env.get("GITLAB_EDP_CUSTOMERS_PROJECT_ID", ""),
+                "path": projects_env.get("GITLAB_EDP_CUSTOMERS_PROJECT_PATH", ""),
+            },
         ]
 
         if not all(project["id"] and project["path"] for project in projects):

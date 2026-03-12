@@ -14,7 +14,13 @@ required_vars=(
   SNOWFLAKE_ROLE
   SNOWFLAKE_WAREHOUSE
   SNOWFLAKE_SDP_DATABASE
+  SNOWFLAKE_SDP_CUSTOMERS_DATABASE
   SNOWFLAKE_EDP_DATABASE
+  SNOWFLAKE_EDP_CUSTOMERS_DATABASE
+  PRD_SNOWFLAKE_SDP_DATABASE
+  PRD_SNOWFLAKE_SDP_CUSTOMERS_DATABASE
+  PRD_SNOWFLAKE_EDP_DATABASE
+  PRD_SNOWFLAKE_EDP_CUSTOMERS_DATABASE
 )
 
 for key in "${required_vars[@]}"; do
@@ -37,13 +43,8 @@ fi
 echo "dropping lingering Snowflake CI clone databases"
 bash ./scripts/cleanup-snowflake-ci-clones.sh
 
-echo "dropping Snowflake control, SDP, and EDP databases for a clean rebuild"
-docker compose run --rm --no-deps \
-  -e "PRD_SNOWFLAKE_SDP_DATABASE=${PRD_SNOWFLAKE_SDP_DATABASE}" \
-  -e "PRD_SNOWFLAKE_EDP_DATABASE=${PRD_SNOWFLAKE_EDP_DATABASE}" \
-  -e "PRD_SNOWFLAKE_SDP_DBT_PROJECT=${PRD_SNOWFLAKE_SDP_DBT_PROJECT}" \
-  -e "PRD_SNOWFLAKE_EDP_DBT_PROJECT=${PRD_SNOWFLAKE_EDP_DBT_PROJECT}" \
-  dbt-executor python - <<'PY'
+echo "dropping Snowflake control and all data product databases for a clean rebuild"
+docker compose run --rm --no-deps dbt-executor python - <<'PY'
 import os
 
 import snowflake.connector
@@ -52,6 +53,17 @@ import snowflake.connector
 def ident(name: str) -> str:
     return f'"{name}"'
 
+
+database_names = [
+    os.environ["PRD_SNOWFLAKE_EDP_CUSTOMERS_DATABASE"],
+    os.environ["PRD_SNOWFLAKE_EDP_DATABASE"],
+    os.environ["PRD_SNOWFLAKE_SDP_CUSTOMERS_DATABASE"],
+    os.environ["PRD_SNOWFLAKE_SDP_DATABASE"],
+    os.environ["SNOWFLAKE_EDP_CUSTOMERS_DATABASE"],
+    os.environ["SNOWFLAKE_EDP_DATABASE"],
+    os.environ["SNOWFLAKE_SDP_CUSTOMERS_DATABASE"],
+    os.environ["SNOWFLAKE_SDP_DATABASE"],
+]
 
 connection = snowflake.connector.connect(
     account=os.environ["SNOWFLAKE_ACCOUNT"],
@@ -67,64 +79,88 @@ try:
         cursor.execute(f'use role {ident(os.environ["SNOWFLAKE_ROLE"])}')
         cursor.execute(f'use warehouse {ident(os.environ["SNOWFLAKE_WAREHOUSE"])}')
         cursor.execute(f'drop database if exists {ident(os.environ["SNOWFLAKE_CONTROL_DATABASE"])}')
-        cursor.execute(f'drop database if exists {ident(os.environ["PRD_SNOWFLAKE_EDP_DATABASE"])}')
-        cursor.execute(f'drop database if exists {ident(os.environ["PRD_SNOWFLAKE_SDP_DATABASE"])}')
-        cursor.execute(f'drop database if exists {ident(os.environ["SNOWFLAKE_EDP_DATABASE"])}')
-        cursor.execute(f'drop database if exists {ident(os.environ["SNOWFLAKE_SDP_DATABASE"])}')
+        for database_name in database_names:
+            cursor.execute(f'drop database if exists {ident(database_name)}')
 finally:
     connection.close()
 
-print(
-    {
-        "dropped_control_database": os.environ["SNOWFLAKE_CONTROL_DATABASE"],
-        "dropped_sdp_database": os.environ["SNOWFLAKE_SDP_DATABASE"],
-        "dropped_edp_database": os.environ["SNOWFLAKE_EDP_DATABASE"],
-        "dropped_prd_sdp_database": os.environ["PRD_SNOWFLAKE_SDP_DATABASE"],
-        "dropped_prd_edp_database": os.environ["PRD_SNOWFLAKE_EDP_DATABASE"],
-    }
-)
+print({"dropped_databases": database_names})
 PY
 
 echo "recreating Snowflake foundation"
 bash ./scripts/ensure-snowflake-foundation.sh
 
+echo "deploying DEV source data products"
+bash ./scripts/deploy-sdp-dev.sh
+
+echo "deploying PRD source data products"
+bash ./scripts/deploy-sdp-prd.sh
+
+echo "deploying DEV EDP customers data product"
+bash ./scripts/deploy-edp-customers-dev.sh
+
+echo "deploying PRD EDP customers data product"
+bash ./scripts/deploy-edp-customers-prd.sh
+
+echo "deploying DEV EDP orders dbt project object without materializing DEV objects"
+export_dev_runtime_env
+export SNOWFLAKE_EDP_DATABASE="${SNOWFLAKE_CONTROL_DATABASE}"
+export SNOWFLAKE_EDP_IN_SCHEMA="${SNOWFLAKE_CONTROL_SCHEMA}"
+export SNOWFLAKE_EDP_CORE_SCHEMA="${SNOWFLAKE_CONTROL_SCHEMA}"
+export SNOWFLAKE_EDP_ACC_SCHEMA="${SNOWFLAKE_CONTROL_SCHEMA}"
+bash ./scripts/deploy-snowflake-dbt-project.sh \
+  proj_edp_orders \
+  "${DEV_SNOWFLAKE_EDP_DBT_PROJECT}" \
+  "${SNOWFLAKE_CONTROL_DATABASE}" \
+  "${SNOWFLAKE_CONTROL_SCHEMA}" \
+  "dev"
+
+echo "deploying PRD EDP orders dbt project object without materializing PRD objects"
+export_prd_runtime_env
+export SNOWFLAKE_EDP_DATABASE="${SNOWFLAKE_CONTROL_DATABASE}"
+export SNOWFLAKE_EDP_IN_SCHEMA="${SNOWFLAKE_CONTROL_SCHEMA}"
+export SNOWFLAKE_EDP_CORE_SCHEMA="${SNOWFLAKE_CONTROL_SCHEMA}"
+export SNOWFLAKE_EDP_ACC_SCHEMA="${SNOWFLAKE_CONTROL_SCHEMA}"
+bash ./scripts/deploy-snowflake-dbt-project.sh \
+  proj_edp_orders \
+  "${PRD_SNOWFLAKE_EDP_DBT_PROJECT}" \
+  "${SNOWFLAKE_CONTROL_DATABASE}" \
+  "${SNOWFLAKE_CONTROL_SCHEMA}" \
+  "prd"
+
 export_dev_runtime_env
 
-echo "refreshing DEV Iceberg artifacts"
-docker compose run --rm --no-deps dlt-extractor python /opt/platform/dlt/pipeline.py
-
-echo "syncing inbound Snowflake raw tables"
-docker compose run --rm --no-deps dlt-extractor python /opt/platform/dlt/snowflake_raw_sync.py
-
-echo "deploying DEV Snowflake dbt projects"
-bash ./scripts/deploy-snowflake-dbt-project.sh \
-  proj_sdp_orders \
-  "${SNOWFLAKE_SDP_DBT_PROJECT}" \
-  "${SNOWFLAKE_SDP_DATABASE}" \
-  "${SNOWFLAKE_SDP_CORE_SCHEMA}" \
-  dev
-
-echo "building SDP data product"
-bash ./scripts/execute-snowflake-dbt-project.sh "${SNOWFLAKE_SDP_DBT_PROJECT}" build
-
-echo "verifying rebuilt SDP without rerunning dbt"
-./scripts/verify-sdp-promotion.sh --skip-foundation --skip-raw-sync --skip-dbt
-
-echo "verifying only SDP exists after initialization"
-docker compose run --rm --no-deps \
-  -e "PRD_SNOWFLAKE_SDP_DATABASE=${PRD_SNOWFLAKE_SDP_DATABASE}" \
-  -e "PRD_SNOWFLAKE_EDP_DATABASE=${PRD_SNOWFLAKE_EDP_DATABASE}" \
-  -e "PRD_SNOWFLAKE_SDP_DBT_PROJECT=${PRD_SNOWFLAKE_SDP_DBT_PROJECT}" \
-  -e "PRD_SNOWFLAKE_EDP_DBT_PROJECT=${PRD_SNOWFLAKE_EDP_DBT_PROJECT}" \
-  dbt-executor python - <<'PY'
+echo "validating initialized DEV/PRD source products, deployed EDP customers, and undeployed EDP orders state"
+docker compose run --rm --no-deps dbt-executor python - <<'PY'
 import os
 
 import snowflake.connector
 
 
-def ident(name: str) -> str:
-    return f'"{name}"'
+def ident(*parts: str) -> str:
+    return ".".join(f'"{part}"' for part in parts)
 
+
+required_databases = [
+    os.environ["SNOWFLAKE_SDP_DATABASE"],
+    os.environ["SNOWFLAKE_SDP_CUSTOMERS_DATABASE"],
+    os.environ["SNOWFLAKE_EDP_CUSTOMERS_DATABASE"],
+    os.environ["PRD_SNOWFLAKE_SDP_DATABASE"],
+    os.environ["PRD_SNOWFLAKE_SDP_CUSTOMERS_DATABASE"],
+    os.environ["PRD_SNOWFLAKE_EDP_CUSTOMERS_DATABASE"],
+]
+required_projects = [
+    os.environ["DEV_SNOWFLAKE_SDP_DBT_PROJECT"],
+    os.environ["DEV_SNOWFLAKE_EDP_DBT_PROJECT"],
+    os.environ["DEV_SNOWFLAKE_EDP_CUSTOMERS_DBT_PROJECT"],
+    os.environ["PRD_SNOWFLAKE_SDP_DBT_PROJECT"],
+    os.environ["PRD_SNOWFLAKE_EDP_DBT_PROJECT"],
+    os.environ["PRD_SNOWFLAKE_EDP_CUSTOMERS_DBT_PROJECT"],
+]
+forbidden_databases = [
+    os.environ["SNOWFLAKE_EDP_DATABASE"],
+    os.environ["PRD_SNOWFLAKE_EDP_DATABASE"],
+]
 
 connection = snowflake.connector.connect(
     account=os.environ["SNOWFLAKE_ACCOUNT"],
@@ -134,52 +170,39 @@ connection = snowflake.connector.connect(
     warehouse=os.environ["SNOWFLAKE_WAREHOUSE"],
 )
 
-sdp_database = os.environ["SNOWFLAKE_SDP_DATABASE"]
-edp_database = os.environ["SNOWFLAKE_EDP_DATABASE"]
-prd_sdp_database = os.environ["PRD_SNOWFLAKE_SDP_DATABASE"]
-prd_edp_database = os.environ["PRD_SNOWFLAKE_EDP_DATABASE"]
-sdp_project_name = os.environ["SNOWFLAKE_SDP_DBT_PROJECT"]
-edp_project_name = os.environ["SNOWFLAKE_EDP_DBT_PROJECT"]
-prd_sdp_project_name = os.environ["PRD_SNOWFLAKE_SDP_DBT_PROJECT"]
-prd_edp_project_name = os.environ["PRD_SNOWFLAKE_EDP_DBT_PROJECT"]
-
 try:
     with connection.cursor() as cursor:
-        cursor.execute(
-            f"show dbt projects in schema {ident(os.environ['SNOWFLAKE_CONTROL_DATABASE'])}.{ident(os.environ['SNOWFLAKE_CONTROL_SCHEMA'])}"
-        )
-        cursor.execute("select \"name\" from table(result_scan(last_query_id()))")
-        dbt_projects = {row[0] for row in cursor.fetchall()}
-        if sdp_project_name not in dbt_projects:
-            raise SystemExit(f"expected SDP dbt project object to exist after initialization: {sdp_project_name}")
-        if edp_project_name in dbt_projects:
-            raise SystemExit(f"unexpected EDP dbt project object present after initialization: {edp_project_name}")
-        if prd_sdp_project_name in dbt_projects:
-            raise SystemExit(f"unexpected PRD SDP dbt project object present after initialization: {prd_sdp_project_name}")
-        if prd_edp_project_name in dbt_projects:
-            raise SystemExit(f"unexpected PRD EDP dbt project object present after initialization: {prd_edp_project_name}")
-
         cursor.execute("show databases")
         databases = {row[1] for row in cursor.fetchall()}
-        if sdp_database not in databases:
-            raise SystemExit(f"expected SDP database to exist after initialization: {sdp_database}")
-        if edp_database in databases:
-            raise SystemExit(f"unexpected EDP database present after initialization: {edp_database}")
-        if prd_sdp_database in databases:
-            raise SystemExit(f"unexpected PRD SDP database present after initialization: {prd_sdp_database}")
-        if prd_edp_database in databases:
-            raise SystemExit(f"unexpected PRD EDP database present after initialization: {prd_edp_database}")
+        missing_databases = sorted(set(required_databases) - databases)
+        if missing_databases:
+            raise SystemExit(f"missing initialized databases: {', '.join(missing_databases)}")
+        unexpected_databases = sorted(set(forbidden_databases) & databases)
+        if unexpected_databases:
+            raise SystemExit(f"unexpected EDP databases after initialization: {', '.join(unexpected_databases)}")
 
-        print(
-            {
-                "sdp_deployed": True,
-                "edp_deployed": False,
-                "prd_deployed": False,
-                "sdp_database_present": sdp_database,
-            }
+        cursor.execute(
+            f"show dbt projects in schema {ident(os.environ['SNOWFLAKE_CONTROL_DATABASE'], os.environ['SNOWFLAKE_CONTROL_SCHEMA'])}"
         )
+        cursor.execute('select "name" from table(result_scan(last_query_id()))')
+        dbt_projects = {row[0] for row in cursor.fetchall()}
+        missing_projects = sorted(set(required_projects) - dbt_projects)
+        if missing_projects:
+            raise SystemExit(f"missing initialized dbt projects: {', '.join(missing_projects)}")
 finally:
     connection.close()
+
+print(
+    {
+        "initialized_databases": required_databases,
+        "initialized_projects": required_projects,
+        "undeployed_databases": forbidden_databases,
+        "undeployed_orders_projects_materialization_only": [
+            os.environ["DEV_SNOWFLAKE_EDP_DBT_PROJECT"],
+            os.environ["PRD_SNOWFLAKE_EDP_DBT_PROJECT"],
+        ],
+    }
+)
 PY
 
 echo "snowflake-only bootstrap complete"

@@ -31,7 +31,7 @@ def main() -> int:
     database = os.environ["SNOWFLAKE_EDP_DATABASE"]
     schema = os.environ["SNOWFLAKE_EDP_CORE_SCHEMA"]
     clone_schema = os.environ.get("SNOWFLAKE_CLONE_SCHEMA", f"{schema}_CLONE_CI")
-    fact_table = "FCT_ORDER_REVENUE_STAR"
+    fact_table = os.environ.get("SNOWFLAKE_ZERO_COPY_FACT_TABLE", "FCT_ORDER_REVENUE_STAR")
 
     connection = connect()
     try:

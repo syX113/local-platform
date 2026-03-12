@@ -37,7 +37,7 @@ export DLT_RUNNER_IMAGE="${DEV_SDP_RUNTIME_IMAGE_PREFIX}/dlt-extractor:dev"
 export DBT_RUNNER_IMAGE="${DEV_SDP_RUNTIME_IMAGE_PREFIX}/dbt-executor:dev"
 export SNOW_DBT_RUNNER_IMAGE="${DBT_RUNNER_IMAGE}"
 
-bash "${SCRIPT_DIR}/deploy-airflow-dev-dag.sh" | tee "${ARTIFACT_DIR}/deploy_airflow_dev.log"
+bash "${SCRIPT_DIR}/deploy-airflow-dag.sh" dev | tee "${ARTIFACT_DIR}/deploy_airflow_dev.log"
 
 bash "${SCRIPT_DIR}/verify-ingestion-promotion.sh" "${1:-2026-03-07}" \
   "${DEV_AIRFLOW_DAG_ID}" \

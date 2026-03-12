@@ -326,6 +326,8 @@ render_runner_config() {
   local sdp_runner_token="${2:?runner token is required}"
   local edp_runner_description="${3:?runner description is required}"
   local edp_runner_token="${4:?runner token is required}"
+  local edp_customers_runner_description="${5:?runner description is required}"
+  local edp_customers_runner_token="${6:?runner token is required}"
 
   {
     printf 'concurrent = 1\n'
@@ -343,6 +345,15 @@ render_runner_config() {
       -e "s|__RUNNER_DESCRIPTION__|${edp_runner_description}|g" \
       -e "s|__GITLAB_URL__|http://gitlab/|g" \
       -e "s|__RUNNER_TOKEN__|${edp_runner_token}|g" \
+      -e "s|__CLONE_URL__|http://gitlab|g" \
+      -e "s|__JOB_IMAGE__|${GITLAB_RUNNER_JOB_IMAGE}|g" \
+      -e "s|__RUNNER_NETWORK__|${PLATFORM_DOCKER_NETWORK}|g" \
+      gitlab-runner/config.template.toml
+    printf '\n'
+    sed \
+      -e "s|__RUNNER_DESCRIPTION__|${edp_customers_runner_description}|g" \
+      -e "s|__GITLAB_URL__|http://gitlab/|g" \
+      -e "s|__RUNNER_TOKEN__|${edp_customers_runner_token}|g" \
       -e "s|__CLONE_URL__|http://gitlab|g" \
       -e "s|__JOB_IMAGE__|${GITLAB_RUNNER_JOB_IMAGE}|g" \
       -e "s|__RUNNER_NETWORK__|${PLATFORM_DOCKER_NETWORK}|g" \
@@ -386,9 +397,12 @@ SDP_PROJECT_NAME="${GITLAB_SDP_PROJECT_NAME}"
 SDP_PROJECT_PATH="${GITLAB_SDP_PROJECT_PATH}"
 EDP_PROJECT_NAME="${GITLAB_EDP_PROJECT_NAME}"
 EDP_PROJECT_PATH="${GITLAB_EDP_PROJECT_PATH}"
+EDP_CUSTOMERS_PROJECT_NAME="${GITLAB_EDP_CUSTOMERS_PROJECT_NAME}"
+EDP_CUSTOMERS_PROJECT_PATH="${GITLAB_EDP_CUSTOMERS_PROJECT_PATH}"
 RUNNER_PREFIX="${GITLAB_RUNNER_DESCRIPTION_PREFIX:-local-fargate-runner}"
 SDP_RUNNER_DESCRIPTION="${RUNNER_PREFIX}-sdp"
 EDP_RUNNER_DESCRIPTION="${RUNNER_PREFIX}-edp"
+EDP_CUSTOMERS_RUNNER_DESCRIPTION="${RUNNER_PREFIX}-edp-customers"
 BRANCH_PROVISIONER_PORT="${GITLAB_BRANCH_PROVISIONER_PORT:-8090}"
 BRANCH_PROVISIONER_TOKEN="${GITLAB_BRANCH_PROVISIONER_WEBHOOK_TOKEN:-local-platform-branch-provisioner}"
 BRANCH_PROVISIONER_HOST="${GITLAB_BRANCH_PROVISIONER_WEBHOOK_HOST:-gitlab-branch-provisioner}"
@@ -401,6 +415,10 @@ echo "creating or resolving EDP GitLab project"
 read -r EDP_PROJECT_ID EDP_PROJECT_STATUS <<<"$(create_or_resolve_project "${EDP_PROJECT_NAME}" "${EDP_PROJECT_PATH}")"
 [ -n "${EDP_PROJECT_ID}" ] || { echo "failed to resolve EDP GitLab project id" >&2; exit 1; }
 
+echo "creating or resolving EDP customers GitLab project"
+read -r EDP_CUSTOMERS_PROJECT_ID EDP_CUSTOMERS_PROJECT_STATUS <<<"$(create_or_resolve_project "${EDP_CUSTOMERS_PROJECT_NAME}" "${EDP_CUSTOMERS_PROJECT_PATH}")"
+[ -n "${EDP_CUSTOMERS_PROJECT_ID}" ] || { echo "failed to resolve EDP customers GitLab project id" >&2; exit 1; }
+
 echo "creating SDP project runner token"
 SDP_RUNNER_TOKEN="$(create_project_runner_token "${SDP_PROJECT_ID}" "${SDP_RUNNER_DESCRIPTION}")"
 [ -n "${SDP_RUNNER_TOKEN}" ] || { echo "failed to create SDP runner token" >&2; exit 1; }
@@ -409,6 +427,10 @@ echo "creating EDP project runner token"
 EDP_RUNNER_TOKEN="$(create_project_runner_token "${EDP_PROJECT_ID}" "${EDP_RUNNER_DESCRIPTION}")"
 [ -n "${EDP_RUNNER_TOKEN}" ] || { echo "failed to create EDP runner token" >&2; exit 1; }
 
+echo "creating EDP customers project runner token"
+EDP_CUSTOMERS_RUNNER_TOKEN="$(create_project_runner_token "${EDP_CUSTOMERS_PROJECT_ID}" "${EDP_CUSTOMERS_RUNNER_DESCRIPTION}")"
+[ -n "${EDP_CUSTOMERS_RUNNER_TOKEN}" ] || { echo "failed to create EDP customers runner token" >&2; exit 1; }
+
 cat > gitlab-runner/generated/projects.env <<EOF
 GITLAB_SDP_PROJECT_ID=${SDP_PROJECT_ID}
 GITLAB_SDP_PROJECT_PATH=${SDP_PROJECT_PATH}
@@ -416,11 +438,15 @@ GITLAB_SDP_RUNNER_TOKEN=${SDP_RUNNER_TOKEN}
 GITLAB_EDP_PROJECT_ID=${EDP_PROJECT_ID}
 GITLAB_EDP_PROJECT_PATH=${EDP_PROJECT_PATH}
 GITLAB_EDP_RUNNER_TOKEN=${EDP_RUNNER_TOKEN}
+GITLAB_EDP_CUSTOMERS_PROJECT_ID=${EDP_CUSTOMERS_PROJECT_ID}
+GITLAB_EDP_CUSTOMERS_PROJECT_PATH=${EDP_CUSTOMERS_PROJECT_PATH}
+GITLAB_EDP_CUSTOMERS_RUNNER_TOKEN=${EDP_CUSTOMERS_RUNNER_TOKEN}
 EOF
 
 render_runner_config \
   "${SDP_RUNNER_DESCRIPTION}" "${SDP_RUNNER_TOKEN}" \
-  "${EDP_RUNNER_DESCRIPTION}" "${EDP_RUNNER_TOKEN}"
+  "${EDP_RUNNER_DESCRIPTION}" "${EDP_RUNNER_TOKEN}" \
+  "${EDP_CUSTOMERS_RUNNER_DESCRIPTION}" "${EDP_CUSTOMERS_RUNNER_TOKEN}"
 
 docker compose up -d gitlab-branch-provisioner
 docker compose restart gitlab-branch-provisioner
@@ -438,6 +464,10 @@ echo "configuring EDP GitLab branch webhook"
 configure_project_merge_policy "${EDP_PROJECT_ID}"
 ensure_project_platform_webhook "${EDP_PROJECT_ID}" "${branch_hook_url}"
 
+echo "configuring EDP customers GitLab branch webhook"
+configure_project_merge_policy "${EDP_CUSTOMERS_PROJECT_ID}"
+ensure_project_platform_webhook "${EDP_CUSTOMERS_PROJECT_ID}" "${branch_hook_url}"
+
 docker compose up -d gitlab-fargate-runner
 docker compose restart gitlab-fargate-runner
 
@@ -451,6 +481,9 @@ fi
 if [ "${EDP_PROJECT_STATUS:-existing}" = "created" ]; then
   publish_args+=(--init-edp-history)
 fi
+if [ "${EDP_CUSTOMERS_PROJECT_STATUS:-existing}" = "created" ]; then
+  publish_args+=(--init-edp-customers-history)
+fi
 
 if [ "${#publish_args[@]}" -gt 0 ]; then
   ./scripts/publish-platform-repos.sh --skip-variable-sync "${publish_args[@]}"
@@ -461,6 +494,7 @@ fi
 echo "gitlab bootstrap complete"
 echo "SDP project id: ${SDP_PROJECT_ID}"
 echo "EDP project id: ${EDP_PROJECT_ID}"
+echo "EDP customers project id: ${EDP_CUSTOMERS_PROJECT_ID}"
 echo "runner config: gitlab-runner/generated/config.toml"
 echo "bootstrap pat: gitlab-runner/generated/bootstrap.env"
 echo "project metadata: gitlab-runner/generated/projects.env"

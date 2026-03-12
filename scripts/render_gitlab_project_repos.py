@@ -71,7 +71,7 @@ def sdp_ci_yaml() -> str:
     return dedent(
         """\
         workflow:
-          name: SDP Promotion
+          name: Source Promotion
           rules:
             - if: '$CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH != $CI_DEFAULT_BRANCH && $CI_COMMIT_BEFORE_SHA == "0000000000000000000000000000000000000000"'
               when: never
@@ -505,6 +505,20 @@ def edp_ci_yaml() -> str:
     )
 
 
+def edp_customers_ci_yaml() -> str:
+    return (
+        edp_ci_yaml()
+        .replace("EDP Promotion", "EDP Customers Promotion")
+        .replace("./ci/scripts/verify-edp-promotion.sh", "./ci/scripts/verify-edp-customers-promotion.sh")
+        .replace("./ci/scripts/deploy-edp-dev.sh", "./ci/scripts/deploy-edp-customers-dev.sh")
+        .replace("./ci/scripts/deploy-edp-prd.sh", "./ci/scripts/deploy-edp-customers-prd.sh")
+        .replace("name: DEV/EDP", "name: DEV/EDP_CUSTOMERS")
+        .replace("name: PRD/EDP", "name: PRD/EDP_CUSTOMERS")
+        .replace("resource_group: edp-dev", "resource_group: edp-customers-dev")
+        .replace("resource_group: edp-prd", "resource_group: edp-customers-prd")
+    )
+
+
 def sdp_compose_yaml() -> str:
     return dedent(
         """\
@@ -562,12 +576,15 @@ def sdp_compose_yaml() -> str:
           SNOWFLAKE_SDP_IN_SCHEMA: ${SNOWFLAKE_SDP_IN_SCHEMA}
           SNOWFLAKE_SDP_CORE_SCHEMA: ${SNOWFLAKE_SDP_CORE_SCHEMA}
           SNOWFLAKE_SDP_ACC_SCHEMA: ${SNOWFLAKE_SDP_ACC_SCHEMA}
-          SNOWFLAKE_SDP_DBT_PROJECT: ${SNOWFLAKE_SDP_DBT_PROJECT:-DEV_DBT_PROJECT_SDP_ORDERS}
+          SNOWFLAKE_SDP_CUSTOMERS_DATABASE: ${SNOWFLAKE_SDP_CUSTOMERS_DATABASE}
+          SNOWFLAKE_SDP_DBT_PROJECT: ${SNOWFLAKE_SDP_DBT_PROJECT:-DEV_DBT_PROJECT_SOURCE_FINNOVA}
           SNOWFLAKE_EDP_DATABASE: ${SNOWFLAKE_EDP_DATABASE}
+          SNOWFLAKE_EDP_CUSTOMERS_DATABASE: ${SNOWFLAKE_EDP_CUSTOMERS_DATABASE}
           SNOWFLAKE_EDP_IN_SCHEMA: ${SNOWFLAKE_EDP_IN_SCHEMA}
           SNOWFLAKE_EDP_CORE_SCHEMA: ${SNOWFLAKE_EDP_CORE_SCHEMA}
           SNOWFLAKE_EDP_ACC_SCHEMA: ${SNOWFLAKE_EDP_ACC_SCHEMA}
           SNOWFLAKE_EDP_DBT_PROJECT: ${SNOWFLAKE_EDP_DBT_PROJECT:-DEV_DBT_PROJECT_EDP_ORDERS}
+          SNOWFLAKE_EDP_CUSTOMERS_DBT_PROJECT: ${SNOWFLAKE_EDP_CUSTOMERS_DBT_PROJECT:-DEV_DBT_PROJECT_EDP_CUSTOMERS}
           SNOWFLAKE_CATALOG_INTEGRATION: ${SNOWFLAKE_CATALOG_INTEGRATION}
           SNOWFLAKE_CLONE_SCHEMA: ${SNOWFLAKE_CLONE_SCHEMA}
           SNOWFLAKE_LOCAL_RAW_SYNC: ${SNOWFLAKE_LOCAL_RAW_SYNC}
@@ -835,12 +852,15 @@ def edp_compose_yaml() -> str:
               SNOWFLAKE_SDP_IN_SCHEMA: ${SNOWFLAKE_SDP_IN_SCHEMA}
               SNOWFLAKE_SDP_CORE_SCHEMA: ${SNOWFLAKE_SDP_CORE_SCHEMA}
               SNOWFLAKE_SDP_ACC_SCHEMA: ${SNOWFLAKE_SDP_ACC_SCHEMA}
-              SNOWFLAKE_SDP_DBT_PROJECT: ${SNOWFLAKE_SDP_DBT_PROJECT:-DEV_DBT_PROJECT_SDP_ORDERS}
-              SNOWFLAKE_EDP_DATABASE: ${SNOWFLAKE_EDP_DATABASE}
-              SNOWFLAKE_EDP_IN_SCHEMA: ${SNOWFLAKE_EDP_IN_SCHEMA}
-              SNOWFLAKE_EDP_CORE_SCHEMA: ${SNOWFLAKE_EDP_CORE_SCHEMA}
-              SNOWFLAKE_EDP_ACC_SCHEMA: ${SNOWFLAKE_EDP_ACC_SCHEMA}
-              SNOWFLAKE_EDP_DBT_PROJECT: ${SNOWFLAKE_EDP_DBT_PROJECT:-DEV_DBT_PROJECT_EDP_ORDERS}
+          SNOWFLAKE_SDP_CUSTOMERS_DATABASE: ${SNOWFLAKE_SDP_CUSTOMERS_DATABASE}
+          SNOWFLAKE_SDP_DBT_PROJECT: ${SNOWFLAKE_SDP_DBT_PROJECT:-DEV_DBT_PROJECT_SOURCE_FINNOVA}
+          SNOWFLAKE_EDP_DATABASE: ${SNOWFLAKE_EDP_DATABASE}
+          SNOWFLAKE_EDP_CUSTOMERS_DATABASE: ${SNOWFLAKE_EDP_CUSTOMERS_DATABASE}
+          SNOWFLAKE_EDP_IN_SCHEMA: ${SNOWFLAKE_EDP_IN_SCHEMA}
+          SNOWFLAKE_EDP_CORE_SCHEMA: ${SNOWFLAKE_EDP_CORE_SCHEMA}
+          SNOWFLAKE_EDP_ACC_SCHEMA: ${SNOWFLAKE_EDP_ACC_SCHEMA}
+          SNOWFLAKE_EDP_DBT_PROJECT: ${SNOWFLAKE_EDP_DBT_PROJECT:-DEV_DBT_PROJECT_EDP_ORDERS}
+          SNOWFLAKE_EDP_CUSTOMERS_DBT_PROJECT: ${SNOWFLAKE_EDP_CUSTOMERS_DBT_PROJECT:-DEV_DBT_PROJECT_EDP_CUSTOMERS}
               SNOWFLAKE_CLONE_SCHEMA: ${SNOWFLAKE_CLONE_SCHEMA}
               SNOW_DBT_TARGET_NAME: ${SNOW_DBT_TARGET_NAME:-dev}
               DBT_THREADS: ${DBT_THREADS}
@@ -898,8 +918,6 @@ def render_sdp_repo(project_path: str) -> None:
         "scripts/load-source-sample-data.sh",
         "scripts/test-airflow-dag.sh",
         "scripts/deploy-airflow-dag.sh",
-        "scripts/deploy-airflow-dev-dag.sh",
-        "scripts/deploy-airflow-prd-dag.sh",
         "scripts/deploy-snowflake-dbt-project.sh",
         "scripts/execute-snowflake-dbt-project.sh",
         "scripts/drop-snowflake-dbt-project.sh",
@@ -916,6 +934,7 @@ def render_sdp_repo(project_path: str) -> None:
         "dbt/requirements.txt",
         "dbt/macros",
         "dbt/scripts/apply_sql.py",
+        "dbt/scripts/ensure_target_databases.py",
         "dbt/scripts/manage_ci_clones.py",
         "dbt/scripts/snow_dbt_cli.py",
     ):
@@ -925,8 +944,8 @@ def render_sdp_repo(project_path: str) -> None:
     copy_path("snowflake/sql/01_snowflake_foundation.sql.tpl", repo_dir, "ci/snowflake/sql/01_snowflake_foundation.sql.tpl")
     copy_path("snowflake/data_products.json", repo_dir, "ci/snowflake/data_products.json")
 
-    copy_path("dbt/projects/proj_sdp_orders/dbt_project.yml", repo_dir, "dbt/dbt_project.yml")
-    copy_path("dbt/projects/proj_sdp_orders/models", repo_dir, "dbt/models")
+    copy_path("dbt/projects/proj_source_finnova/dbt_project.yml", repo_dir, "dbt/dbt_project.yml")
+    copy_path("dbt/projects/proj_source_finnova/models", repo_dir, "dbt/models")
 
     write_file(repo_dir / "compose.yaml", sdp_compose_yaml())
     write_file(repo_dir / "compose.ci.yaml", sdp_compose_ci_yaml())
@@ -938,13 +957,14 @@ def render_sdp_repo(project_path: str) -> None:
             project_path,
             dedent(
                 """\
-                This is the Source Data Product repository.
+                This is the source-system repository for Finnova.
 
                 Managed artifacts:
 
                 - Airflow DAG for PostgreSQL -> MinIO/Iceberg ingestion
                 - dlt ingestion runtime code
-                - SDP dbt project for Snowflake `INBOUND`, `CORE`, and `ACCESS`, executed natively in Snowflake
+                - One combined source dbt project for Snowflake `INBOUND`, `CORE`, and `ACCESS`, executed natively in Snowflake
+                - Two SDPs inside the same repository: `orders` and `customers`
                 - `ci/scripts/` contains only CI helper scripts
                 - `ci/` contains runner-only config and Snowflake foundation metadata
 
@@ -967,7 +987,7 @@ def render_sdp_repo(project_path: str) -> None:
                 - Opening a merge request creates or reuses one MR-scoped zero-copy clone plus one MR-scoped MinIO/Iceberg namespace, and MR pipelines validate the candidate there in detail.
                 - MR-scoped zero-copy environments stay in place while the merge request stays open and are destroyed automatically when the merge request is merged or closed.
                 - A merge commit into `main` triggers the CD part of the same pipeline family: DEV deploy runs automatically, then the committer can approve the PRD deployment gate.
-                - PRD deployment runs in the same post-merge pipeline after the approval gate and deploys to shared `PRD_` targets such as `PRD_local_platform_ingest` and `PRD_DB_SDP_ORDERS`.
+                - PRD deployment runs in the same post-merge pipeline after the approval gate and deploys to shared `PRD_` targets such as `PRD_local_platform_ingest`, `PRD_DB_SDP_ORDERS`, and `PRD_DB_SDP_CUSTOMERS`.
                 - Branch environments are preserved after the pipeline, can be destroyed explicitly with the manual `destroy_sdp_branch_sandbox` job, and are also destroyed automatically when the GitLab branch is deleted.
                 """
             ),
@@ -1003,6 +1023,7 @@ def render_edp_repo(project_path: str) -> None:
         "dbt/requirements.txt",
         "dbt/macros",
         "dbt/scripts/apply_sql.py",
+        "dbt/scripts/ensure_target_databases.py",
         "dbt/scripts/manage_ci_clones.py",
         "dbt/scripts/snow_dbt_cli.py",
         "dbt/scripts/zero_copy_clone_check.py",
@@ -1064,18 +1085,97 @@ def render_edp_repo(project_path: str) -> None:
     )
 
 
-def main() -> int:
-    sdp_project_path = env("GITLAB_SDP_PROJECT_PATH", "proj_sdp_orders")
-    edp_project_path = env("GITLAB_EDP_PROJECT_PATH", "proj_edp_orders")
+def render_edp_customers_repo(project_path: str) -> None:
+    repo_dir = GENERATED_ROOT / project_path
+    reset_repo(repo_dir)
 
-    if sdp_project_path == edp_project_path:
-        raise SystemExit("GITLAB_SDP_PROJECT_PATH and GITLAB_EDP_PROJECT_PATH must be different")
+    copy_path(".dockerignore", repo_dir)
+    copy_path(".env.example", repo_dir, "ci/.env.example")
+
+    for relative_path in (
+        "scripts/common.sh",
+        "scripts/ensure-snowflake-foundation.sh",
+        "scripts/prepare-ci-sandbox.sh",
+        "scripts/cleanup-ci-sandbox.sh",
+        "scripts/require-approver-match-commit.sh",
+        "scripts/deploy-snowflake-dbt-project.sh",
+        "scripts/execute-snowflake-dbt-project.sh",
+        "scripts/drop-snowflake-dbt-project.sh",
+        "scripts/deploy-edp-customers-dev.sh",
+        "scripts/deploy-edp-customers-prd.sh",
+        "scripts/verify-edp-customers-promotion.sh",
+    ):
+        copy_path(relative_path, repo_dir, f"ci/{relative_path}")
+
+    for relative_path in (
+        "dbt/.sqlfluff",
+        "dbt/Dockerfile",
+        "dbt/requirements.txt",
+        "dbt/macros",
+        "dbt/scripts/apply_sql.py",
+        "dbt/scripts/ensure_target_databases.py",
+        "dbt/scripts/manage_ci_clones.py",
+        "dbt/scripts/snow_dbt_cli.py",
+        "dbt/scripts/zero_copy_clone_check.py",
+    ):
+        copy_path(relative_path, repo_dir)
+    copy_path("dbt/profiles/profiles.yml", repo_dir, "dbt/profiles/profiles.yml")
+
+    copy_path("snowflake/sql/01_snowflake_foundation.sql.tpl", repo_dir, "ci/snowflake/sql/01_snowflake_foundation.sql.tpl")
+    copy_path("snowflake/data_products.json", repo_dir, "ci/snowflake/data_products.json")
+
+    copy_path("dbt/projects/proj_edp_customers/dbt_project.yml", repo_dir, "dbt/dbt_project.yml")
+    copy_path("dbt/projects/proj_edp_customers/models", repo_dir, "dbt/models")
+
+    write_file(repo_dir / "compose.yaml", edp_compose_yaml())
+    write_file(repo_dir / "compose.ci.yaml", edp_compose_ci_yaml())
+    write_file(repo_dir / ".gitignore", shared_gitignore())
+    write_file(repo_dir / ".gitlab-ci.yml", edp_customers_ci_yaml())
+    write_file(
+        repo_dir / "README.md",
+        project_readme(
+            project_path,
+            dedent(
+                """\
+                This is the Enterprise Data Product repository for customers.
+
+                Managed artifacts:
+
+                - EDP customers dbt project for Snowflake `INBOUND`, `CORE`, and `ACCESS`, executed natively in Snowflake
+                - `ci/scripts/` contains only CI helper scripts
+                - `ci/` contains runner-only config and Snowflake foundation metadata
+
+                Upstream dependency:
+
+                - The published SDP customers `ACCESS` tables must already exist in Snowflake before the EDP promotion runs.
+
+                Main CI entrypoint:
+
+                - `./ci/scripts/prepare-ci-sandbox.sh edp artifacts/context/edp.env`
+                - `./ci/scripts/verify-edp-customers-promotion.sh`
+                - `./ci/scripts/deploy-edp-customers-dev.sh`
+                - `./ci/scripts/deploy-edp-customers-prd.sh`
+                """
+            ),
+        ),
+    )
+
+
+def main() -> int:
+    sdp_project_path = env("GITLAB_SDP_PROJECT_PATH", "proj_source_finnova")
+    edp_project_path = env("GITLAB_EDP_PROJECT_PATH", "proj_edp_orders")
+    edp_customers_project_path = env("GITLAB_EDP_CUSTOMERS_PROJECT_PATH", "proj_edp_customers")
+
+    if len({sdp_project_path, edp_project_path, edp_customers_project_path}) != 3:
+        raise SystemExit("GitLab source and EDP project paths must all be different")
 
     render_sdp_repo(sdp_project_path)
     render_edp_repo(edp_project_path)
+    render_edp_customers_repo(edp_customers_project_path)
 
-    print(f"rendered SDP project repo: {GENERATED_ROOT / sdp_project_path}")
-    print(f"rendered EDP project repo: {GENERATED_ROOT / edp_project_path}")
+    print(f"rendered source project repo: {GENERATED_ROOT / sdp_project_path}")
+    print(f"rendered EDP orders project repo: {GENERATED_ROOT / edp_project_path}")
+    print(f"rendered EDP customers project repo: {GENERATED_ROOT / edp_customers_project_path}")
     return 0
 
 

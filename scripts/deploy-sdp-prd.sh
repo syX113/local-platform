@@ -32,7 +32,7 @@ docker image inspect "${source_dbt_image}" >/dev/null 2>&1
 docker tag "${source_dlt_image}" "${DLT_RUNNER_IMAGE}"
 docker tag "${source_dbt_image}" "${DBT_RUNNER_IMAGE}"
 
-bash "${SCRIPT_DIR}/deploy-airflow-prd-dag.sh" | tee "${ARTIFACT_DIR}/deploy_airflow_prd.log"
+bash "${SCRIPT_DIR}/deploy-airflow-dag.sh" prd | tee "${ARTIFACT_DIR}/deploy_airflow_prd.log"
 
 airflow_prd_subdir="/opt/airflow/dags/deployed/${PRD_AIRFLOW_DAG_FILENAME}"
 bash "${SCRIPT_DIR}/verify-ingestion-promotion.sh" \

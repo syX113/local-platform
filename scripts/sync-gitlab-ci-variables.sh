@@ -15,7 +15,7 @@ fi
 load_env_preserving_existing "${ROOT_DIR}/gitlab-runner/generated/bootstrap.env"
 load_env_preserving_existing "${ROOT_DIR}/gitlab-runner/generated/projects.env"
 
-if [ -z "${GITLAB_BOOTSTRAP_PAT:-}" ] || { [ -z "${GITLAB_SDP_PROJECT_ID:-}" ] && [ -z "${GITLAB_EDP_PROJECT_ID:-}" ]; }; then
+if [ -z "${GITLAB_BOOTSTRAP_PAT:-}" ] || { [ -z "${GITLAB_SDP_PROJECT_ID:-}" ] && [ -z "${GITLAB_EDP_PROJECT_ID:-}" ] && [ -z "${GITLAB_EDP_CUSTOMERS_PROJECT_ID:-}" ]; }; then
   echo "GitLab bootstrap token or project ids are missing" >&2
   exit 1
 fi
@@ -88,10 +88,14 @@ ci_variable_keys=(
   SNOWFLAKE_ROLE
   SNOWFLAKE_WAREHOUSE
   SNOWFLAKE_SDP_DATABASE
+  SNOWFLAKE_SDP_ORDERS_DATABASE
+  SNOWFLAKE_SDP_CUSTOMERS_DATABASE
   SNOWFLAKE_SDP_IN_SCHEMA
   SNOWFLAKE_SDP_CORE_SCHEMA
   SNOWFLAKE_SDP_ACC_SCHEMA
   SNOWFLAKE_EDP_DATABASE
+  SNOWFLAKE_EDP_ORDERS_DATABASE
+  SNOWFLAKE_EDP_CUSTOMERS_DATABASE
   SNOWFLAKE_EDP_IN_SCHEMA
   SNOWFLAKE_EDP_CORE_SCHEMA
   SNOWFLAKE_EDP_ACC_SCHEMA
@@ -149,4 +153,9 @@ fi
 if [ -n "${GITLAB_EDP_PROJECT_ID:-}" ]; then
   sync_project_variables "${GITLAB_EDP_PROJECT_ID}"
   echo "Synced ${#ci_variable_keys[@]} GitLab CI/CD variables to EDP project ${GITLAB_EDP_PROJECT_ID}"
+fi
+
+if [ -n "${GITLAB_EDP_CUSTOMERS_PROJECT_ID:-}" ]; then
+  sync_project_variables "${GITLAB_EDP_CUSTOMERS_PROJECT_ID}"
+  echo "Synced ${#ci_variable_keys[@]} GitLab CI/CD variables to EDP customers project ${GITLAB_EDP_CUSTOMERS_PROJECT_ID}"
 fi

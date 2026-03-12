@@ -1,0 +1,35 @@
+name: proj_source_finnova
+version: 1.0.0
+config-version: 2
+profile: local_platform
+
+model-paths: ["models"]
+macro-paths: ["macros"]
+clean-targets:
+  - target
+  - dbt_packages
+
+on-run-start:
+  - "{{ ensure_target_database_and_schemas(env_var('SNOWFLAKE_SDP_DATABASE'), [env_var('SNOWFLAKE_SDP_IN_SCHEMA', 'INBOUND'), env_var('SNOWFLAKE_SDP_CORE_SCHEMA', 'CORE'), env_var('SNOWFLAKE_SDP_ACC_SCHEMA', 'ACCESS')]) }}"
+  - "{{ ensure_target_database_and_schemas(env_var('SNOWFLAKE_SDP_CUSTOMERS_DATABASE'), [env_var('SNOWFLAKE_SDP_IN_SCHEMA', 'INBOUND'), env_var('SNOWFLAKE_SDP_CORE_SCHEMA', 'CORE'), env_var('SNOWFLAKE_SDP_ACC_SCHEMA', 'ACCESS')]) }}"
+
+models:
+  proj_source_finnova:
+    orders:
+      core:
+        +database: "{{ env_var('SNOWFLAKE_SDP_DATABASE') }}"
+        +schema: "{{ env_var('SNOWFLAKE_SDP_CORE_SCHEMA', 'CORE') }}"
+        +materialized: table
+      access:
+        +database: "{{ env_var('SNOWFLAKE_SDP_DATABASE') }}"
+        +schema: "{{ env_var('SNOWFLAKE_SDP_ACC_SCHEMA', 'ACCESS') }}"
+        +materialized: table
+    customers:
+      core:
+        +database: "{{ env_var('SNOWFLAKE_SDP_CUSTOMERS_DATABASE') }}"
+        +schema: "{{ env_var('SNOWFLAKE_SDP_CORE_SCHEMA', 'CORE') }}"
+        +materialized: table
+      access:
+        +database: "{{ env_var('SNOWFLAKE_SDP_CUSTOMERS_DATABASE') }}"
+        +schema: "{{ env_var('SNOWFLAKE_SDP_ACC_SCHEMA', 'ACCESS') }}"
+        +materialized: table

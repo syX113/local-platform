@@ -49,3 +49,24 @@ SELECT
   o.order_created_at AS loaded_at
 FROM order_items AS oi
 JOIN orders AS o ON o.order_id = oi.order_id;
+
+CREATE OR REPLACE VIEW raw_customers_export AS
+SELECT
+  c.customer_code AS customer_id,
+  c.customer_name,
+  c.region,
+  c.segment,
+  COUNT(DISTINCT o.order_id)::INTEGER AS order_count,
+  COALESCE(ROUND(SUM(oi.quantity * oi.unit_price), 2), 0)::NUMERIC(12, 2) AS total_order_value,
+  MIN(o.order_created_at) AS first_order_at,
+  MAX(o.order_created_at) AS latest_order_at,
+  c.created_at AS customer_created_at
+FROM customers AS c
+LEFT JOIN orders AS o ON o.customer_id = c.customer_id
+LEFT JOIN order_items AS oi ON oi.order_id = o.order_id
+GROUP BY
+  c.customer_code,
+  c.customer_name,
+  c.region,
+  c.segment,
+  c.created_at;

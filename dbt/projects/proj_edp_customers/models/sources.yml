@@ -1,0 +1,36 @@
+version: 2
+
+sources:
+  - name: source_edp_customers_sdp_access
+    database: "{{ env_var('SNOWFLAKE_SDP_CUSTOMERS_DATABASE') }}"
+    schema: "{{ env_var('SNOWFLAKE_SDP_ACC_SCHEMA', 'ACCESS') }}"
+    tables:
+      - name: T_CUSTOMERS_ENTITY_GRAIN
+      - name: T_CUSTOMERS_REGION_GRAIN
+      - name: T_CUSTOMERS_SEGMENT_GRAIN
+
+models:
+  - name: model_edp_customers_core_dim_regions
+    columns:
+      - name: region_sk
+        tests:
+          - not_null
+          - unique
+  - name: model_edp_customers_core_dim_segments
+    columns:
+      - name: segment_sk
+        tests:
+          - not_null
+          - unique
+  - name: model_edp_customers_core_fct_customer_value_star
+    columns:
+      - name: customer_id
+        tests:
+          - not_null
+          - unique
+      - name: region_sk
+        tests:
+          - not_null
+      - name: segment_sk
+        tests:
+          - not_null

@@ -55,17 +55,19 @@ source_counts="$(
         (select count(*) from customers),
         (select count(*) from orders),
         (select count(*) from order_items),
+        (select count(*) from raw_customers_export),
         (select count(*) from raw_orders_export),
         (select count(*) from raw_order_items_export);
     "
 )"
 printf '%s\n' "${source_counts}" | tee "${ARTIFACT_DIR}/source_counts.csv"
 
-IFS=',' read -r customer_count order_count order_item_count raw_orders_count raw_order_items_count <<<"${source_counts}"
+IFS=',' read -r customer_count order_count order_item_count raw_customers_count raw_orders_count raw_order_items_count <<<"${source_counts}"
 
 [ "${customer_count}" = "12" ] || { echo "expected 12 customers, got ${customer_count}" >&2; exit 1; }
 [ "${order_count}" = "30" ] || { echo "expected 30 orders, got ${order_count}" >&2; exit 1; }
 [ "${order_item_count}" = "60" ] || { echo "expected 60 order items, got ${order_item_count}" >&2; exit 1; }
+[ "${raw_customers_count}" = "12" ] || { echo "expected 12 raw customers export rows, got ${raw_customers_count}" >&2; exit 1; }
 [ "${raw_orders_count}" = "30" ] || { echo "expected 30 raw orders export rows, got ${raw_orders_count}" >&2; exit 1; }
 [ "${raw_order_items_count}" = "60" ] || { echo "expected 60 raw order item export rows, got ${raw_order_items_count}" >&2; exit 1; }
 
@@ -82,7 +84,8 @@ catalog_rows="$(
 printf '%s\n' "${catalog_rows}" | tee "${ARTIFACT_DIR}/iceberg_catalog.csv"
 
 catalog_count="$(printf '%s\n' "${catalog_rows}" | sed '/^$/d' | wc -l | tr -d ' ')"
-[ "${catalog_count}" = "2" ] || { echo "expected 2 Iceberg catalog entries, got ${catalog_count}" >&2; exit 1; }
+[ "${catalog_count}" = "3" ] || { echo "expected 3 Iceberg catalog entries, got ${catalog_count}" >&2; exit 1; }
+printf '%s\n' "${catalog_rows}" | grep -q "^${iceberg_catalog_name},${catalog_namespace},raw_customers," || { echo "missing ${iceberg_catalog_name}.${catalog_namespace}.raw_customers catalog entry" >&2; exit 1; }
 printf '%s\n' "${catalog_rows}" | grep -q "^${iceberg_catalog_name},${catalog_namespace},raw_order_items," || { echo "missing ${iceberg_catalog_name}.${catalog_namespace}.raw_order_items catalog entry" >&2; exit 1; }
 printf '%s\n' "${catalog_rows}" | grep -q "^${iceberg_catalog_name},${catalog_namespace},raw_orders," || { echo "missing ${iceberg_catalog_name}.${catalog_namespace}.raw_orders catalog entry" >&2; exit 1; }
 
@@ -116,10 +119,10 @@ keys = [obj["Key"] for obj in objects]
 metadata_keys = sorted(key for key in keys if "/metadata/" in key and key.endswith(".metadata.json"))
 parquet_keys = sorted(key for key in keys if key.endswith(".parquet"))
 
-if len(metadata_keys) < 4:
-    raise SystemExit(f"expected at least 4 metadata files, found {len(metadata_keys)}")
-if len(parquet_keys) < 2:
-    raise SystemExit(f"expected at least 2 parquet data files, found {len(parquet_keys)}")
+if len(metadata_keys) < 6:
+    raise SystemExit(f"expected at least 6 metadata files, found {len(metadata_keys)}")
+if len(parquet_keys) < 3:
+    raise SystemExit(f"expected at least 3 parquet data files, found {len(parquet_keys)}")
 
 print(f"metadata_files={len(metadata_keys)}")
 print(f"parquet_files_total={len(parquet_keys)}")
@@ -148,7 +151,7 @@ for key in parquet_keys:
     if current is None or last_modified > current[1]:
         latest_parquet_keys[table_name] = (key, last_modified)
 
-expected = {"raw_orders": 30, "raw_order_items": 60}
+expected = {"raw_orders": 30, "raw_order_items": 60, "raw_customers": 12}
 for table_name, expected_rows in expected.items():
     latest_key = latest_parquet_keys.get(table_name)
     if latest_key is None:
@@ -170,6 +173,7 @@ Ingestion promotion succeeded.
 source.customers=${customer_count}
 source.orders=${order_count}
 source.order_items=${order_item_count}
+source.raw_customers_export=${raw_customers_count}
 source.raw_orders_export=${raw_orders_count}
 source.raw_order_items_export=${raw_order_items_count}
 iceberg.catalog_entries=${catalog_count}

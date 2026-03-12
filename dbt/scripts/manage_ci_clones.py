@@ -23,6 +23,7 @@ class ClonePair:
     key: str
     source_database: str
     target_database: str
+    source_missing_behavior: str = "error"
 
 
 def ident(name: str) -> str:
@@ -137,7 +138,14 @@ def clone_pairs_from_registry() -> list[ClonePair]:
         if not target_database or target_database in seen_targets:
             continue
         seen_targets.add(target_database)
-        pairs.append(ClonePair(key=key, source_database=source_database, target_database=target_database))
+        pairs.append(
+            ClonePair(
+                key=key,
+                source_database=source_database,
+                target_database=target_database,
+                source_missing_behavior=str(product.get("source_missing_behavior", "error")).strip() or "error",
+            )
+        )
     return pairs
 
 
@@ -214,6 +222,13 @@ def clone_database(cursor, source_name: str, target_name: str) -> None:
     cursor.execute(f"create or replace transient database {ident(target_name)} clone {ident(source_name)}")
 
 
+def create_empty_database(cursor, target_name: str, *, replace: bool) -> None:
+    if replace:
+        cursor.execute(f"create or replace transient database {ident(target_name)}")
+    elif not database_exists(cursor, target_name):
+        cursor.execute(f"create transient database {ident(target_name)}")
+
+
 def database_exists(cursor, target_name: str) -> bool:
     cursor.execute(f"show databases like '{target_name}'")
     return cursor.fetchone() is not None
@@ -240,6 +255,31 @@ def ensure_database_clone(cursor, source_name: str, target_name: str) -> bool:
     return True
 
 
+def ensure_pair(cursor, pair: ClonePair, *, replace: bool) -> tuple[bool, str]:
+    if pair.source_database == pair.target_database:
+        return False, "same"
+
+    source_exists = database_exists(cursor, pair.source_database)
+    if source_exists:
+        if replace:
+            clone_database(cursor, pair.source_database, pair.target_database)
+            return True, "cloned"
+        created = ensure_database_clone(cursor, pair.source_database, pair.target_database)
+        return created, "cloned" if created else "reused"
+
+    if pair.source_missing_behavior == "create_empty":
+        target_exists = database_exists(cursor, pair.target_database)
+        create_empty_database(cursor, pair.target_database, replace=replace)
+        if replace:
+            return True, "created_empty"
+        return (not target_exists), ("created_empty" if not target_exists else "reused_empty")
+
+    raise SystemExit(
+        f"base database for clone target {pair.key} is missing: {pair.source_database}. "
+        "This product must be deployed before clone-based CI can run."
+    )
+
+
 def drop_database(cursor, target_name: str) -> None:
     cursor.execute(f"drop database if exists {ident(target_name)}")
 
@@ -262,29 +302,33 @@ def list_ci_clone_databases(cursor) -> list[str]:
 
 def apply_replace() -> None:
     pairs = clone_pairs()
+    applied_pairs: list[tuple[ClonePair, str]] = []
     connection = connect()
     try:
         with connection.cursor() as cursor:
             for pair in pairs:
-                clone_database(cursor, pair.source_database, pair.target_database)
+                _, status = ensure_pair(cursor, pair, replace=True)
+                applied_pairs.append((pair, status))
         connection.commit()
     finally:
         connection.close()
 
-    print("created clones " + " ".join(f"{pair.key}={pair.target_database}" for pair in pairs))
+    print(
+        "created clones "
+        + " ".join(f"{pair.key}={pair.target_database}({status})" for pair, status in applied_pairs)
+    )
 
 
 def apply_ensure() -> None:
     pairs = clone_pairs()
-    created_pairs: list[tuple[ClonePair, bool]] = []
+    created_pairs: list[tuple[ClonePair, bool, str]] = []
 
     connection = connect()
     try:
         with connection.cursor() as cursor:
             for pair in pairs:
-                created_pairs.append(
-                    (pair, ensure_database_clone(cursor, pair.source_database, pair.target_database))
-                )
+                created, status = ensure_pair(cursor, pair, replace=False)
+                created_pairs.append((pair, created, status))
         connection.commit()
     finally:
         connection.close()
@@ -292,8 +336,8 @@ def apply_ensure() -> None:
     print(
         "ensured clones "
         + " ".join(
-            f"{pair.key}={pair.target_database}({'created' if created else 'reused'})"
-            for pair, created in created_pairs
+            f"{pair.key}={pair.target_database}({status if created else ('reused' if status == 'reused' else status)})"
+            for pair, created, status in created_pairs
         )
     )
 

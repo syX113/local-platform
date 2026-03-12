@@ -8,10 +8,11 @@ The default sample flow is:
 
 `dlt` always runs in an external runtime container. `dbt` is deployed as a Snowflake dbt project object and executed natively inside Snowflake. The local `dbt-executor` container exists only to package and trigger Snowflake-native `dbt parse`, `dbt run`, `dbt test`, and `dbt build` through Snowflake CLI.
 
-The platform repo is the control plane. During GitLab bootstrap it renders and pushes two separate GitLab project repos:
+The platform repo is the control plane. During GitLab bootstrap it renders and pushes three separate GitLab project repos:
 
-- `proj_sdp_orders`: owns the Airflow DAG, the dlt ingestion code, and the SDP dbt project
-- `proj_edp_orders`: owns the EDP dbt project
+- `proj_source_finnova`: owns the Airflow DAG, the dlt ingestion code, and both SDP dbt projects for the Finnova source
+- `proj_edp_orders`: owns the orders EDP dbt project
+- `proj_edp_customers`: owns the customers EDP dbt project
 
 ## Services
 
@@ -26,9 +27,9 @@ The platform repo is the control plane. During GitLab bootstrap it renders and p
 
 ## Sample Data Products
 
-The repo ships with two sample Snowflake data products built by dbt.
+The repo ships with four sample Snowflake data products built by dbt.
 
-### SDP
+### SDP Orders
 
 Database: `DB_SDP_ORDERS`
 
@@ -57,7 +58,27 @@ Meaning:
 - `CORE` contains basic cleanup and shaping.
 - `ACCESS` publishes reusable order-grain and customer-grain outputs for downstream products.
 
-### EDP
+### SDP Customers
+
+Database: `DB_SDP_CUSTOMERS`
+
+Schemas:
+
+- `INBOUND`
+- `CORE`
+- `ACCESS`
+
+Objects:
+
+- `INBOUND.EXT_CUSTOMERS_RAW`
+- `CORE.T_CUSTOMERS_CLEAN`
+- `CORE.T_CUSTOMER_REGION_SUMMARY`
+- `CORE.T_CUSTOMER_SEGMENT_SUMMARY`
+- `ACCESS.T_CUSTOMERS_ENTITY_GRAIN`
+- `ACCESS.T_CUSTOMERS_REGION_GRAIN`
+- `ACCESS.T_CUSTOMERS_SEGMENT_GRAIN`
+
+### EDP Orders
 
 Database target after first EDP deployment: `DB_EDP_ORDERS`
 
@@ -88,9 +109,34 @@ Meaning:
 - `CORE` contains the business model: first 3NF tables, then the star schema.
 - `ACCESS` publishes business-facing outputs derived from the star schema.
 
+### EDP Customers
+
+Database target after first EDP deployment: `DB_EDP_CUSTOMERS`
+
+Schemas:
+
+- `INBOUND`
+- `CORE`
+- `ACCESS`
+
+Objects:
+
+- `INBOUND.V_IN_CUSTOMERS_ENTITY_GRAIN`
+- `INBOUND.V_IN_CUSTOMERS_REGION_GRAIN`
+- `INBOUND.V_IN_CUSTOMERS_SEGMENT_GRAIN`
+- `CORE.T_CUSTOMERS_3NF`
+- `CORE.T_REGIONS_3NF`
+- `CORE.T_SEGMENTS_3NF`
+- `CORE.DIM_REGIONS`
+- `CORE.DIM_SEGMENTS`
+- `CORE.FCT_CUSTOMER_VALUE_STAR`
+- `ACCESS.T_CUSTOMERS_ONLY`
+- `ACCESS.T_CUSTOMERS_COMPLETE`
+- `ACCESS.T_CUSTOMERS_HIGH_VALUE`
+
 ## dbt Naming
 
-The dbt nodes follow the `model_sdp_orders_*` and `model_edp_orders_*` naming pattern.
+The dbt nodes follow the `model_sdp_*` and `model_edp_*` naming pattern.
 
 Examples:
 
@@ -98,6 +144,8 @@ Examples:
 - `model_sdp_orders_access_orders_customer_grain`
 - `model_edp_orders_core_fct_order_revenue_star`
 - `model_edp_orders_access_orders_complete`
+- `model_sdp_customers_access_customers_entity_grain`
+- `model_edp_customers_access_customers_complete`
 
 ## Full Reset And Bootstrap
 
@@ -295,9 +343,11 @@ Current DEV targets after a fresh initialization:
 - MinIO/S3 prefix: `landing/dev`
 - resulting Iceberg layout: `landing/dev/postgres/{table_name}/...`
 - Snowflake SDP database: `DB_SDP_ORDERS`
-- Snowflake EDP database target: `DB_EDP_ORDERS` (not created until the EDP CI/CD flow deploys it)
-- Snowflake dbt project objects after initialization: `DEV_DBT_PROJECT_SDP_ORDERS`
-- Snowflake EDP dbt project objects are deployed on demand by the EDP CI/CD flow, not by the base initialization
+- Snowflake SDP customers database: `DB_SDP_CUSTOMERS`
+- Snowflake EDP orders database target: `DB_EDP_ORDERS` (not materialized after initialization; branch and MR CI use isolated suffixed databases)
+- Snowflake EDP customers database target after initialization: `DB_EDP_CUSTOMERS`
+- Snowflake dbt project objects after initialization: `DEV_DBT_PROJECT_SOURCE_FINNOVA`, `DEV_DBT_PROJECT_EDP_ORDERS`, `DEV_DBT_PROJECT_EDP_CUSTOMERS`
+- Only the EDP customers database is materialized during initialization; the EDP orders dbt project is deployed but its DEV database is created only by CD deployment or isolated branch/MR test runs
 - DEV SDP runtime image prefix: `local-platform-dev-sdp`
 - DEV EDP runtime image prefix: `local-platform-dev-edp`
 
@@ -309,9 +359,12 @@ Current PRD targets:
 - Iceberg catalog name: `prd`
 - MinIO/S3 prefix: `landing/prd`
 - resulting Iceberg layout: `landing/prd/postgres/{table_name}/...`
-- Snowflake SDP database target: `PRD_DB_SDP_ORDERS` (created only by the PRD deployment flow)
-- Snowflake EDP database target: `PRD_DB_EDP_ORDERS` (created only by the PRD deployment flow)
-- Snowflake dbt project objects: `PRD_DBT_PROJECT_SDP_ORDERS`, `PRD_DBT_PROJECT_EDP_ORDERS` (both created on demand by PRD deployment)
+- Snowflake SDP database target after initialization: `PRD_DB_SDP_ORDERS`
+- Snowflake SDP customers database target after initialization: `PRD_DB_SDP_CUSTOMERS`
+- Snowflake EDP orders database target: `PRD_DB_EDP_ORDERS` (not materialized after initialization; PRD database is created only by PRD CD deployment)
+- Snowflake EDP customers database target after initialization: `PRD_DB_EDP_CUSTOMERS`
+- Snowflake dbt project objects after initialization: `PRD_DBT_PROJECT_SOURCE_FINNOVA`, `PRD_DBT_PROJECT_EDP_ORDERS`, `PRD_DBT_PROJECT_EDP_CUSTOMERS`
+- Only the EDP customers PRD database is materialized during initialization; the EDP orders PRD dbt project is deployed but its PRD database is created only by PRD CD deployment
 - PRD SDP runtime image prefix: `local-platform-prd-sdp`
 - PRD EDP runtime image prefix: `local-platform-prd-edp`
 
@@ -416,7 +469,7 @@ The Unix/macOS commands are the `.sh` entrypoints under `scripts/`. Windows host
   Finishes the GitLab setup: creates or resolves the SDP and EDP projects, configures branch webhooks, registers runners, publishes the rendered repos, and syncs GitLab CI variables.
   On a fresh bootstrap where the GitLab projects are newly created, each hosted repo is initialized with a single `main` commit named `init-artifacts` so users start from a clean history.
 - `./scripts/bootstrap-snowflake-products.sh`
-  Drops lingering Snowflake CI clone databases, recreates the Snowflake foundation from scratch, reloads the raw inbound data, deploys and builds only the SDP dbt project, and verifies that EDP remains undeployed and empty until the EDP CI/CD flow promotes it.
+  Drops lingering Snowflake CI clone databases, recreates the Snowflake foundation from scratch, reloads the raw inbound data, deploys and builds the DEV and PRD SDP dbt projects, and verifies that EDP remains undeployed and empty until the EDP CI/CD flow promotes it.
 - `./scripts/cleanup-snowflake-ci-clones.sh`
   Drops all Snowflake CI clone databases for the registered data products, for example `DB_SDP_ORDERS_CI_CLO_*` and `DB_EDP_ORDERS_CI_CLO_*`, and purges Snowflake dbt project objects from the control schema.
 - `./scripts/print-setup-summary.sh`
@@ -428,7 +481,7 @@ The Unix/macOS commands are the `.sh` entrypoints under `scripts/`. Windows host
 - `pwsh ./scripts/windows/bootstrap-gitlab.ps1`
   Windows host equivalent of the GitLab bootstrap and repo publish flow.
 - `pwsh ./scripts/windows/bootstrap-snowflake-products.ps1`
-  Windows host equivalent of the Snowflake-only initialization flow with SDP deployed and EDP left undeployed.
+  Windows host equivalent of the Snowflake-only initialization flow with DEV and PRD SDP deployed and EDP left undeployed.
 - `pwsh ./scripts/windows/print-setup-summary.ps1`
   Windows host equivalent of the access summary output.
 
@@ -450,10 +503,8 @@ The Unix/macOS commands are the `.sh` entrypoints under `scripts/`. Windows host
   Validates the SDP Snowflake/dbt promotion path. It deploys the SDP Snowflake dbt project object and executes `parse`, `run`, and `test` inside Snowflake. Internal `--skip-foundation`, `--skip-raw-sync`, and `--skip-dbt` flags exist for bootstrap and CI reuse.
 - `./scripts/verify-edp-promotion.sh`
   Validates the EDP Snowflake/dbt promotion path. It deploys the EDP Snowflake dbt project object and executes `parse`, `run`, and `test` inside Snowflake. Internal `--skip-foundation` and `--skip-dbt` flags exist for bootstrap and CI reuse.
-- `./scripts/deploy-airflow-dev-dag.sh`
-  Deploys the DEV Airflow DAG wrapper into the shared Airflow service so the development ingestion pipeline is available as `DEV_local_platform_ingest`.
-- `./scripts/deploy-airflow-prd-dag.sh`
-  Deploys the PRD Airflow DAG wrapper into the shared Airflow service so the deployed ingestion pipeline is available as `PRD_local_platform_ingest`.
+- `./scripts/deploy-airflow-dag.sh dev|prd`
+  Deploys the selected Airflow DAG wrapper into the shared Airflow service so the ingestion pipeline is available as `DEV_local_platform_ingest` or `PRD_local_platform_ingest`.
 - `./scripts/deploy-snowflake-dbt-project.sh`
   Packages a dbt project, uploads it to the Snowflake control stage, and creates or replaces the target Snowflake dbt project object.
 - `./scripts/execute-snowflake-dbt-project.sh`
@@ -549,14 +600,15 @@ docker compose run --rm dbt-executor python /opt/platform/dbt/scripts/zero_copy_
 The local platform keeps a strict separation between the source repo and the hosted/platform GitLab repos.
 
 - source repo: this repository, with Docker assets, Airflow, dlt, dbt, bootstrap scripts, and render logic
-- platform repos: rendered working trees under [gitlab-projects/generated/proj_sdp_orders](/Users/taagiti2/Documents/01%20Projects/Valiant/repos/local-platform/gitlab-projects/generated/proj_sdp_orders) and [gitlab-projects/generated/proj_edp_orders](/Users/taagiti2/Documents/01%20Projects/Valiant/repos/local-platform/gitlab-projects/generated/proj_edp_orders)
+- platform repos: rendered working trees under [gitlab-projects/generated/proj_source_finnova](/Users/taagiti2/Documents/01%20Projects/Valiant/repos/local-platform/gitlab-projects/generated/proj_source_finnova), [gitlab-projects/generated/proj_edp_orders](/Users/taagiti2/Documents/01%20Projects/Valiant/repos/local-platform/gitlab-projects/generated/proj_edp_orders), and [gitlab-projects/generated/proj_edp_customers](/Users/taagiti2/Documents/01%20Projects/Valiant/repos/local-platform/gitlab-projects/generated/proj_edp_customers)
 
 Only the rendered platform repos are pushed to the hosted GitLab instance. The source repo itself is not bootstrapped into GitLab and `bootstrap-gitlab.sh` or `publish-platform-repos.sh` do not add or change a remote on the source repo root.
 
 The ownership split is:
 
-- `proj_sdp_orders`: promotes the Airflow DAG, dlt ingestion runtime, and the SDP dbt models
-- `proj_edp_orders`: promotes only the EDP dbt models that consume the SDP access layer
+- `proj_source_finnova`: promotes the Airflow DAG, dlt ingestion runtime, and both SDP dbt models for the Finnova source
+- `proj_edp_orders`: promotes only the orders EDP dbt models that consume the SDP access layer
+- `proj_edp_customers`: promotes only the customers EDP dbt models that consume the SDP access layer
 
 Each generated project ships its own `.gitlab-ci.yml` with isolated CI/CD verification:
 
@@ -590,7 +642,7 @@ Default-branch and PRD pipelines now include real deployment jobs:
 
 The expected GitLab operator flow is:
 
-1. Create a new branch in `proj_sdp_orders` or `proj_edp_orders`.
+1. Create a new branch in `proj_source_finnova`, `proj_edp_orders`, or `proj_edp_customers`.
 2. Wait for the platform webhook handler to create the isolated branch sandbox automatically.
 3. Push commits to that branch and rerun the branch CI pipeline as often as needed.
 4. Open a merge request. The platform creates an MR-scoped sandbox automatically and the MR pipeline validates the candidate there in detail.

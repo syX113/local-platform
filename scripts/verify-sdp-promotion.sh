@@ -48,6 +48,7 @@ required_vars=(
   SNOWFLAKE_ROLE
   SNOWFLAKE_WAREHOUSE
   SNOWFLAKE_SDP_DATABASE
+  SNOWFLAKE_SDP_CUSTOMERS_DATABASE
   SNOWFLAKE_SDP_IN_SCHEMA
   SNOWFLAKE_SDP_CORE_SCHEMA
   SNOWFLAKE_SDP_ACC_SCHEMA
@@ -95,6 +96,10 @@ queries = {
         f"select count(*) from {ident(os.environ['SNOWFLAKE_SDP_DATABASE'], os.environ['SNOWFLAKE_SDP_IN_SCHEMA'], 'EXT_ORDER_ITEMS_RAW')}",
         60,
     ),
+    "sdp_customers_ext_customers_raw": (
+        f"select count(*) from {ident(os.environ['SNOWFLAKE_SDP_CUSTOMERS_DATABASE'], os.environ['SNOWFLAKE_SDP_IN_SCHEMA'], 'EXT_CUSTOMERS_RAW')}",
+        12,
+    ),
 }
 
 connection = snowflake.connector.connect(
@@ -126,7 +131,7 @@ PY
 
 if [ "${skip_dbt}" != "true" ]; then
   bash "${SCRIPT_DIR}/deploy-snowflake-dbt-project.sh" \
-    proj_sdp_orders \
+    proj_source_finnova \
     "${SNOWFLAKE_SDP_DBT_PROJECT}" \
     "${SNOWFLAKE_SDP_DATABASE}" \
     "${SNOWFLAKE_SDP_CORE_SCHEMA}" \
@@ -184,6 +189,34 @@ queries = {
         f"select count(*) from {ident(os.environ['SNOWFLAKE_SDP_DATABASE'], os.environ['SNOWFLAKE_SDP_ACC_SCHEMA'], 'T_ORDER_LINES_ORDER_GRAIN')}",
         60,
     ),
+    "sdp_customers_ext_customers_raw": (
+        f"select count(*) from {ident(os.environ['SNOWFLAKE_SDP_CUSTOMERS_DATABASE'], os.environ['SNOWFLAKE_SDP_IN_SCHEMA'], 'EXT_CUSTOMERS_RAW')}",
+        12,
+    ),
+    "sdp_customers_core_customers_clean": (
+        f"select count(*) from {ident(os.environ['SNOWFLAKE_SDP_CUSTOMERS_DATABASE'], os.environ['SNOWFLAKE_SDP_CORE_SCHEMA'], 'T_CUSTOMERS_CLEAN')}",
+        12,
+    ),
+    "sdp_customers_core_customer_region_summary": (
+        f"select count(*) from {ident(os.environ['SNOWFLAKE_SDP_CUSTOMERS_DATABASE'], os.environ['SNOWFLAKE_SDP_CORE_SCHEMA'], 'T_CUSTOMER_REGION_SUMMARY')}",
+        3,
+    ),
+    "sdp_customers_core_customer_segment_summary": (
+        f"select count(*) from {ident(os.environ['SNOWFLAKE_SDP_CUSTOMERS_DATABASE'], os.environ['SNOWFLAKE_SDP_CORE_SCHEMA'], 'T_CUSTOMER_SEGMENT_SUMMARY')}",
+        3,
+    ),
+    "sdp_customers_access_entity_grain": (
+        f"select count(*) from {ident(os.environ['SNOWFLAKE_SDP_CUSTOMERS_DATABASE'], os.environ['SNOWFLAKE_SDP_ACC_SCHEMA'], 'T_CUSTOMERS_ENTITY_GRAIN')}",
+        12,
+    ),
+    "sdp_customers_access_region_grain": (
+        f"select count(*) from {ident(os.environ['SNOWFLAKE_SDP_CUSTOMERS_DATABASE'], os.environ['SNOWFLAKE_SDP_ACC_SCHEMA'], 'T_CUSTOMERS_REGION_GRAIN')}",
+        3,
+    ),
+    "sdp_customers_access_segment_grain": (
+        f"select count(*) from {ident(os.environ['SNOWFLAKE_SDP_CUSTOMERS_DATABASE'], os.environ['SNOWFLAKE_SDP_ACC_SCHEMA'], 'T_CUSTOMERS_SEGMENT_GRAIN')}",
+        3,
+    ),
 }
 
 connection = snowflake.connector.connect(
@@ -217,6 +250,13 @@ snowflake.sdp_core_order_items_clean=60
 snowflake.sdp_access_orders_order_grain=30
 snowflake.sdp_access_orders_customer_grain=12
 snowflake.sdp_access_order_lines_order_grain=60
+snowflake.sdp_customers_ext_customers_raw=12
+snowflake.sdp_customers_core_customers_clean=12
+snowflake.sdp_customers_core_customer_region_summary=3
+snowflake.sdp_customers_core_customer_segment_summary=3
+snowflake.sdp_customers_access_entity_grain=12
+snowflake.sdp_customers_access_region_grain=3
+snowflake.sdp_customers_access_segment_grain=3
 snowflake.sdp_dbt_project=${SNOWFLAKE_SDP_DBT_PROJECT}
 snowflake.dbt_target=${dbt_target_name}
 EOF

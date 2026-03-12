@@ -4,15 +4,30 @@
       "key": "sdp_orders",
       "kind": "sdp",
       "database": "DB_SDP_ORDERS",
-      "runtime_env_var": "SNOWFLAKE_SDP_DATABASE",
-      "source_env_var": "SNOWFLAKE_SDP_DATABASE_BASE"
+      "runtime_env_var": "SNOWFLAKE_SDP_ORDERS_DATABASE",
+      "source_env_var": "SNOWFLAKE_SDP_ORDERS_DATABASE_BASE"
+    },
+    {
+      "key": "sdp_customers",
+      "kind": "sdp",
+      "database": "DB_SDP_CUSTOMERS",
+      "runtime_env_var": "SNOWFLAKE_SDP_CUSTOMERS_DATABASE",
+      "source_env_var": "SNOWFLAKE_SDP_CUSTOMERS_DATABASE_BASE"
     },
     {
       "key": "edp_orders",
       "kind": "edp",
       "database": "DB_EDP_ORDERS",
-      "runtime_env_var": "SNOWFLAKE_EDP_DATABASE",
-      "source_env_var": "SNOWFLAKE_EDP_DATABASE_BASE"
+      "runtime_env_var": "SNOWFLAKE_EDP_ORDERS_DATABASE",
+      "source_env_var": "SNOWFLAKE_EDP_ORDERS_DATABASE_BASE",
+      "source_missing_behavior": "create_empty"
+    },
+    {
+      "key": "edp_customers",
+      "kind": "edp",
+      "database": "DB_EDP_CUSTOMERS",
+      "runtime_env_var": "SNOWFLAKE_EDP_CUSTOMERS_DATABASE",
+      "source_env_var": "SNOWFLAKE_EDP_CUSTOMERS_DATABASE_BASE"
     }
   ]
 }

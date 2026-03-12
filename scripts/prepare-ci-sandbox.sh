@@ -66,13 +66,28 @@ project_path_slug="${CI_PROJECT_PATH_SLUG:-${project_kind}}"
 source_system_slug="${SOURCE_SYSTEM_SLUG:-postgres}"
 object_prefix="landing/ci/${project_path_slug}/${sandbox_kind}/${source_system_slug}"
 object_store_bucket="s3://${MINIO_BUCKET}/${object_prefix}"
-sdp_dbt_project="DBT_PROJECT_SDP_ORDERS_${db_suffix}"
-edp_dbt_project="DBT_PROJECT_EDP_ORDERS_${db_suffix}"
+source_dbt_project="DBT_PROJECT_SOURCE_FINNOVA_${db_suffix}"
+edp_orders_dbt_project="DBT_PROJECT_EDP_ORDERS_${db_suffix}"
+edp_customers_dbt_project="DBT_PROJECT_EDP_CUSTOMERS_${db_suffix}"
 
-base_sdp_database="${SNOWFLAKE_SDP_DATABASE}"
-base_edp_database="${SNOWFLAKE_EDP_DATABASE}"
+base_sdp_database="${SNOWFLAKE_SDP_ORDERS_DATABASE:-${SNOWFLAKE_SDP_DATABASE}}"
+base_sdp_customers_database="${SNOWFLAKE_SDP_CUSTOMERS_DATABASE}"
+base_edp_orders_database="${SNOWFLAKE_EDP_ORDERS_DATABASE:-${SNOWFLAKE_EDP_DATABASE}}"
+base_edp_customers_database="${SNOWFLAKE_EDP_CUSTOMERS_DATABASE}"
 branch_sdp_database="$(build_clone_database_name "${base_sdp_database}" "${clone_owner_token}" "${clone_branch_token}" 120)"
-branch_edp_database="$(build_clone_database_name "${base_edp_database}" "${clone_owner_token}" "${clone_branch_token}" 120)"
+branch_sdp_customers_database="$(build_clone_database_name "${base_sdp_customers_database}" "${clone_owner_token}" "${clone_branch_token}" 120)"
+branch_edp_orders_database="$(build_clone_database_name "${base_edp_orders_database}" "${clone_owner_token}" "${clone_branch_token}" 120)"
+branch_edp_customers_database="$(build_clone_database_name "${base_edp_customers_database}" "${clone_owner_token}" "${clone_branch_token}" 120)"
+
+if printf '%s' "${project_path_slug}" | grep -qi 'customers'; then
+  base_edp_database="${base_edp_customers_database}"
+  branch_edp_database="${branch_edp_customers_database}"
+  edp_dbt_project="${edp_customers_dbt_project}"
+else
+  base_edp_database="${base_edp_orders_database}"
+  branch_edp_database="${branch_edp_orders_database}"
+  edp_dbt_project="${edp_orders_dbt_project}"
+fi
 
 cat > "${tmp_dotenv_path}" <<EOF
 CI_SANDBOX_KIND=${sandbox_kind}
@@ -87,12 +102,22 @@ ICEBERG_CATALOG_NAME=ci_${project_kind}_${sandbox_kind}_${namespace_suffix}
 SNOWFLAKE_CLONE_OWNER_TOKEN=${clone_owner_token}
 SNOWFLAKE_CLONE_BRANCH_TOKEN=${clone_branch_token}
 SNOWFLAKE_SDP_DATABASE_BASE=${base_sdp_database}
+SNOWFLAKE_SDP_ORDERS_DATABASE_BASE=${base_sdp_database}
+SNOWFLAKE_SDP_CUSTOMERS_DATABASE_BASE=${base_sdp_customers_database}
 SNOWFLAKE_EDP_DATABASE_BASE=${base_edp_database}
+SNOWFLAKE_EDP_ORDERS_DATABASE_BASE=${base_edp_orders_database}
+SNOWFLAKE_EDP_CUSTOMERS_DATABASE_BASE=${base_edp_customers_database}
 SNOWFLAKE_SDP_DATABASE=${branch_sdp_database}
+SNOWFLAKE_SDP_ORDERS_DATABASE=${branch_sdp_database}
+SNOWFLAKE_SDP_CUSTOMERS_DATABASE=${branch_sdp_customers_database}
 SNOWFLAKE_EDP_DATABASE=${branch_edp_database}
+SNOWFLAKE_EDP_ORDERS_DATABASE=${branch_edp_orders_database}
+SNOWFLAKE_EDP_CUSTOMERS_DATABASE=${branch_edp_customers_database}
 SNOWFLAKE_CLONE_SCHEMA=CLONE_${db_suffix}
-SNOWFLAKE_SDP_DBT_PROJECT=${sdp_dbt_project}
+SNOWFLAKE_SDP_DBT_PROJECT=${source_dbt_project}
 SNOWFLAKE_EDP_DBT_PROJECT=${edp_dbt_project}
+SNOWFLAKE_EDP_ORDERS_DBT_PROJECT=${edp_orders_dbt_project}
+SNOWFLAKE_EDP_CUSTOMERS_DBT_PROJECT=${edp_customers_dbt_project}
 MINIO_PREFIX=${object_prefix}
 OBJECT_STORE_BUCKET=${object_store_bucket}
 DLT_PIPELINE_NAME=${project_kind}_${sandbox_kind}_${namespace_suffix}
@@ -117,9 +142,17 @@ docker compose run --rm --no-deps \
   -e "SNOWFLAKE_CLONE_OWNER_TOKEN=${SNOWFLAKE_CLONE_OWNER_TOKEN}" \
   -e "SNOWFLAKE_CLONE_BRANCH_TOKEN=${SNOWFLAKE_CLONE_BRANCH_TOKEN}" \
   -e "SNOWFLAKE_SDP_DATABASE_BASE=${SNOWFLAKE_SDP_DATABASE_BASE}" \
+  -e "SNOWFLAKE_SDP_ORDERS_DATABASE_BASE=${SNOWFLAKE_SDP_ORDERS_DATABASE_BASE}" \
+  -e "SNOWFLAKE_SDP_CUSTOMERS_DATABASE_BASE=${SNOWFLAKE_SDP_CUSTOMERS_DATABASE_BASE}" \
   -e "SNOWFLAKE_EDP_DATABASE_BASE=${SNOWFLAKE_EDP_DATABASE_BASE}" \
+  -e "SNOWFLAKE_EDP_ORDERS_DATABASE_BASE=${SNOWFLAKE_EDP_ORDERS_DATABASE_BASE}" \
+  -e "SNOWFLAKE_EDP_CUSTOMERS_DATABASE_BASE=${SNOWFLAKE_EDP_CUSTOMERS_DATABASE_BASE}" \
   -e "SNOWFLAKE_SDP_DATABASE=${SNOWFLAKE_SDP_DATABASE}" \
+  -e "SNOWFLAKE_SDP_ORDERS_DATABASE=${SNOWFLAKE_SDP_ORDERS_DATABASE}" \
+  -e "SNOWFLAKE_SDP_CUSTOMERS_DATABASE=${SNOWFLAKE_SDP_CUSTOMERS_DATABASE}" \
   -e "SNOWFLAKE_EDP_DATABASE=${SNOWFLAKE_EDP_DATABASE}" \
+  -e "SNOWFLAKE_EDP_ORDERS_DATABASE=${SNOWFLAKE_EDP_ORDERS_DATABASE}" \
+  -e "SNOWFLAKE_EDP_CUSTOMERS_DATABASE=${SNOWFLAKE_EDP_CUSTOMERS_DATABASE}" \
   dbt-executor \
   python /opt/platform/dbt/scripts/manage_ci_clones.py "${CI_SANDBOX_CLONE_ACTION}" \
   | tee "${clone_create_log}"

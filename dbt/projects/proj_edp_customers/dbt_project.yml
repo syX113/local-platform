@@ -1,0 +1,28 @@
+name: proj_edp_customers
+version: 1.0.0
+config-version: 2
+profile: local_platform
+
+model-paths: ["models"]
+macro-paths: ["macros"]
+clean-targets:
+  - target
+  - dbt_packages
+
+on-run-start:
+  - "{{ ensure_target_database_and_schemas(env_var('SNOWFLAKE_EDP_CUSTOMERS_DATABASE'), [env_var('SNOWFLAKE_EDP_IN_SCHEMA', 'INBOUND'), env_var('SNOWFLAKE_EDP_CORE_SCHEMA', 'CORE'), env_var('SNOWFLAKE_EDP_ACC_SCHEMA', 'ACCESS')]) }}"
+
+models:
+  proj_edp_customers:
+    inbound:
+      +database: "{{ env_var('SNOWFLAKE_EDP_CUSTOMERS_DATABASE') }}"
+      +schema: "{{ env_var('SNOWFLAKE_EDP_IN_SCHEMA', 'INBOUND') }}"
+      +materialized: view
+    core:
+      +database: "{{ env_var('SNOWFLAKE_EDP_CUSTOMERS_DATABASE') }}"
+      +schema: "{{ env_var('SNOWFLAKE_EDP_CORE_SCHEMA', 'CORE') }}"
+      +materialized: table
+    access:
+      +database: "{{ env_var('SNOWFLAKE_EDP_CUSTOMERS_DATABASE') }}"
+      +schema: "{{ env_var('SNOWFLAKE_EDP_ACC_SCHEMA', 'ACCESS') }}"
+      +materialized: table

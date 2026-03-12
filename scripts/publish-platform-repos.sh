@@ -10,6 +10,7 @@ ensure_platform_env
 SKIP_VARIABLE_SYNC="false"
 INIT_SDP_HISTORY="false"
 INIT_EDP_HISTORY="false"
+INIT_EDP_CUSTOMERS_HISTORY="false"
 
 while [ $# -gt 0 ]; do
   case "${1}" in
@@ -25,6 +26,9 @@ while [ $# -gt 0 ]; do
       ;;
     --init-edp-history)
       INIT_EDP_HISTORY="true"
+      ;;
+    --init-edp-customers-history)
+      INIT_EDP_CUSTOMERS_HISTORY="true"
       ;;
     *)
       echo "unsupported argument: ${1}" >&2
@@ -44,7 +48,7 @@ source "${ROOT_DIR}/gitlab-runner/generated/bootstrap.env"
 # shellcheck disable=SC1091
 source "${ROOT_DIR}/gitlab-runner/generated/projects.env"
 
-if [ -z "${GITLAB_BOOTSTRAP_PAT:-}" ] || [ -z "${GITLAB_SDP_PROJECT_PATH:-}" ] || [ -z "${GITLAB_EDP_PROJECT_PATH:-}" ]; then
+if [ -z "${GITLAB_BOOTSTRAP_PAT:-}" ] || [ -z "${GITLAB_SDP_PROJECT_PATH:-}" ] || [ -z "${GITLAB_EDP_PROJECT_PATH:-}" ] || [ -z "${GITLAB_EDP_CUSTOMERS_PROJECT_PATH:-}" ]; then
   echo "bootstrap metadata is incomplete. Re-run ./scripts/bootstrap-gitlab.sh." >&2
   exit 1
 fi
@@ -186,6 +190,7 @@ sync_rendered_repo() {
 platform_sha="$(git rev-parse --short HEAD 2>/dev/null || echo manual)"
 sdp_repo_dir="${ROOT_DIR}/gitlab-projects/generated/${GITLAB_SDP_PROJECT_PATH}"
 edp_repo_dir="${ROOT_DIR}/gitlab-projects/generated/${GITLAB_EDP_PROJECT_PATH}"
+edp_customers_repo_dir="${ROOT_DIR}/gitlab-projects/generated/${GITLAB_EDP_CUSTOMERS_PROJECT_PATH}"
 
 prime_rendered_repo \
   "${sdp_repo_dir}" \
@@ -196,6 +201,11 @@ prime_rendered_repo \
   "${edp_repo_dir}" \
   local-gitlab-edp \
   "http://oauth2:${GITLAB_BOOTSTRAP_PAT}@localhost:${GITLAB_HTTP_PORT}/root/${GITLAB_EDP_PROJECT_PATH}.git"
+
+prime_rendered_repo \
+  "${edp_customers_repo_dir}" \
+  local-gitlab-edp-customers \
+  "http://oauth2:${GITLAB_BOOTSTRAP_PAT}@localhost:${GITLAB_HTTP_PORT}/root/${GITLAB_EDP_CUSTOMERS_PROJECT_PATH}.git"
 
 python3 "${ROOT_DIR}/scripts/render_gitlab_project_repos.py"
 
@@ -216,6 +226,15 @@ sync_rendered_repo \
   "Sync EDP project from local platform ${platform_sha}" \
   "${INIT_EDP_HISTORY}" \
   "${GITLAB_EDP_PROJECT_ID}"
+
+echo "publishing rendered EDP customers platform repo"
+sync_rendered_repo \
+  "${edp_customers_repo_dir}" \
+  local-gitlab-edp-customers \
+  "http://oauth2:${GITLAB_BOOTSTRAP_PAT}@localhost:${GITLAB_HTTP_PORT}/root/${GITLAB_EDP_CUSTOMERS_PROJECT_PATH}.git" \
+  "Sync EDP customers project from local platform ${platform_sha}" \
+  "${INIT_EDP_CUSTOMERS_HISTORY}" \
+  "${GITLAB_EDP_CUSTOMERS_PROJECT_ID}"
 
 if [ "${SKIP_VARIABLE_SYNC}" != "true" ]; then
   echo "syncing GitLab CI variables"

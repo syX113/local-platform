@@ -15,10 +15,11 @@ docker compose up -d airflow-metadata-db source-postgres-db lakehouse-object-sto
 docker compose up -d lakehouse-bucket-init airflow-init
 ./scripts/load-source-sample-data.sh
 docker compose up -d airflow-webserver airflow-scheduler
-./scripts/deploy-airflow-dev-dag.sh
+./scripts/deploy-airflow-dag.sh dev
+./scripts/deploy-airflow-dag.sh prd
 
 echo "stack is starting"
 echo "next:"
 echo "  1. wait for GitLab on http://localhost:${GITLAB_HTTP_PORT:-8080}"
-echo "  2. run ./scripts/bootstrap-gitlab.sh to create the SDP and EDP GitLab projects and start the GitLab runner"
+echo "  2. run ./scripts/bootstrap-gitlab.sh to create the source and EDP GitLab projects and start the GitLab runner"
 ./scripts/print-setup-summary.sh
