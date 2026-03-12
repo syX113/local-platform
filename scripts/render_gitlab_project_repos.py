@@ -73,8 +73,6 @@ def sdp_ci_yaml() -> str:
         workflow:
           name: Source Promotion
           rules:
-            - if: '$CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH != $CI_DEFAULT_BRANCH && $CI_COMMIT_BEFORE_SHA == "0000000000000000000000000000000000000000"'
-              when: never
             - if: '$CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH != $CI_DEFAULT_BRANCH && $CI_OPEN_MERGE_REQUESTS'
               when: never
             - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
@@ -135,14 +133,13 @@ def sdp_ci_yaml() -> str:
             paths:
               - artifacts/context/
 
-        prepare_sdp_sandbox:
+        prepare_sdp_mr_context:
           stage: prepare
-          rules:
-            - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
-            - if: '$CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH != $CI_DEFAULT_BRANCH'
-            - when: never
           script:
             - ./ci/scripts/prepare-ci-sandbox.sh sdp artifacts/context/sdp.env
+          rules:
+            - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+            - when: never
           artifacts:
             when: always
             paths:
@@ -153,13 +150,18 @@ def sdp_ci_yaml() -> str:
           needs:
             - job: build_sdp_runtimes
               artifacts: true
-            - job: prepare_sdp_sandbox
+            - job: prepare_sdp_mr_context
               artifacts: true
+              optional: true
           rules:
             - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
             - if: '$CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH != $CI_DEFAULT_BRANCH'
             - when: never
           script:
+            - |
+              if [ "${CI_PIPELINE_SOURCE}" != "merge_request_event" ]; then
+                bash ./ci/scripts/resolve-existing-sandbox.sh sdp artifacts/context/sdp.env
+              fi
             - set -a; . artifacts/context/runtime.env; . artifacts/context/sdp.env; set +a
             - docker compose config -q
             - docker compose run --rm --no-deps --entrypoint python airflow-webserver -m compileall /opt/airflow/dags
@@ -172,8 +174,9 @@ def sdp_ci_yaml() -> str:
           needs:
             - job: build_sdp_runtimes
               artifacts: true
-            - job: prepare_sdp_sandbox
+            - job: prepare_sdp_mr_context
               artifacts: true
+              optional: true
             - job: ci_validate_sdp_assets
               artifacts: true
           rules:
@@ -181,6 +184,10 @@ def sdp_ci_yaml() -> str:
             - if: '$CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH != $CI_DEFAULT_BRANCH'
             - when: never
           script:
+            - |
+              if [ "${CI_PIPELINE_SOURCE}" != "merge_request_event" ]; then
+                bash ./ci/scripts/resolve-existing-sandbox.sh sdp artifacts/context/sdp.env
+              fi
             - set -a; . artifacts/context/runtime.env; . artifacts/context/sdp.env; set +a
             - ./ci/scripts/deploy-airflow-dag.sh current orders "current-sdp-orders-ci"
             - SOURCE_SCOPE=orders ./ci/scripts/verify-ingestion-promotion.sh
@@ -197,8 +204,9 @@ def sdp_ci_yaml() -> str:
           needs:
             - job: build_sdp_runtimes
               artifacts: true
-            - job: prepare_sdp_sandbox
+            - job: prepare_sdp_mr_context
               artifacts: true
+              optional: true
             - job: ci_validate_sdp_ingestion
               artifacts: true
           rules:
@@ -206,6 +214,10 @@ def sdp_ci_yaml() -> str:
             - if: '$CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH != $CI_DEFAULT_BRANCH'
             - when: never
           script:
+            - |
+              if [ "${CI_PIPELINE_SOURCE}" != "merge_request_event" ]; then
+                bash ./ci/scripts/resolve-existing-sandbox.sh sdp artifacts/context/sdp.env
+              fi
             - set -a; . artifacts/context/runtime.env; . artifacts/context/sdp.env; set +a
             - SOURCE_SCOPE=orders ./ci/scripts/verify-sdp-promotion.sh
             - SOURCE_SCOPE=customers ./ci/scripts/verify-sdp-promotion.sh
@@ -271,24 +283,20 @@ def sdp_ci_yaml() -> str:
             paths:
               - artifacts/deploy-sdp-prd/
 
-        cleanup_sdp_sandbox:
+        cleanup_sdp_mr_sandbox:
           stage: cleanup
           when: always
           needs:
-            - job: prepare_sdp_sandbox
+            - job: prepare_sdp_mr_context
               artifacts: true
           rules:
             - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
-            - if: '$CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH != $CI_DEFAULT_BRANCH'
             - when: never
           script:
             - ./ci/scripts/cleanup-ci-sandbox.sh artifacts/context/sdp.env
 
         destroy_sdp_branch_sandbox:
           stage: cleanup
-          needs:
-            - job: prepare_sdp_sandbox
-              artifacts: true
           rules:
             - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
               when: never
@@ -297,6 +305,7 @@ def sdp_ci_yaml() -> str:
             - when: never
           allow_failure: true
           script:
+            - bash ./ci/scripts/resolve-existing-sandbox.sh sdp artifacts/context/sdp.env
             - ./ci/scripts/cleanup-ci-sandbox.sh --destroy artifacts/context/sdp.env
         """
     )
@@ -308,8 +317,6 @@ def edp_ci_yaml() -> str:
         workflow:
           name: EDP Promotion
           rules:
-            - if: '$CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH != $CI_DEFAULT_BRANCH && $CI_COMMIT_BEFORE_SHA == "0000000000000000000000000000000000000000"'
-              when: never
             - if: '$CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH != $CI_DEFAULT_BRANCH && $CI_OPEN_MERGE_REQUESTS'
               when: never
             - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
@@ -369,14 +376,13 @@ def edp_ci_yaml() -> str:
             paths:
               - artifacts/context/
 
-        prepare_edp_sandbox:
+        prepare_edp_mr_context:
           stage: prepare
-          rules:
-            - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
-            - if: '$CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH != $CI_DEFAULT_BRANCH'
-            - when: never
           script:
             - ./ci/scripts/prepare-ci-sandbox.sh edp artifacts/context/edp.env
+          rules:
+            - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+            - when: never
           artifacts:
             when: always
             paths:
@@ -387,13 +393,18 @@ def edp_ci_yaml() -> str:
           needs:
             - job: build_edp_runtime
               artifacts: true
-            - job: prepare_edp_sandbox
+            - job: prepare_edp_mr_context
               artifacts: true
+              optional: true
           rules:
             - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
             - if: '$CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH != $CI_DEFAULT_BRANCH'
             - when: never
           script:
+            - |
+              if [ "${CI_PIPELINE_SOURCE}" != "merge_request_event" ]; then
+                bash ./ci/scripts/resolve-existing-sandbox.sh edp artifacts/context/edp.env
+              fi
             - set -a; . artifacts/context/runtime.env; . artifacts/context/edp.env; set +a
             - docker compose config -q
             - docker compose run --rm --no-deps --entrypoint python dbt-executor -m compileall /opt/platform/dbt
@@ -404,8 +415,9 @@ def edp_ci_yaml() -> str:
           needs:
             - job: build_edp_runtime
               artifacts: true
-            - job: prepare_edp_sandbox
+            - job: prepare_edp_mr_context
               artifacts: true
+              optional: true
             - job: ci_validate_edp_assets
               artifacts: true
           rules:
@@ -413,6 +425,10 @@ def edp_ci_yaml() -> str:
             - if: '$CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH != $CI_DEFAULT_BRANCH'
             - when: never
           script:
+            - |
+              if [ "${CI_PIPELINE_SOURCE}" != "merge_request_event" ]; then
+                bash ./ci/scripts/resolve-existing-sandbox.sh edp artifacts/context/edp.env
+              fi
             - set -a; . artifacts/context/runtime.env; . artifacts/context/edp.env; set +a
             - ./ci/scripts/verify-edp-promotion.sh
           artifacts:
@@ -477,24 +493,20 @@ def edp_ci_yaml() -> str:
             paths:
               - artifacts/deploy-edp-prd/
 
-        cleanup_edp_sandbox:
+        cleanup_edp_mr_sandbox:
           stage: cleanup
           when: always
           needs:
-            - job: prepare_edp_sandbox
+            - job: prepare_edp_mr_context
               artifacts: true
           rules:
             - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
-            - if: '$CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH != $CI_DEFAULT_BRANCH'
             - when: never
           script:
             - ./ci/scripts/cleanup-ci-sandbox.sh artifacts/context/edp.env
 
         destroy_edp_branch_sandbox:
           stage: cleanup
-          needs:
-            - job: prepare_edp_sandbox
-              artifacts: true
           rules:
             - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
               when: never
@@ -503,6 +515,7 @@ def edp_ci_yaml() -> str:
             - when: never
           allow_failure: true
           script:
+            - bash ./ci/scripts/resolve-existing-sandbox.sh edp artifacts/context/edp.env
             - ./ci/scripts/cleanup-ci-sandbox.sh --destroy artifacts/context/edp.env
         """
     )
@@ -855,15 +868,15 @@ def edp_compose_yaml() -> str:
               SNOWFLAKE_SDP_IN_SCHEMA: ${SNOWFLAKE_SDP_IN_SCHEMA}
               SNOWFLAKE_SDP_CORE_SCHEMA: ${SNOWFLAKE_SDP_CORE_SCHEMA}
               SNOWFLAKE_SDP_ACC_SCHEMA: ${SNOWFLAKE_SDP_ACC_SCHEMA}
-          SNOWFLAKE_SDP_CUSTOMERS_DATABASE: ${SNOWFLAKE_SDP_CUSTOMERS_DATABASE}
-          SNOWFLAKE_SDP_DBT_PROJECT: ${SNOWFLAKE_SDP_DBT_PROJECT:-DEV_DBT_PROJECT_SOURCE_FINNOVA}
-          SNOWFLAKE_EDP_DATABASE: ${SNOWFLAKE_EDP_DATABASE}
-          SNOWFLAKE_EDP_CUSTOMERS_DATABASE: ${SNOWFLAKE_EDP_CUSTOMERS_DATABASE}
-          SNOWFLAKE_EDP_IN_SCHEMA: ${SNOWFLAKE_EDP_IN_SCHEMA}
-          SNOWFLAKE_EDP_CORE_SCHEMA: ${SNOWFLAKE_EDP_CORE_SCHEMA}
-          SNOWFLAKE_EDP_ACC_SCHEMA: ${SNOWFLAKE_EDP_ACC_SCHEMA}
-          SNOWFLAKE_EDP_DBT_PROJECT: ${SNOWFLAKE_EDP_DBT_PROJECT:-DEV_DBT_PROJECT_EDP_ORDERS}
-          SNOWFLAKE_EDP_CUSTOMERS_DBT_PROJECT: ${SNOWFLAKE_EDP_CUSTOMERS_DBT_PROJECT:-DEV_DBT_PROJECT_EDP_CUSTOMERS}
+              SNOWFLAKE_SDP_CUSTOMERS_DATABASE: ${SNOWFLAKE_SDP_CUSTOMERS_DATABASE}
+              SNOWFLAKE_SDP_DBT_PROJECT: ${SNOWFLAKE_SDP_DBT_PROJECT:-DEV_DBT_PROJECT_SOURCE_FINNOVA}
+              SNOWFLAKE_EDP_DATABASE: ${SNOWFLAKE_EDP_DATABASE}
+              SNOWFLAKE_EDP_CUSTOMERS_DATABASE: ${SNOWFLAKE_EDP_CUSTOMERS_DATABASE}
+              SNOWFLAKE_EDP_IN_SCHEMA: ${SNOWFLAKE_EDP_IN_SCHEMA}
+              SNOWFLAKE_EDP_CORE_SCHEMA: ${SNOWFLAKE_EDP_CORE_SCHEMA}
+              SNOWFLAKE_EDP_ACC_SCHEMA: ${SNOWFLAKE_EDP_ACC_SCHEMA}
+              SNOWFLAKE_EDP_DBT_PROJECT: ${SNOWFLAKE_EDP_DBT_PROJECT:-DEV_DBT_PROJECT_EDP_ORDERS}
+              SNOWFLAKE_EDP_CUSTOMERS_DBT_PROJECT: ${SNOWFLAKE_EDP_CUSTOMERS_DBT_PROJECT:-DEV_DBT_PROJECT_EDP_CUSTOMERS}
               SNOWFLAKE_CLONE_SCHEMA: ${SNOWFLAKE_CLONE_SCHEMA}
               SNOW_DBT_TARGET_NAME: ${SNOW_DBT_TARGET_NAME:-dev}
               DBT_THREADS: ${DBT_THREADS}
@@ -936,6 +949,7 @@ def render_sdp_repo(project_path: str) -> None:
         "scripts/common.sh",
         "scripts/ensure-snowflake-foundation.sh",
         "scripts/prepare-ci-sandbox.sh",
+        "scripts/resolve-existing-sandbox.sh",
         "scripts/cleanup-ci-sandbox.sh",
         "scripts/require-approver-match-commit.sh",
         "scripts/load-source-sample-data.sh",
@@ -1045,6 +1059,7 @@ def render_edp_repo(project_path: str) -> None:
         "scripts/common.sh",
         "scripts/ensure-snowflake-foundation.sh",
         "scripts/prepare-ci-sandbox.sh",
+        "scripts/resolve-existing-sandbox.sh",
         "scripts/cleanup-ci-sandbox.sh",
         "scripts/require-approver-match-commit.sh",
         "scripts/deploy-snowflake-dbt-project.sh",
@@ -1135,6 +1150,7 @@ def render_edp_customers_repo(project_path: str) -> None:
         "scripts/common.sh",
         "scripts/ensure-snowflake-foundation.sh",
         "scripts/prepare-ci-sandbox.sh",
+        "scripts/resolve-existing-sandbox.sh",
         "scripts/cleanup-ci-sandbox.sh",
         "scripts/require-approver-match-commit.sh",
         "scripts/deploy-snowflake-dbt-project.sh",

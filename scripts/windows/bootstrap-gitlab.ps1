@@ -195,7 +195,7 @@ function Render-RunnerConfig {
         Replace("__RUNNER_NETWORK__", (Get-EnvValue -Name "PLATFORM_DOCKER_NETWORK"))
 
     $config = @(
-        "concurrent = 1",
+        "concurrent = 4",
         "check_interval = 2",
         "",
         $renderedSdp.TrimEnd(),

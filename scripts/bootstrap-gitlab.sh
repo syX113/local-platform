@@ -330,7 +330,7 @@ render_runner_config() {
   local edp_customers_runner_token="${6:?runner token is required}"
 
   {
-    printf 'concurrent = 1\n'
+    printf 'concurrent = 4\n'
     printf 'check_interval = 2\n\n'
     sed \
       -e "s|__RUNNER_DESCRIPTION__|${sdp_runner_description}|g" \

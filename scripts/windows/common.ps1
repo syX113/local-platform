@@ -176,6 +176,11 @@ function Resolve-ContainerDbtProjectDir {
         return "/opt/platform/dbt/projects/$ProjectSlug"
     }
 
+    $singleProject = Join-Path $RootDir "dbt/dbt_project.yml"
+    if (Test-Path -LiteralPath $singleProject) {
+        return "/opt/platform/dbt"
+    }
+
     throw "unable to resolve dbt project dir for $ProjectSlug"
 }
 

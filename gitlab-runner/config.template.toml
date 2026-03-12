@@ -4,7 +4,7 @@
   token = "__RUNNER_TOKEN__"
   executor = "docker"
   clone_url = "__CLONE_URL__"
-  request_concurrency = 1
+  request_concurrency = 2
   environment = ["DOCKER_HOST=unix:///var/run/docker.sock"]
 
   [runners.docker]

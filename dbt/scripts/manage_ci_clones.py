@@ -226,7 +226,12 @@ def create_empty_database(cursor, target_name: str, *, replace: bool) -> None:
     if replace:
         cursor.execute(f"create or replace transient database {ident(target_name)}")
     elif not database_exists(cursor, target_name):
-        cursor.execute(f"create transient database {ident(target_name)}")
+        try:
+            cursor.execute(f"create transient database {ident(target_name)}")
+        except snowflake.connector.errors.ProgrammingError as error:
+            if is_already_exists_error(error):
+                return
+            raise
 
 
 def database_exists(cursor, target_name: str) -> bool:
