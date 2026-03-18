@@ -8,6 +8,8 @@ The default sample flow is:
 
 `dlt` always runs in an external runtime container. `dbt` is deployed as a Snowflake dbt project object and executed natively inside Snowflake. The local `dbt-executor` container exists only to package and trigger Snowflake-native `dbt parse`, `dbt run`, `dbt test`, and `dbt build` through Snowflake CLI.
 
+The full bootstrap initializes the local services, reloads deterministic sample data, deploys the Airflow DAGs, and then performs the Snowflake bootstrap so the expected Snowflake control objects and data products exist immediately after startup.
+
 The platform repo is the control plane. During GitLab bootstrap it renders and pushes three separate GitLab project repos:
 
 - `proj_source_finnova`: owns the Airflow DAG, the dlt ingestion code, and both SDP dbt projects for the Finnova source
@@ -177,7 +179,7 @@ Those are the intended full local restart flows.
 ## Quick Start
 
 1. Copy `.env.example` to `.env`.
-2. Fill the Snowflake variables if you want Snowflake connectivity.
+2. Fill the Snowflake variables if you want a full bootstrap. The Snowflake control objects and the deployed data products are created as part of `bootstrap.sh`.
 3. Reset if you want a clean rebuild:
 
 Unix/macOS:
@@ -466,7 +468,7 @@ The Unix/macOS commands are the `.sh` entrypoints under `scripts/`. Windows host
 - `./scripts/reset-platform.sh`
   Stops the local stack, removes containers, volumes, generated runtime clutter, drops registered Snowflake CI clone databases when credentials and the local `dbt-executor` image are available, and gives you a clean starting point.
 - `./scripts/bootstrap.sh`
-  Builds and starts the base local platform, seeds the sample source data, and prints the current access summary.
+  Builds and starts the base local platform, deploys the Airflow DAGs, reloads the deterministic sample source data, performs the Snowflake bootstrap so the control database, schemas, and expected data products exist, and prints the current access summary.
 - `./scripts/bootstrap-gitlab.sh`
   Finishes the GitLab setup: creates or resolves the SDP and EDP projects, configures branch webhooks, registers runners, publishes the rendered repos, and syncs GitLab CI variables.
   On a fresh bootstrap where the GitLab projects are newly created, each hosted repo is initialized with a single `main` commit named `init-artifacts` so users start from a clean history.
@@ -479,7 +481,7 @@ The Unix/macOS commands are the `.sh` entrypoints under `scripts/`. Windows host
 - `pwsh ./scripts/windows/reset-platform.ps1`
   Windows host equivalent of the full reset flow.
 - `pwsh ./scripts/windows/bootstrap.ps1`
-  Windows host equivalent of the base platform bootstrap.
+  Windows host equivalent of the base platform bootstrap, including the Snowflake bootstrap and deployed data products.
 - `pwsh ./scripts/windows/bootstrap-gitlab.ps1`
   Windows host equivalent of the GitLab bootstrap and repo publish flow.
 - `pwsh ./scripts/windows/bootstrap-snowflake-products.ps1`

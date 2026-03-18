@@ -60,3 +60,55 @@ fi
 
 docker compose run --rm --no-deps dbt-executor \
   python /opt/platform/dbt/scripts/apply_sql.py "${sql_files[@]}"
+
+docker compose run --rm --no-deps dbt-executor python - <<'PY'
+import os
+import snowflake.connector
+
+
+def ident(*parts: str) -> str:
+    return ".".join(f'"{part}"' for part in parts)
+
+
+control_database = os.environ["SNOWFLAKE_CONTROL_DATABASE"]
+control_schema = os.environ["SNOWFLAKE_CONTROL_SCHEMA"]
+control_stage = os.environ["SNOWFLAKE_DBT_STAGE"]
+
+connection = snowflake.connector.connect(
+    account=os.environ["SNOWFLAKE_ACCOUNT"],
+    user=os.environ["SNOWFLAKE_USER"],
+    password=os.environ["SNOWFLAKE_PASSWORD"],
+    role=os.environ["SNOWFLAKE_ROLE"],
+    warehouse=os.environ["SNOWFLAKE_WAREHOUSE"],
+)
+
+try:
+    with connection.cursor() as cursor:
+        cursor.execute(f"show databases like '{control_database}'")
+        if not cursor.fetchall():
+            raise SystemExit(f"missing Snowflake control database: {control_database}")
+
+        cursor.execute(f"show schemas like '{control_schema}' in database {ident(control_database)}")
+        if not cursor.fetchall():
+            raise SystemExit(
+                f"missing Snowflake control schema: {control_database}.{control_schema}"
+            )
+
+        cursor.execute(
+            f"show stages like '{control_stage}' in schema {ident(control_database, control_schema)}"
+        )
+        if not cursor.fetchall():
+            raise SystemExit(
+                f"missing Snowflake dbt stage: {control_database}.{control_schema}.{control_stage}"
+            )
+finally:
+    connection.close()
+
+print(
+    {
+        "control_database": control_database,
+        "control_schema": control_schema,
+        "control_stage": control_stage,
+    }
+)
+PY
