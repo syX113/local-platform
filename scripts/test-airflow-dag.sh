@@ -14,10 +14,28 @@ ensure_platform_env
 
 execution_date="${1:-2026-03-07}"
 source_scope="${SOURCE_SCOPE:-orders}"
+
+resolve_sandbox_dag_id() {
+  local scope="${1:?source scope is required}"
+
+  case "${scope}" in
+    orders)
+      printf '%s' "${AIRFLOW_SANDBOX_ORDERS_DAG_ID:-${AIRFLOW_SANDBOX_DAG_ID:-${DEV_ORDERS_AIRFLOW_DAG_ID:-DEV_local_platform_orders_ingest}}}"
+      ;;
+    customers)
+      printf '%s' "${AIRFLOW_SANDBOX_CUSTOMERS_DAG_ID:-${AIRFLOW_SANDBOX_DAG_ID:-${DEV_CUSTOMERS_AIRFLOW_DAG_ID:-DEV_local_platform_customers_ingest}}}"
+      ;;
+    *)
+      echo "unsupported source scope for DAG resolution: ${scope}" >&2
+      exit 1
+      ;;
+  esac
+}
+
 if [ -n "${2:-}" ]; then
   dag_id="${2}"
-elif [ -n "${AIRFLOW_SANDBOX_DAG_ID:-}" ]; then
-  dag_id="${AIRFLOW_SANDBOX_DAG_ID}"
+elif [ -n "${AIRFLOW_SANDBOX_ORDERS_DAG_ID:-}" ] || [ -n "${AIRFLOW_SANDBOX_CUSTOMERS_DAG_ID:-}" ] || [ -n "${AIRFLOW_SANDBOX_DAG_ID:-}" ]; then
+  dag_id="$(resolve_sandbox_dag_id "${source_scope}")"
 else
   case "${source_scope}" in
     orders)
@@ -35,8 +53,8 @@ fi
 
 if [ -n "${3:-}" ]; then
   dag_subdir="${3}"
-elif [ -n "${AIRFLOW_SANDBOX_DAG_ID:-}" ]; then
-  dag_subdir="/opt/airflow/dags/deployed/$(sanitize_branch_token "${AIRFLOW_SANDBOX_DAG_ID}").py"
+elif [ -n "${AIRFLOW_SANDBOX_ORDERS_DAG_ID:-}" ] || [ -n "${AIRFLOW_SANDBOX_CUSTOMERS_DAG_ID:-}" ] || [ -n "${AIRFLOW_SANDBOX_DAG_ID:-}" ]; then
+  dag_subdir="/opt/airflow/dags/deployed/$(sanitize_branch_token "$(resolve_sandbox_dag_id "${source_scope}")").py"
 else
   case "${source_scope}" in
     orders)
