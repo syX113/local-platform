@@ -161,6 +161,9 @@ Invoke-DockerCompose -Arguments @("run", "--rm", "--no-deps", "dlt-extractor", "
 Invoke-DockerCompose -Arguments @("run", "--rm", "--no-deps", "dbt-executor", "python", "/opt/platform/dbt/scripts/snow_dbt_cli.py", "deploy", "--project-dir", $sdpProjectDir, "--project-name", $prdSdpDbtProject, "--database", (Get-EnvValue -Name "SNOWFLAKE_CONTROL_DATABASE"), "--schema", (Get-EnvValue -Name "SNOWFLAKE_CONTROL_SCHEMA"), "--target-name", "prd")
 Invoke-DockerCompose -Arguments @("run", "--rm", "--no-deps", "dbt-executor", "python", "/opt/platform/dbt/scripts/snow_dbt_cli.py", "execute", "--project-name", $prdSdpDbtProject, "build")
 
+Write-Host "publishing dbt loom manifests for downstream EDP projects"
+Publish-SourceLoomManifests
+
 Write-Host "validating zero-copy clone semantics"
 Invoke-DockerCompose -Arguments @("run", "--rm", "--no-deps", "dbt-executor", "python", "/opt/platform/dbt/scripts/zero_copy_clone_check.py")
 

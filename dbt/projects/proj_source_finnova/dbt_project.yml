@@ -20,6 +20,7 @@ models:
         +database: "{{ env_var('SNOWFLAKE_SDP_DATABASE') }}"
         +schema: "{{ env_var('SNOWFLAKE_SDP_ACC_SCHEMA', 'ACCESS') }}"
         +materialized: table
+        +access: public
     customers:
       core:
         +database: "{{ env_var('SNOWFLAKE_SDP_CUSTOMERS_DATABASE') }}"
@@ -29,3 +30,4 @@ models:
         +database: "{{ env_var('SNOWFLAKE_SDP_CUSTOMERS_DATABASE') }}"
         +schema: "{{ env_var('SNOWFLAKE_SDP_ACC_SCHEMA', 'ACCESS') }}"
         +materialized: table
+        +access: public

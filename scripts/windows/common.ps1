@@ -184,6 +184,69 @@ function Resolve-ContainerDbtProjectDir {
     throw "unable to resolve dbt project dir for $ProjectSlug"
 }
 
+function Get-LoomManifestBucket {
+    $bucket = Get-EnvValue -Name "MINIO_MANIFEST_BUCKET"
+    if ([string]::IsNullOrEmpty($bucket)) {
+        return "dbt-manifests"
+    }
+    return $bucket
+}
+
+function Get-LoomManifestObjectKeyForRepo {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$RepoPath
+    )
+
+    return "dbt-loom/$RepoPath/manifest.json.gz"
+}
+
+function Publish-SourceLoomManifests {
+    param(
+        [string]$SourceProjectSlug = "proj_source_finnova"
+    )
+
+    $sourceProjectDir = Resolve-ContainerDbtProjectDir -ProjectSlug $SourceProjectSlug -RootDir (Get-RepoRoot)
+    $bucket = Get-LoomManifestBucket
+    $edpRepoPath = Get-EnvValue -Name "GITLAB_EDP_PROJECT_PATH"
+    if ([string]::IsNullOrEmpty($edpRepoPath)) {
+        $edpRepoPath = "proj_edp_orders"
+    }
+    $edpCustomersRepoPath = Get-EnvValue -Name "GITLAB_EDP_CUSTOMERS_PROJECT_PATH"
+    if ([string]::IsNullOrEmpty($edpCustomersRepoPath)) {
+        $edpCustomersRepoPath = "proj_edp_customers"
+    }
+
+    Invoke-DockerCompose -Arguments @(
+        "run", "--rm", "--no-deps", "dbt-executor", "python", "/opt/platform/dbt/scripts/loom_manifest.py", "publish",
+        "--project-dir", $sourceProjectDir,
+        "--bucket", $bucket,
+        "--object-key", (Get-LoomManifestObjectKeyForRepo -RepoPath $edpRepoPath),
+        "--object-key", (Get-LoomManifestObjectKeyForRepo -RepoPath $edpCustomersRepoPath)
+    )
+}
+
+function Ensure-DbtLoomManifestForProject {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$ProjectSlug
+    )
+
+    switch ($ProjectSlug) {
+        "proj_edp_orders" {}
+        "proj_edp_customers" {}
+        default { return }
+    }
+
+    $projectDir = Resolve-ContainerDbtProjectDir -ProjectSlug $ProjectSlug -RootDir (Get-RepoRoot)
+    Invoke-DockerCompose -Arguments @(
+        "run", "--rm", "--no-deps", "dbt-executor", "python", "/opt/platform/dbt/scripts/loom_manifest.py", "fetch",
+        "--project-dir", $projectDir,
+        "--bucket", (Get-LoomManifestBucket),
+        "--object-key", (Get-LoomManifestObjectKeyForRepo -RepoPath $ProjectSlug)
+    )
+}
+
 function Invoke-DockerCompose {
     param(
         [Parameter(Mandatory = $true)]

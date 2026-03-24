@@ -10,4 +10,4 @@ select
   line_number,
   loaded_at,
   cleaned_at
-from {{ source('source_edp_orders_sdp_access', 'T_ORDER_LINES_ORDER_GRAIN') }}
+from {{ ref('proj_source_finnova', 'model_sdp_orders_access_order_lines_order_grain') }}

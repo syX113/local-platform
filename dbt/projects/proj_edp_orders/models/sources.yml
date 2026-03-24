@@ -1,14 +1,5 @@
 version: 2
 
-sources:
-  - name: source_edp_orders_sdp_access
-    database: "{{ env_var('SNOWFLAKE_SDP_DATABASE') }}"
-    schema: "{{ env_var('SNOWFLAKE_SDP_ACC_SCHEMA', 'ACCESS') }}"
-    tables:
-      - name: T_ORDERS_ORDER_GRAIN
-      - name: T_ORDERS_CUSTOMER_GRAIN
-      - name: T_ORDER_LINES_ORDER_GRAIN
-
 models:
   - name: model_edp_orders_core_dim_customers
     columns:

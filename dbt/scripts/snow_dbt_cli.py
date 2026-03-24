@@ -17,6 +17,8 @@ ENV_VAR_PATTERN = re.compile(
     r"env_var\(\s*'([^']+)'\s*(?:,\s*'([^']*)'\s*)?\)"
 )
 EXCLUDED_PATH_NAMES = {".git", "__pycache__", "target", "logs", "dbt_packages"}
+SOURCE_PROJECT_SLUG = "proj_source_finnova"
+DOWNSTREAM_PROJECT_SLUGS = {"proj_edp_orders", "proj_edp_customers"}
 
 
 def env(name: str, default: str | None = None) -> str:
@@ -110,6 +112,13 @@ def render_env_vars(raw_text: str) -> str:
     return ENV_VAR_PATTERN.sub(replace, raw_text)
 
 
+def render_env_vars_in_tree(root_dir: Path) -> None:
+    for config_path in list(root_dir.rglob("*.yml")) + list(root_dir.rglob("*.yaml")):
+        if config_path.name == "profiles.yml":
+            continue
+        config_path.write_text(render_env_vars(config_path.read_text(encoding="utf-8")), encoding="utf-8")
+
+
 def project_profile_name(project_dir: Path) -> str:
     match = re.search(r"^\s*profile:\s*([A-Za-z0-9_]+)\s*$", project_dir.joinpath("dbt_project.yml").read_text(encoding="utf-8"), re.MULTILINE)
     if not match:
@@ -147,15 +156,52 @@ def prepare_project_source(project_dir: Path, *, database: str, schema: str, tar
         ignore=shutil.ignore_patterns(*EXCLUDED_PATH_NAMES),
     )
 
-    for config_path in list(prepared_dir.rglob("*.yml")) + list(prepared_dir.rglob("*.yaml")):
-        if config_path.name == "profiles.yml":
-            continue
-        config_path.write_text(render_env_vars(config_path.read_text(encoding="utf-8")), encoding="utf-8")
+    render_env_vars_in_tree(prepared_dir)
 
     prepared_dir.joinpath("profiles.yml").write_text(
         build_profiles_yml(project_dir, database=database, schema=schema, target_name=target_name),
         encoding="utf-8",
     )
+
+    if project_dir.name in DOWNSTREAM_PROJECT_SLUGS:
+        local_source_project_dir = project_dir.parent / SOURCE_PROJECT_SLUG
+        if not local_source_project_dir.exists():
+            raise SystemExit(
+                f"missing local dependency project directory: {local_source_project_dir}"
+            )
+
+        local_dependency_dir = prepared_dir / SOURCE_PROJECT_SLUG
+        shutil.copytree(
+            local_source_project_dir,
+            local_dependency_dir,
+            ignore=shutil.ignore_patterns(*EXCLUDED_PATH_NAMES),
+        )
+        render_env_vars_in_tree(local_dependency_dir)
+
+        prepared_dir.joinpath("packages.yml").write_text(
+            "packages:\n"
+            f"  - local: {SOURCE_PROJECT_SLUG}\n",
+            encoding="utf-8",
+        )
+
+        completed = subprocess.run(
+            [
+                shutil.which("dbt") or "dbt",
+                "deps",
+                "--profiles-dir",
+                str(prepared_dir),
+                "--project-dir",
+                str(prepared_dir),
+                "--target",
+                target_name,
+            ],
+            check=False,
+            text=True,
+            env=snow_env(),
+        )
+        if completed.returncode != 0:
+            raise SystemExit(completed.returncode)
+
     return prepared_dir
 
 

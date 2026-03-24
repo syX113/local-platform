@@ -7,3 +7,4 @@ until mc alias set local "${MINIO_ENDPOINT}" "${MINIO_ROOT_USER}" "${MINIO_ROOT_
 done
 
 mc mb --ignore-existing "local/${MINIO_BUCKET}"
+mc mb --ignore-existing "local/${MINIO_MANIFEST_BUCKET:-dbt-manifests}"

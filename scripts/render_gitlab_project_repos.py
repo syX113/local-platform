@@ -9,7 +9,7 @@ from textwrap import dedent
 
 ROOT_DIR = Path(__file__).resolve().parent.parent
 GENERATED_ROOT = ROOT_DIR / "gitlab-projects" / "generated"
-IGNORE_NAMES = {".DS_Store", "__pycache__", ".dlt", "target", "logs", "deployed"}
+IGNORE_NAMES = {".DS_Store", "__pycache__", ".dlt", ".loom", "target", "logs", "deployed"}
 
 
 def env(name: str, default: str) -> str:
@@ -59,6 +59,9 @@ def shared_gitignore() -> str:
         .env
         artifacts/
         logs/
+        .loom/
+        dbt/.loom/
+        dbt/projects/**/.loom/
         airflow/dags/deployed/
         dbt/profiles/.user.yml
         dbt/target/
@@ -947,6 +950,7 @@ def render_sdp_repo(project_path: str) -> None:
         "dbt/requirements.txt",
         "dbt/scripts/apply_sql.py",
         "dbt/scripts/ensure_target_databases.py",
+        "dbt/scripts/loom_manifest.py",
         "dbt/scripts/manage_ci_clones.py",
         "dbt/scripts/snow_dbt_cli.py",
     ):
@@ -993,6 +997,7 @@ def render_sdp_repo(project_path: str) -> None:
                 - Two Airflow DAGs for PostgreSQL -> MinIO/Iceberg ingestion: one for `orders`, one for `customers`
                 - Two dlt ingestion entrypoints: one for `orders`, one for `customers`
                 - One combined source dbt project for Snowflake `INBOUND`, `CORE`, and `ACCESS`, executed natively in Snowflake
+                - Source dbt manifests are published to MinIO so the downstream EDP repositories can weave the public source models into their own dbt projects with dbt-loom
                 - Two SDPs inside the same repository: `orders` and `customers`
                 - `ci/scripts/` contains only CI helper scripts
                 - `ci/` contains runner-only config and Snowflake foundation metadata
@@ -1054,12 +1059,14 @@ def render_edp_repo(project_path: str) -> None:
         "dbt/requirements.txt",
         "dbt/scripts/apply_sql.py",
         "dbt/scripts/ensure_target_databases.py",
+        "dbt/scripts/loom_manifest.py",
         "dbt/scripts/manage_ci_clones.py",
         "dbt/scripts/snow_dbt_cli.py",
         "dbt/scripts/zero_copy_clone_check.py",
     ):
         copy_path(relative_path, repo_dir)
     copy_path("dbt/profiles/profiles.yml", repo_dir, "dbt/profiles/profiles.yml")
+    copy_path("dbt/projects/proj_edp_orders/dbt_loom.config.yml", repo_dir, "dbt/dbt_loom.config.yml")
 
     copy_path("snowflake/sql/01_snowflake_foundation.sql.tpl", repo_dir, "ci/snowflake/sql/01_snowflake_foundation.sql.tpl")
     copy_path("snowflake/data_products.json", repo_dir, "ci/snowflake/data_products.json")
@@ -1083,6 +1090,7 @@ def render_edp_repo(project_path: str) -> None:
                 Managed artifacts:
 
                 - EDP dbt project for Snowflake `INBOUND`, `CORE`, and `ACCESS`, executed natively in Snowflake
+                - The upstream source manifests are fetched from MinIO into `dbt/.loom/manifest.json.gz` and woven into the project with dbt-loom before Snowflake deployment
                 - `ci/scripts/` contains only CI helper scripts
                 - `ci/` contains runner-only config and Snowflake foundation metadata
 
@@ -1146,12 +1154,14 @@ def render_edp_customers_repo(project_path: str) -> None:
         "dbt/requirements.txt",
         "dbt/scripts/apply_sql.py",
         "dbt/scripts/ensure_target_databases.py",
+        "dbt/scripts/loom_manifest.py",
         "dbt/scripts/manage_ci_clones.py",
         "dbt/scripts/snow_dbt_cli.py",
         "dbt/scripts/zero_copy_clone_check.py",
     ):
         copy_path(relative_path, repo_dir)
     copy_path("dbt/profiles/profiles.yml", repo_dir, "dbt/profiles/profiles.yml")
+    copy_path("dbt/projects/proj_edp_customers/dbt_loom.config.yml", repo_dir, "dbt/dbt_loom.config.yml")
 
     copy_path("snowflake/sql/01_snowflake_foundation.sql.tpl", repo_dir, "ci/snowflake/sql/01_snowflake_foundation.sql.tpl")
     copy_path("snowflake/data_products.json", repo_dir, "ci/snowflake/data_products.json")
@@ -1175,6 +1185,7 @@ def render_edp_customers_repo(project_path: str) -> None:
                 Managed artifacts:
 
                 - EDP customers dbt project for Snowflake `INBOUND`, `CORE`, and `ACCESS`, executed natively in Snowflake
+                - The upstream source manifests are fetched from MinIO into `dbt/.loom/manifest.json.gz` and woven into the project with dbt-loom before Snowflake deployment
                 - `ci/scripts/` contains only CI helper scripts
                 - `ci/` contains runner-only config and Snowflake foundation metadata
 

@@ -13,6 +13,8 @@ gitlab-projects/generated/
 dbt/target/
 dbt/dbt_packages/
 dbt/logs/
+dbt/.loom/
+dbt/projects/**/.loom/
 dbt/profiles/.user.yml
 dbt/projects/**/target/
 dbt/projects/**/logs/

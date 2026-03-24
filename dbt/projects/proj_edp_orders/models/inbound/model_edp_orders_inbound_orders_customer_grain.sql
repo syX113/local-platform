@@ -7,4 +7,4 @@ select
   first_order_at,
   latest_order_at,
   latest_load_batch
-from {{ source('source_edp_orders_sdp_access', 'T_ORDERS_CUSTOMER_GRAIN') }}
+from {{ ref('proj_source_finnova', 'model_sdp_orders_access_orders_customer_grain') }}

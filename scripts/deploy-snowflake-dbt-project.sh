@@ -23,6 +23,8 @@ target_kind=""
 
 container_project_dir="$(resolve_container_dbt_project_dir "${project_slug}")"
 
+ensure_dbt_loom_manifest_for_project "${project_slug}"
+
 case "${project_slug}" in
   proj_source_finnova)
     target_kind="source"

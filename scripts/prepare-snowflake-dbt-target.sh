@@ -70,6 +70,7 @@ case "${project_slug}" in
       "${SNOWFLAKE_SDP_ACC_SCHEMA:-ACCESS}"
     ;;
   proj_edp_orders|proj_edp_customers)
+    ensure_dbt_loom_manifest_for_project "${project_slug}"
     run_prepare \
       "$(resolve_project_dir "${project_slug}")" \
       "${SNOW_DBT_TARGET_NAME:-dev}" \

@@ -7,4 +7,4 @@ select
   total_order_value,
   avg_customer_value,
   latest_cleaned_at
-from {{ source('source_edp_customers_sdp_access', 'T_CUSTOMERS_SEGMENT_GRAIN') }}
+from {{ ref('proj_source_finnova', 'model_sdp_customers_access_customers_segment_grain') }}

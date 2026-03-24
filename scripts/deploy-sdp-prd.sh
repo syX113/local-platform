@@ -43,6 +43,8 @@ for scope in orders customers; do
   SOURCE_SCOPE="${scope}" bash "${SCRIPT_DIR}/verify-sdp-promotion.sh" | tee "${ARTIFACT_DIR}/verify_sdp_prd_${scope}.log"
 done
 
+publish_source_loom_manifests
+
 cat > "${ARTIFACT_DIR}/summary.txt" <<EOF
 sdp_prd_deploy=passed
 airflow.prd_orders_dag_id=${PRD_ORDERS_AIRFLOW_DAG_ID}

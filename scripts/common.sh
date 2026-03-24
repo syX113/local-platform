@@ -383,6 +383,65 @@ resolve_container_dbt_project_dir() {
   return 1
 }
 
+dbt_loom_manifest_bucket() {
+  printf '%s' "${MINIO_MANIFEST_BUCKET:-dbt-manifests}"
+}
+
+dbt_loom_manifest_object_name_for_repo() {
+  local repo_path="${1:?GitLab repo path is required}"
+  printf 'dbt-loom/%s/manifest.json.gz' "${repo_path}"
+}
+
+dbt_loom_manifest_local_path() {
+  printf '%s' '.loom/manifest.json.gz'
+}
+
+run_dbt_loom_manifest_helper() {
+  local command="${1:?loom manifest command is required}"
+  shift
+
+  docker compose run --rm --no-deps dbt-executor \
+    python /opt/platform/dbt/scripts/loom_manifest.py "${command}" "$@"
+}
+
+publish_source_loom_manifests() {
+  local source_project_slug="${1:-proj_source_finnova}"
+  local source_project_dir
+  local bucket_name
+  local edp_repo_path edp_customers_repo_path
+
+  source_project_dir="$(resolve_container_dbt_project_dir "${source_project_slug}")"
+  bucket_name="$(dbt_loom_manifest_bucket)"
+  edp_repo_path="${GITLAB_EDP_PROJECT_PATH:-proj_edp_orders}"
+  edp_customers_repo_path="${GITLAB_EDP_CUSTOMERS_PROJECT_PATH:-proj_edp_customers}"
+
+  run_dbt_loom_manifest_helper publish \
+    --project-dir "${source_project_dir}" \
+    --bucket "${bucket_name}" \
+    --object-key "$(dbt_loom_manifest_object_name_for_repo "${edp_repo_path}")" \
+    --object-key "$(dbt_loom_manifest_object_name_for_repo "${edp_customers_repo_path}")"
+}
+
+ensure_dbt_loom_manifest_for_project() {
+  local project_slug="${1:?dbt project slug is required}"
+  case "${project_slug}" in
+    proj_edp_orders|proj_edp_customers)
+      ;;
+    *)
+      return 0
+      ;;
+  esac
+
+  local project_dir bucket_name
+  project_dir="$(resolve_container_dbt_project_dir "${project_slug}")"
+  bucket_name="$(dbt_loom_manifest_bucket)"
+
+  run_dbt_loom_manifest_helper fetch \
+    --project-dir "${project_dir}" \
+    --bucket "${bucket_name}" \
+    --object-key "$(dbt_loom_manifest_object_name_for_repo "${project_slug}")"
+}
+
 export_prd_runtime_env() {
   local prd_prefix source_dlt_pipeline source_iceberg_namespace source_minio_prefix
   local source_sdp_database source_sdp_customers_database

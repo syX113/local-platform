@@ -10,4 +10,4 @@ select
   order_created_at,
   load_batch,
   cleaned_at
-from {{ source('source_edp_orders_sdp_access', 'T_ORDERS_ORDER_GRAIN') }}
+from {{ ref('proj_source_finnova', 'model_sdp_orders_access_orders_order_grain') }}

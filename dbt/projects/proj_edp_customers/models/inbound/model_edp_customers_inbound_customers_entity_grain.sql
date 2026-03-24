@@ -13,4 +13,4 @@ select
   load_batch,
   customer_value_band,
   cleaned_at
-from {{ source('source_edp_customers_sdp_access', 'T_CUSTOMERS_ENTITY_GRAIN') }}
+from {{ ref('proj_source_finnova', 'model_sdp_customers_access_customers_entity_grain') }}

@@ -1,0 +1,5 @@
+manifests:
+  - name: proj_source_finnova
+    type: file
+    config:
+      path: .loom/manifest.json.gz
