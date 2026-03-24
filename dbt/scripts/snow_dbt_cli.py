@@ -144,12 +144,30 @@ def build_profiles_yml(project_dir: Path, *, database: str, schema: str, target_
     )
 
 
-def prepare_project_source(project_dir: Path, *, database: str, schema: str, target_name: str) -> Path:
+def prepare_project_source(
+    project_dir: Path,
+    *,
+    project_slug: str | None = None,
+    database: str,
+    schema: str,
+    target_name: str,
+    quiet: bool = False,
+    copy_downstream_dependencies: bool = True,
+    work_dir: Path | None = None,
+) -> Path:
     if not project_dir.joinpath("dbt_project.yml").exists():
         raise SystemExit(f"{project_dir} is not a dbt project directory")
 
-    work_dir = Path(tempfile.mkdtemp(prefix="snow-dbt-project-"))
-    prepared_dir = work_dir / "project"
+    project_identity = project_slug or project_dir.name
+
+    if work_dir is None:
+        work_root = Path(tempfile.mkdtemp(prefix="snow-dbt-project-"))
+        prepared_dir = work_root / "project"
+    else:
+        work_root = Path(work_dir)
+        prepared_dir = work_root / "project"
+        shutil.rmtree(prepared_dir, ignore_errors=True)
+
     shutil.copytree(
         project_dir,
         prepared_dir,
@@ -163,7 +181,7 @@ def prepare_project_source(project_dir: Path, *, database: str, schema: str, tar
         encoding="utf-8",
     )
 
-    if project_dir.name in DOWNSTREAM_PROJECT_SLUGS:
+    if copy_downstream_dependencies and project_identity in DOWNSTREAM_PROJECT_SLUGS:
         local_source_project_dir = project_dir.parent / SOURCE_PROJECT_SLUG
         if not local_source_project_dir.exists():
             raise SystemExit(
@@ -198,8 +216,13 @@ def prepare_project_source(project_dir: Path, *, database: str, schema: str, tar
             check=False,
             text=True,
             env=snow_env(),
+            capture_output=quiet,
         )
         if completed.returncode != 0:
+            if completed.stdout:
+                print(completed.stdout, file=sys.stdout, end="")
+            if completed.stderr:
+                print(completed.stderr, file=sys.stderr, end="")
             raise SystemExit(completed.returncode)
 
     return prepared_dir
@@ -334,15 +357,17 @@ def purge_all_projects() -> None:
         drop_project(project_name)
 
 
-def default_database_for_project(project_dir: Path) -> str:
-    project_name = project_dir.name
+def default_database_for_project(project_dir: Path, project_slug: str | None = None) -> str:
+    project_name = project_slug or project_dir.name
+    if "customers" in project_name:
+        return env("SNOWFLAKE_EDP_CUSTOMERS_DATABASE", env("SNOWFLAKE_EDP_DATABASE"))
     if "edp" in project_name:
         return env("SNOWFLAKE_EDP_DATABASE")
     return env("SNOWFLAKE_SDP_DATABASE")
 
 
-def default_schema_for_project(project_dir: Path) -> str:
-    project_name = project_dir.name
+def default_schema_for_project(project_dir: Path, project_slug: str | None = None) -> str:
+    project_name = project_slug or project_dir.name
     if "edp" in project_name:
         return env("SNOWFLAKE_EDP_CORE_SCHEMA")
     return env("SNOWFLAKE_SDP_CORE_SCHEMA")

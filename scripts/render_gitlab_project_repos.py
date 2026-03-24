@@ -43,6 +43,8 @@ def copy_path(src_relative: str, destination_root: Path, dest_relative: str | No
 
     destination.parent.mkdir(parents=True, exist_ok=True)
     shutil.copy2(source, destination)
+    if source.suffix == ".sh":
+        destination.chmod(destination.stat().st_mode | 0o111)
 
 
 def write_file(destination: Path, content: str) -> None:
@@ -68,6 +70,17 @@ def shared_gitignore() -> str:
         dbt/dbt_packages/
         """
     )
+
+
+def sqlfluff_lint_prepared_workspace_command(project_slug: str) -> str:
+    return dedent(
+        """\
+            - mkdir -p artifacts/sqlfluff/{workspace_name}
+            - docker compose run --rm --no-deps dbt-executor python /opt/platform/dbt/scripts/prepare_sqlfluff_workspace.py --project-dir /opt/platform/dbt --project-slug {project_slug} --workspace-dir /opt/platform/artifacts/sqlfluff/{workspace_name}
+            - docker compose run --rm --no-deps dbt-executor sqlfluff lint --config /opt/platform/artifacts/sqlfluff/{workspace_name}/.sqlfluff /opt/platform/artifacts/sqlfluff/{workspace_name}/models
+            - rm -rf artifacts/sqlfluff/{workspace_name}
+        """
+    ).format(project_slug=project_slug, workspace_name=project_slug)
 
 
 def sdp_ci_yaml() -> str:
@@ -168,7 +181,7 @@ def sdp_ci_yaml() -> str:
             - docker compose run --rm --no-deps --entrypoint python airflow-webserver -m compileall /opt/airflow/dags
             - docker compose run --rm --no-deps --entrypoint python dlt-extractor -m compileall /opt/platform/dlt
             - docker compose run --rm --no-deps --entrypoint python dbt-executor -m compileall /opt/platform/dbt
-            - docker compose run --rm --no-deps dbt-executor sqlfluff lint --config /opt/platform/dbt/.sqlfluff /opt/platform/dbt/models
+            - ./ci/scripts/lint-prepared-dbt-project.sh proj_source_finnova
 
         ci_validate_sdp_ingestion:
           stage: ci_validate
@@ -395,7 +408,7 @@ def edp_ci_yaml() -> str:
             - set -a; . artifacts/context/runtime.env; . artifacts/context/edp.env; set +a
             - docker compose config -q
             - docker compose run --rm --no-deps --entrypoint python dbt-executor -m compileall /opt/platform/dbt
-            - docker compose run --rm --no-deps dbt-executor sqlfluff lint --config /opt/platform/dbt/.sqlfluff /opt/platform/dbt/models
+            - ./ci/scripts/lint-prepared-dbt-project.sh proj_edp_orders
 
         ci_validate_edp_models:
           stage: ci_validate
@@ -510,6 +523,7 @@ def edp_customers_ci_yaml() -> str:
         .replace("name: PRD/EDP", "name: PRD/EDP_CUSTOMERS")
         .replace("resource_group: edp-dev", "resource_group: edp-customers-dev")
         .replace("resource_group: edp-prd", "resource_group: edp-customers-prd")
+        .replace("proj_edp_orders", "proj_edp_customers")
     )
 
 
@@ -827,40 +841,69 @@ def edp_compose_yaml() -> str:
         """\
         name: ${COMPOSE_PROJECT_NAME:-proj-edp-local}
 
+        x-common-env: &common-env
+          PLATFORM_DOCKER_NETWORK: ${PLATFORM_DOCKER_NETWORK:-local-platform-net}
+          AWS_ACCESS_KEY_ID: ${OBJECT_STORE_ACCESS_KEY_ID}
+          AWS_SECRET_ACCESS_KEY: ${OBJECT_STORE_SECRET_ACCESS_KEY}
+          AWS_DEFAULT_REGION: ${OBJECT_STORE_REGION}
+          AWS_REGION: ${OBJECT_STORE_REGION}
+          MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+          MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+          MINIO_BUCKET: ${MINIO_BUCKET}
+          MINIO_MANIFEST_BUCKET: ${MINIO_MANIFEST_BUCKET:-dbt-manifests}
+          MINIO_PREFIX: ${MINIO_PREFIX}
+          MINIO_ENDPOINT: ${MINIO_ENDPOINT}
+          MINIO_PUBLIC_ENDPOINT: ${MINIO_PUBLIC_ENDPOINT}
+          MINIO_USE_SSL: ${MINIO_USE_SSL}
+          MINIO_REGION: ${MINIO_REGION}
+          OBJECT_STORE_TYPE: ${OBJECT_STORE_TYPE}
+          OBJECT_STORE_BUCKET: ${OBJECT_STORE_BUCKET}
+          OBJECT_STORE_ACCESS_KEY_ID: ${OBJECT_STORE_ACCESS_KEY_ID}
+          OBJECT_STORE_SECRET_ACCESS_KEY: ${OBJECT_STORE_SECRET_ACCESS_KEY}
+          OBJECT_STORE_ENDPOINT_URL: ${OBJECT_STORE_ENDPOINT_URL}
+          OBJECT_STORE_REGION: ${OBJECT_STORE_REGION}
+          OBJECT_STORE_USE_SSL: ${OBJECT_STORE_USE_SSL}
+          SNOWFLAKE_ACCOUNT: ${SNOWFLAKE_ACCOUNT}
+          SNOWFLAKE_USER: ${SNOWFLAKE_USER}
+          SNOWFLAKE_PASSWORD: ${SNOWFLAKE_PASSWORD}
+          SNOWFLAKE_ROLE: ${SNOWFLAKE_ROLE}
+          SNOWFLAKE_WAREHOUSE: ${SNOWFLAKE_WAREHOUSE}
+          SNOWFLAKE_CONTROL_DATABASE: ${SNOWFLAKE_CONTROL_DATABASE:-LOCAL_PLATFORM_CONTROL}
+          SNOWFLAKE_CONTROL_SCHEMA: ${SNOWFLAKE_CONTROL_SCHEMA:-OPERATIONS}
+          SNOWFLAKE_DBT_STAGE: ${SNOWFLAKE_DBT_STAGE:-DBT_PROJECT_STAGE}
+          SNOWFLAKE_SDP_DATABASE: ${SNOWFLAKE_SDP_DATABASE}
+          SNOWFLAKE_SDP_CUSTOMERS_DATABASE: ${SNOWFLAKE_SDP_CUSTOMERS_DATABASE}
+          SNOWFLAKE_SDP_IN_SCHEMA: ${SNOWFLAKE_SDP_IN_SCHEMA}
+          SNOWFLAKE_SDP_CORE_SCHEMA: ${SNOWFLAKE_SDP_CORE_SCHEMA}
+          SNOWFLAKE_SDP_ACC_SCHEMA: ${SNOWFLAKE_SDP_ACC_SCHEMA}
+          SNOWFLAKE_SDP_DBT_PROJECT: ${SNOWFLAKE_SDP_DBT_PROJECT:-DEV_DBT_PROJECT_SOURCE_FINNOVA}
+          SNOWFLAKE_EDP_DATABASE: ${SNOWFLAKE_EDP_DATABASE}
+          SNOWFLAKE_EDP_CUSTOMERS_DATABASE: ${SNOWFLAKE_EDP_CUSTOMERS_DATABASE}
+          SNOWFLAKE_EDP_IN_SCHEMA: ${SNOWFLAKE_EDP_IN_SCHEMA}
+          SNOWFLAKE_EDP_CORE_SCHEMA: ${SNOWFLAKE_EDP_CORE_SCHEMA}
+          SNOWFLAKE_EDP_ACC_SCHEMA: ${SNOWFLAKE_EDP_ACC_SCHEMA}
+          SNOWFLAKE_EDP_DBT_PROJECT: ${SNOWFLAKE_EDP_DBT_PROJECT:-DEV_DBT_PROJECT_EDP_ORDERS}
+          SNOWFLAKE_EDP_CUSTOMERS_DBT_PROJECT: ${SNOWFLAKE_EDP_CUSTOMERS_DBT_PROJECT:-DEV_DBT_PROJECT_EDP_CUSTOMERS}
+          SNOWFLAKE_CLONE_SCHEMA: ${SNOWFLAKE_CLONE_SCHEMA}
+          SNOW_DBT_TARGET_NAME: ${SNOW_DBT_TARGET_NAME:-dev}
+          DBT_THREADS: ${DBT_THREADS}
+
         services:
           dbt-executor:
             build:
               context: .
               dockerfile: dbt/Dockerfile
             image: ${RUNTIME_IMAGE_PREFIX:-${COMPOSE_PROJECT_NAME:-proj-edp-local}}/dbt-executor:dev
-            environment:
-              SNOWFLAKE_ACCOUNT: ${SNOWFLAKE_ACCOUNT}
-              SNOWFLAKE_USER: ${SNOWFLAKE_USER}
-              SNOWFLAKE_PASSWORD: ${SNOWFLAKE_PASSWORD}
-              SNOWFLAKE_ROLE: ${SNOWFLAKE_ROLE}
-              SNOWFLAKE_WAREHOUSE: ${SNOWFLAKE_WAREHOUSE}
-              SNOWFLAKE_CONTROL_DATABASE: ${SNOWFLAKE_CONTROL_DATABASE:-LOCAL_PLATFORM_CONTROL}
-              SNOWFLAKE_CONTROL_SCHEMA: ${SNOWFLAKE_CONTROL_SCHEMA:-OPERATIONS}
-              SNOWFLAKE_DBT_STAGE: ${SNOWFLAKE_DBT_STAGE:-DBT_PROJECT_STAGE}
-              SNOWFLAKE_SDP_DATABASE: ${SNOWFLAKE_SDP_DATABASE}
-              SNOWFLAKE_SDP_IN_SCHEMA: ${SNOWFLAKE_SDP_IN_SCHEMA}
-              SNOWFLAKE_SDP_CORE_SCHEMA: ${SNOWFLAKE_SDP_CORE_SCHEMA}
-              SNOWFLAKE_SDP_ACC_SCHEMA: ${SNOWFLAKE_SDP_ACC_SCHEMA}
-              SNOWFLAKE_SDP_CUSTOMERS_DATABASE: ${SNOWFLAKE_SDP_CUSTOMERS_DATABASE}
-              SNOWFLAKE_SDP_DBT_PROJECT: ${SNOWFLAKE_SDP_DBT_PROJECT:-DEV_DBT_PROJECT_SOURCE_FINNOVA}
-              SNOWFLAKE_EDP_DATABASE: ${SNOWFLAKE_EDP_DATABASE}
-              SNOWFLAKE_EDP_CUSTOMERS_DATABASE: ${SNOWFLAKE_EDP_CUSTOMERS_DATABASE}
-              SNOWFLAKE_EDP_IN_SCHEMA: ${SNOWFLAKE_EDP_IN_SCHEMA}
-              SNOWFLAKE_EDP_CORE_SCHEMA: ${SNOWFLAKE_EDP_CORE_SCHEMA}
-              SNOWFLAKE_EDP_ACC_SCHEMA: ${SNOWFLAKE_EDP_ACC_SCHEMA}
-              SNOWFLAKE_EDP_DBT_PROJECT: ${SNOWFLAKE_EDP_DBT_PROJECT:-DEV_DBT_PROJECT_EDP_ORDERS}
-              SNOWFLAKE_EDP_CUSTOMERS_DBT_PROJECT: ${SNOWFLAKE_EDP_CUSTOMERS_DBT_PROJECT:-DEV_DBT_PROJECT_EDP_CUSTOMERS}
-              SNOWFLAKE_CLONE_SCHEMA: ${SNOWFLAKE_CLONE_SCHEMA}
-              SNOW_DBT_TARGET_NAME: ${SNOW_DBT_TARGET_NAME:-dev}
-              DBT_THREADS: ${DBT_THREADS}
+            environment: *common-env
             volumes:
               - ./dbt:/opt/platform/dbt
               - ./ci/snowflake:/opt/platform/ci/snowflake
+            networks:
+              - platform
+
+        networks:
+          platform:
+            name: ${PLATFORM_DOCKER_NETWORK:-local-platform-net}
         """
     )
 
@@ -926,6 +969,7 @@ def render_sdp_repo(project_path: str) -> None:
     for relative_path in (
         "scripts/common.sh",
         "scripts/ensure-snowflake-foundation.sh",
+        "scripts/lint-prepared-dbt-project.sh",
         "scripts/prepare-ci-sandbox.sh",
         "scripts/resolve-existing-sandbox.sh",
         "scripts/cleanup-ci-sandbox.sh",
@@ -950,6 +994,7 @@ def render_sdp_repo(project_path: str) -> None:
         "dbt/requirements.txt",
         "dbt/scripts/apply_sql.py",
         "dbt/scripts/ensure_target_databases.py",
+        "dbt/scripts/prepare_sqlfluff_workspace.py",
         "dbt/scripts/loom_manifest.py",
         "dbt/scripts/manage_ci_clones.py",
         "dbt/scripts/snow_dbt_cli.py",
@@ -983,7 +1028,10 @@ def render_sdp_repo(project_path: str) -> None:
     write_file(repo_dir / "compose.yaml", sdp_compose_yaml())
     write_file(repo_dir / "compose.ci.yaml", sdp_compose_ci_yaml())
     write_file(repo_dir / ".gitignore", shared_gitignore())
-    write_file(repo_dir / ".gitlab-ci.yml", sdp_ci_yaml())
+    write_file(
+        repo_dir / ".gitlab-ci.yml",
+        sdp_ci_yaml().replace("__SQLFLUFF_LINT__", sqlfluff_lint_prepared_workspace_command("proj_source_finnova")),
+    )
     write_file(
         repo_dir / "README.md",
         project_readme(
@@ -1039,6 +1087,7 @@ def render_edp_repo(project_path: str) -> None:
     for relative_path in (
         "scripts/common.sh",
         "scripts/ensure-snowflake-foundation.sh",
+        "scripts/lint-prepared-dbt-project.sh",
         "scripts/prepare-ci-sandbox.sh",
         "scripts/resolve-existing-sandbox.sh",
         "scripts/cleanup-ci-sandbox.sh",
@@ -1059,6 +1108,7 @@ def render_edp_repo(project_path: str) -> None:
         "dbt/requirements.txt",
         "dbt/scripts/apply_sql.py",
         "dbt/scripts/ensure_target_databases.py",
+        "dbt/scripts/prepare_sqlfluff_workspace.py",
         "dbt/scripts/loom_manifest.py",
         "dbt/scripts/manage_ci_clones.py",
         "dbt/scripts/snow_dbt_cli.py",
@@ -1078,7 +1128,10 @@ def render_edp_repo(project_path: str) -> None:
     write_file(repo_dir / "compose.yaml", edp_compose_yaml())
     write_file(repo_dir / "compose.ci.yaml", edp_compose_ci_yaml())
     write_file(repo_dir / ".gitignore", shared_gitignore())
-    write_file(repo_dir / ".gitlab-ci.yml", edp_ci_yaml())
+    write_file(
+        repo_dir / ".gitlab-ci.yml",
+        edp_ci_yaml().replace("__SQLFLUFF_LINT__", sqlfluff_lint_prepared_workspace_command("proj_edp_orders")),
+    )
     write_file(
         repo_dir / "README.md",
         project_readme(
@@ -1090,7 +1143,7 @@ def render_edp_repo(project_path: str) -> None:
                 Managed artifacts:
 
                 - EDP dbt project for Snowflake `INBOUND`, `CORE`, and `ACCESS`, executed natively in Snowflake
-                - The upstream source manifests are fetched from MinIO into `dbt/.loom/manifest.json.gz` and woven into the project with dbt-loom before Snowflake deployment
+                - The upstream source manifests are fetched from MinIO into `dbt/loom/manifest.json.gz` and woven into the project with dbt-loom before Snowflake deployment
                 - `ci/scripts/` contains only CI helper scripts
                 - `ci/` contains runner-only config and Snowflake foundation metadata
 
@@ -1134,6 +1187,7 @@ def render_edp_customers_repo(project_path: str) -> None:
     for relative_path in (
         "scripts/common.sh",
         "scripts/ensure-snowflake-foundation.sh",
+        "scripts/lint-prepared-dbt-project.sh",
         "scripts/prepare-ci-sandbox.sh",
         "scripts/resolve-existing-sandbox.sh",
         "scripts/cleanup-ci-sandbox.sh",
@@ -1154,6 +1208,7 @@ def render_edp_customers_repo(project_path: str) -> None:
         "dbt/requirements.txt",
         "dbt/scripts/apply_sql.py",
         "dbt/scripts/ensure_target_databases.py",
+        "dbt/scripts/prepare_sqlfluff_workspace.py",
         "dbt/scripts/loom_manifest.py",
         "dbt/scripts/manage_ci_clones.py",
         "dbt/scripts/snow_dbt_cli.py",
@@ -1185,7 +1240,7 @@ def render_edp_customers_repo(project_path: str) -> None:
                 Managed artifacts:
 
                 - EDP customers dbt project for Snowflake `INBOUND`, `CORE`, and `ACCESS`, executed natively in Snowflake
-                - The upstream source manifests are fetched from MinIO into `dbt/.loom/manifest.json.gz` and woven into the project with dbt-loom before Snowflake deployment
+                - The upstream source manifests are fetched from MinIO into `dbt/loom/manifest.json.gz` and woven into the project with dbt-loom before Snowflake deployment
                 - `ci/scripts/` contains only CI helper scripts
                 - `ci/` contains runner-only config and Snowflake foundation metadata
 

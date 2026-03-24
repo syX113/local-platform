@@ -393,7 +393,7 @@ dbt_loom_manifest_object_name_for_repo() {
 }
 
 dbt_loom_manifest_local_path() {
-  printf '%s' '.loom/manifest.json.gz'
+  printf '%s' 'loom/manifest.json.gz'
 }
 
 run_dbt_loom_manifest_helper() {

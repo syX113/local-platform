@@ -216,7 +216,7 @@ def build_parser() -> argparse.ArgumentParser:
     fetch_parser.add_argument("--project-dir", required=True)
     fetch_parser.add_argument("--bucket", default=manifest_bucket())
     fetch_parser.add_argument("--object-key", required=True)
-    fetch_parser.add_argument("--local-path", default=".loom/manifest.json.gz")
+    fetch_parser.add_argument("--local-path", default="loom/manifest.json.gz")
 
     return parser
 
