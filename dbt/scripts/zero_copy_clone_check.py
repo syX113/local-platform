@@ -4,6 +4,7 @@ import os
 import sys
 
 import snowflake.connector
+from project_registry import project_by_name, project_by_slug
 
 
 def ident(*parts: str) -> str:
@@ -28,10 +29,23 @@ def scalar(cursor, sql: str):
 
 
 def main() -> int:
+    project_slug = os.environ.get("PROJECT_SLUG", "").strip()
+    project_name = os.environ.get("SNOWFLAKE_EDP_DBT_PROJECT", "").strip()
+    if project_slug:
+        project = project_by_slug(project_slug)
+    elif project_name:
+        project = project_by_name(project_name)
+    else:
+        raise SystemExit("missing PROJECT_SLUG or SNOWFLAKE_EDP_DBT_PROJECT")
+
     database = os.environ["SNOWFLAKE_EDP_DATABASE"]
     schema = os.environ["SNOWFLAKE_EDP_CORE_SCHEMA"]
     clone_schema = os.environ.get("SNOWFLAKE_CLONE_SCHEMA", f"{schema}_CLONE_CI")
-    fact_table = os.environ.get("SNOWFLAKE_ZERO_COPY_FACT_TABLE", "FCT_ORDER_REVENUE_STAR")
+    fact_table = os.environ.get("SNOWFLAKE_ZERO_COPY_FACT_TABLE", "").strip() or str(
+        project.get("zero_copy_fact_table", "")
+    ).strip()
+    if not fact_table:
+        raise SystemExit("missing zero_copy_fact_table in project registry or SNOWFLAKE_ZERO_COPY_FACT_TABLE")
 
     connection = connect()
     try:

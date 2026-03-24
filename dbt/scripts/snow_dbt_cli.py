@@ -12,13 +12,13 @@ from pathlib import Path
 
 import snowflake.connector
 
+from project_registry import project_by_name, project_by_slug
+
 
 ENV_VAR_PATTERN = re.compile(
     r"env_var\(\s*'([^']+)'\s*(?:,\s*'([^']*)'\s*)?\)"
 )
 EXCLUDED_PATH_NAMES = {".git", "__pycache__", "target", "logs", "dbt_packages"}
-SOURCE_PROJECT_SLUG = "proj_source_finnova"
-DOWNSTREAM_PROJECT_SLUGS = {"proj_edp_orders", "proj_edp_customers"}
 
 
 def env(name: str, default: str | None = None) -> str:
@@ -101,6 +101,33 @@ def fully_qualified_project_name(name: str) -> str:
     return ident(control_database(), control_schema(), name)
 
 
+def project_spec(project_dir: Path, project_slug: str | None = None) -> dict[str, object]:
+    if project_slug:
+        try:
+            return project_by_slug(project_slug)
+        except SystemExit:
+            pass
+
+    try:
+        return project_by_slug(project_dir.name)
+    except SystemExit:
+        pass
+
+    try:
+        return project_by_name(project_dir.name)
+    except SystemExit:
+        return {}
+
+
+def project_registry_env_value(spec: dict[str, object], field: str, *, required: bool = True, default: str = "") -> str:
+    env_name = str(spec.get(field, "")).strip()
+    if not env_name:
+        if required:
+            raise SystemExit(f"missing project registry field: {field}")
+        return default
+    return env(env_name, default if not required else None)
+
+
 def render_env_vars(raw_text: str) -> str:
     def replace(match: re.Match[str]) -> str:
         variable_name = match.group(1)
@@ -158,7 +185,9 @@ def prepare_project_source(
     if not project_dir.joinpath("dbt_project.yml").exists():
         raise SystemExit(f"{project_dir} is not a dbt project directory")
 
-    project_identity = project_slug or project_dir.name
+    spec = project_spec(project_dir, project_slug)
+    project_identity = str(spec.get("slug", project_slug or project_dir.name)).strip()
+    project_kind = str(spec.get("kind", "")).strip()
 
     if work_dir is None:
         work_root = Path(tempfile.mkdtemp(prefix="snow-dbt-project-"))
@@ -181,14 +210,18 @@ def prepare_project_source(
         encoding="utf-8",
     )
 
-    if copy_downstream_dependencies and project_identity in DOWNSTREAM_PROJECT_SLUGS:
-        local_source_project_dir = project_dir.parent / SOURCE_PROJECT_SLUG
+    if copy_downstream_dependencies and project_kind == "edp":
+        upstream_project_slug = str(spec.get("upstream_project_slug", "")).strip()
+        if not upstream_project_slug:
+            raise SystemExit(f"missing upstream_project_slug for project: {project_identity}")
+
+        local_source_project_dir = project_dir.parent / upstream_project_slug
         if not local_source_project_dir.exists():
             raise SystemExit(
                 f"missing local dependency project directory: {local_source_project_dir}"
             )
 
-        local_dependency_dir = prepared_dir / SOURCE_PROJECT_SLUG
+        local_dependency_dir = prepared_dir / upstream_project_slug
         shutil.copytree(
             local_source_project_dir,
             local_dependency_dir,
@@ -198,7 +231,7 @@ def prepare_project_source(
 
         prepared_dir.joinpath("packages.yml").write_text(
             "packages:\n"
-            f"  - local: {SOURCE_PROJECT_SLUG}\n",
+            f"  - local: {upstream_project_slug}\n",
             encoding="utf-8",
         )
 
@@ -228,8 +261,14 @@ def prepare_project_source(
     return prepared_dir
 
 
-def deploy_project(*, project_dir: Path, project_name: str, database: str, schema: str, target_name: str) -> None:
-    prepared_dir = prepare_project_source(project_dir, database=database, schema=schema, target_name=target_name)
+def deploy_project(*, project_dir: Path, project_name: str, database: str, schema: str, target_name: str, project_slug: str | None = None) -> None:
+    prepared_dir = prepare_project_source(
+        project_dir,
+        project_slug=project_slug,
+        database=database,
+        schema=schema,
+        target_name=target_name,
+    )
     try:
         run_snow(
             "dbt",
@@ -259,8 +298,22 @@ def execute_project(*, project_name: str, dbt_command: str, command_args: list[s
     )
 
 
-def run_local_dbt(*, project_dir: Path, database: str, schema: str, target_name: str, dbt_args: list[str]) -> None:
-    prepared_dir = prepare_project_source(project_dir, database=database, schema=schema, target_name=target_name)
+def run_local_dbt(
+    *,
+    project_dir: Path,
+    project_slug: str | None = None,
+    database: str,
+    schema: str,
+    target_name: str,
+    dbt_args: list[str],
+) -> None:
+    prepared_dir = prepare_project_source(
+        project_dir,
+        project_slug=project_slug,
+        database=database,
+        schema=schema,
+        target_name=target_name,
+    )
     try:
         completed = subprocess.run(
             [
@@ -283,9 +336,18 @@ def run_local_dbt(*, project_dir: Path, database: str, schema: str, target_name:
         shutil.rmtree(prepared_dir.parent, ignore_errors=True)
 
 
-def prepare_target(*, project_dir: Path, database: str, schema: str, target_name: str, schemas: list[str]) -> None:
+def prepare_target(
+    *,
+    project_dir: Path,
+    project_slug: str | None = None,
+    database: str,
+    schema: str,
+    target_name: str,
+    schemas: list[str],
+) -> None:
     run_local_dbt(
         project_dir=project_dir,
+        project_slug=project_slug,
         database=database,
         schema=schema,
         target_name=target_name,
@@ -358,19 +420,13 @@ def purge_all_projects() -> None:
 
 
 def default_database_for_project(project_dir: Path, project_slug: str | None = None) -> str:
-    project_name = project_slug or project_dir.name
-    if "customers" in project_name:
-        return env("SNOWFLAKE_EDP_CUSTOMERS_DATABASE", env("SNOWFLAKE_EDP_DATABASE"))
-    if "edp" in project_name:
-        return env("SNOWFLAKE_EDP_DATABASE")
-    return env("SNOWFLAKE_SDP_DATABASE")
+    spec = project_spec(project_dir, project_slug)
+    return project_registry_env_value(spec, "default_database_env")
 
 
 def default_schema_for_project(project_dir: Path, project_slug: str | None = None) -> str:
-    project_name = project_slug or project_dir.name
-    if "edp" in project_name:
-        return env("SNOWFLAKE_EDP_CORE_SCHEMA")
-    return env("SNOWFLAKE_SDP_CORE_SCHEMA")
+    spec = project_spec(project_dir, project_slug)
+    return project_registry_env_value(spec, "default_schema_env")
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -380,12 +436,14 @@ def build_parser() -> argparse.ArgumentParser:
     deploy_parser = subparsers.add_parser("deploy")
     deploy_parser.add_argument("--project-dir", required=True)
     deploy_parser.add_argument("--project-name", required=True)
+    deploy_parser.add_argument("--project-slug")
     deploy_parser.add_argument("--database")
     deploy_parser.add_argument("--schema")
     deploy_parser.add_argument("--target-name", default="dev")
 
     prepare_parser = subparsers.add_parser("prepare-target")
     prepare_parser.add_argument("--project-dir", required=True)
+    prepare_parser.add_argument("--project-slug")
     prepare_parser.add_argument("--database", required=True)
     prepare_parser.add_argument("--schema", required=True)
     prepare_parser.add_argument("--target-name", default="dev")
@@ -414,12 +472,14 @@ def main() -> int:
             database=args.database or default_database_for_project(project_dir),
             schema=args.schema or default_schema_for_project(project_dir),
             target_name=args.target_name,
+            project_slug=args.project_slug,
         )
         return 0
 
     if args.command == "prepare-target":
         prepare_target(
             project_dir=Path(args.project_dir),
+            project_slug=args.project_slug,
             database=args.database,
             schema=args.schema,
             target_name=args.target_name,

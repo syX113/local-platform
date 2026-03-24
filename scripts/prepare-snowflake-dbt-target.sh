@@ -13,23 +13,20 @@ source "${SCRIPT_DIR}/common.sh"
 ensure_platform_env
 
 project_slug="${1:?project slug is required}"
-
-resolve_project_dir() {
-  local slug="$1"
-
-  if [ -f "${ROOT_DIR}/dbt/dbt_project.yml" ]; then
-    printf '%s' "/opt/platform/dbt"
-    return 0
-  fi
-
-  if [ -f "${ROOT_DIR}/dbt/projects/${slug}/dbt_project.yml" ]; then
-    printf '%s' "/opt/platform/dbt/projects/${slug}"
-    return 0
-  fi
-
-  echo "unable to resolve dbt project directory for ${slug}" >&2
-  exit 1
-}
+project_dir="$(resolve_container_dbt_project_dir "${project_slug}")"
+project_kind="$(project_registry_lookup "${project_slug}" kind)"
+case "${project_kind}" in
+  source)
+    default_core_schema_env="SNOWFLAKE_SDP_CORE_SCHEMA"
+    ;;
+  edp)
+    default_core_schema_env="SNOWFLAKE_EDP_CORE_SCHEMA"
+    ;;
+  *)
+    echo "unsupported dbt project slug for Snowflake target preparation: ${project_slug}" >&2
+    exit 1
+    ;;
+esac
 
 run_prepare() {
   local project_dir="$1"
@@ -44,44 +41,38 @@ run_prepare() {
     python /opt/platform/dbt/scripts/snow_dbt_cli.py \
       prepare-target \
       --project-dir "${project_dir}" \
+      --project-slug "${project_slug}" \
       --database "${database_name}" \
       --schema "${schema_name}" \
       --target-name "${target_name}" \
       --schemas "${schemas[@]}"
 }
 
-case "${project_slug}" in
-  proj_source_finnova)
-    run_prepare \
-      "$(resolve_project_dir "proj_source_finnova")" \
-      "${SNOW_DBT_TARGET_NAME:-dev}" \
-      "${SNOWFLAKE_SDP_CORE_SCHEMA:-CORE}" \
-      "${SNOWFLAKE_SDP_DATABASE}" \
-      "${SNOWFLAKE_SDP_IN_SCHEMA:-INBOUND}" \
-      "${SNOWFLAKE_SDP_CORE_SCHEMA:-CORE}" \
-      "${SNOWFLAKE_SDP_ACC_SCHEMA:-ACCESS}"
-    run_prepare \
-      "$(resolve_project_dir "proj_source_finnova")" \
-      "${SNOW_DBT_TARGET_NAME:-dev}" \
-      "${SNOWFLAKE_SDP_CORE_SCHEMA:-CORE}" \
-      "${SNOWFLAKE_SDP_CUSTOMERS_DATABASE}" \
-      "${SNOWFLAKE_SDP_IN_SCHEMA:-INBOUND}" \
-      "${SNOWFLAKE_SDP_CORE_SCHEMA:-CORE}" \
-      "${SNOWFLAKE_SDP_ACC_SCHEMA:-ACCESS}"
-    ;;
-  proj_edp_orders|proj_edp_customers)
-    ensure_dbt_loom_manifest_for_project "${project_slug}"
-    run_prepare \
-      "$(resolve_project_dir "${project_slug}")" \
-      "${SNOW_DBT_TARGET_NAME:-dev}" \
-      "${SNOWFLAKE_EDP_CORE_SCHEMA:-CORE}" \
-      "${SNOWFLAKE_EDP_DATABASE}" \
-      "${SNOWFLAKE_EDP_IN_SCHEMA:-INBOUND}" \
-      "${SNOWFLAKE_EDP_CORE_SCHEMA:-CORE}" \
-      "${SNOWFLAKE_EDP_ACC_SCHEMA:-ACCESS}"
-    ;;
-  *)
-    echo "unsupported dbt project slug for Snowflake target preparation: ${project_slug}" >&2
+ensure_dbt_loom_manifest_for_project "${project_slug}"
+
+while IFS='|' read -r database_env schema_envs_csv; do
+  [ -n "${database_env}" ] || continue
+  database_name="${!database_env:-}"
+  if [ -z "${database_name}" ]; then
+    echo "missing required Snowflake database environment variable: ${database_env}" >&2
     exit 1
-    ;;
-esac
+  fi
+
+  schemas=()
+  IFS=',' read -r -a schema_envs <<< "${schema_envs_csv}"
+  for schema_env in "${schema_envs[@]}"; do
+    schema_name="${!schema_env:-}"
+    if [ -z "${schema_name}" ]; then
+      echo "missing required Snowflake schema environment variable: ${schema_env}" >&2
+      exit 1
+    fi
+    schemas+=("${schema_name}")
+  done
+
+  run_prepare \
+    "${project_dir}" \
+    "${SNOW_DBT_TARGET_NAME:-dev}" \
+    "${!default_core_schema_env:-CORE}" \
+    "${database_name}" \
+    "${schemas[@]}"
+done < <(project_registry_prepare_targets "${project_slug}")

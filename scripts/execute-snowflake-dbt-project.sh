@@ -16,14 +16,8 @@ project_name="${1:?Snowflake dbt project name is required}"
 dbt_command="${2:?dbt command is required}"
 shift 2
 
-case "${project_name}" in
-  *EDP_CUSTOMERS*|*edp_customers*)
-    ensure_dbt_loom_manifest_for_project "proj_edp_customers"
-    ;;
-  *EDP_ORDERS*|*edp_orders*)
-    ensure_dbt_loom_manifest_for_project "proj_edp_orders"
-    ;;
-esac
+project_slug="$(project_registry_project_slug_for_name "${project_name}")"
+ensure_dbt_loom_manifest_for_project "${project_slug}"
 
 run_with_retry "${SNOW_DBT_RETRY_ATTEMPTS:-4}" "${SNOW_DBT_RETRY_SLEEP_SECONDS:-5}" \
   docker compose run --rm --no-deps dbt-executor \

@@ -97,10 +97,10 @@ echo "deploying PRD source data products"
 bash ./scripts/deploy-sdp-prd.sh
 
 echo "deploying DEV EDP customers data product"
-bash ./scripts/deploy-edp-customers-dev.sh
+bash ./scripts/deploy-edp-dev.sh proj_edp_customers
 
 echo "deploying PRD EDP customers data product"
-bash ./scripts/deploy-edp-customers-prd.sh
+bash ./scripts/deploy-edp-prd.sh proj_edp_customers
 
 echo "deploying DEV EDP orders dbt project object without materializing DEV objects"
 export_dev_runtime_env

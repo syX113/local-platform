@@ -22,6 +22,64 @@ resolve_platform_root() {
   printf '%s\n' "${ROOT_DIR:-$(pwd)}"
 }
 
+project_registry_script_path() {
+  local candidates=(
+    "${ROOT_DIR}/dbt/scripts/project_registry.py"
+  )
+  local candidate
+  for candidate in "${candidates[@]}"; do
+    if [ -f "${candidate}" ]; then
+      printf '%s\n' "${candidate}"
+      return 0
+    fi
+  done
+
+  echo "unable to locate project registry helper" >&2
+  return 1
+}
+
+project_registry_lookup() {
+  local project_slug="${1:?project slug is required}"
+  local field="${2:?registry field is required}"
+  local default_value="${3:-}"
+
+  python3 "$(project_registry_script_path)" lookup \
+    --project-slug "${project_slug}" \
+    --field "${field}" \
+    --default "${default_value}"
+}
+
+project_registry_manifest_key() {
+  local project_slug="${1:?project slug is required}"
+  project_registry_lookup "${project_slug}" manifest_object_key
+}
+
+project_registry_manifest_publish_keys() {
+  local project_slug="${1:?project slug is required}"
+  python3 "$(project_registry_script_path)" manifest-publish-keys \
+    --project-slug "${project_slug}"
+}
+
+project_registry_prepare_targets() {
+  local project_slug="${1:?project slug is required}"
+  python3 "$(project_registry_script_path)" prepare-targets \
+    --project-slug "${project_slug}"
+}
+
+project_registry_project_slug_for_name() {
+  local project_name="${1:?project name is required}"
+  python3 "$(project_registry_script_path)" project-slug-for-name \
+    --project-name "${project_name}"
+}
+
+project_registry_project_name_for_target() {
+  local project_slug="${1:?project slug is required}"
+  local target_name="${2:?target name is required}"
+  python3 "$(project_registry_script_path)" project-name \
+    --project-slug "${project_slug}" \
+    --target-name "${target_name}"
+}
+
 docker() {
   if [ "${1:-}" = "compose" ] && [ "${2:-}" = "run" ]; then
     shift 2
@@ -406,31 +464,32 @@ run_dbt_loom_manifest_helper() {
 
 publish_source_loom_manifests() {
   local source_project_slug="${1:-proj_source_finnova}"
-  local source_project_dir
   local bucket_name
-  local edp_repo_path edp_customers_repo_path
+  local source_project_dir
+  local publish_args=()
+  local object_key
 
   source_project_dir="$(resolve_container_dbt_project_dir "${source_project_slug}")"
   bucket_name="$(dbt_loom_manifest_bucket)"
-  edp_repo_path="${GITLAB_EDP_PROJECT_PATH:-proj_edp_orders}"
-  edp_customers_repo_path="${GITLAB_EDP_CUSTOMERS_PROJECT_PATH:-proj_edp_customers}"
+  publish_args=(publish --project-dir "${source_project_dir}" --project-slug "${source_project_slug}" --bucket "${bucket_name}")
 
-  run_dbt_loom_manifest_helper publish \
-    --project-dir "${source_project_dir}" \
-    --bucket "${bucket_name}" \
-    --object-key "$(dbt_loom_manifest_object_name_for_repo "${edp_repo_path}")" \
-    --object-key "$(dbt_loom_manifest_object_name_for_repo "${edp_customers_repo_path}")"
+  while IFS= read -r object_key; do
+    if [ -n "${object_key}" ]; then
+      publish_args+=(--object-key "${object_key}")
+    fi
+  done < <(project_registry_manifest_publish_keys "${source_project_slug}")
+
+  run_dbt_loom_manifest_helper "${publish_args[@]}"
 }
 
 ensure_dbt_loom_manifest_for_project() {
   local project_slug="${1:?dbt project slug is required}"
-  case "${project_slug}" in
-    proj_edp_orders|proj_edp_customers)
-      ;;
-    *)
-      return 0
-      ;;
-  esac
+  local manifest_object_key
+
+  manifest_object_key="$(project_registry_manifest_key "${project_slug}")"
+  if [ -z "${manifest_object_key}" ]; then
+    return 0
+  fi
 
   local project_dir bucket_name
   project_dir="$(resolve_container_dbt_project_dir "${project_slug}")"
@@ -439,7 +498,7 @@ ensure_dbt_loom_manifest_for_project() {
   run_dbt_loom_manifest_helper fetch \
     --project-dir "${project_dir}" \
     --bucket "${bucket_name}" \
-    --object-key "$(dbt_loom_manifest_object_name_for_repo "${project_slug}")"
+    --object-key "${manifest_object_key}"
 }
 
 export_prd_runtime_env() {

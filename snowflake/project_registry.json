@@ -1,0 +1,98 @@
+{
+  "projects": [
+    {
+      "slug": "proj_source_finnova",
+      "kind": "source",
+      "scope": "all",
+      "snowflake_project_names": [
+        "DEV_DBT_PROJECT_SOURCE_FINNOVA",
+        "PRD_DBT_PROJECT_SOURCE_FINNOVA"
+      ],
+      "snowflake_project_name_prefixes": [
+        "DBT_PROJECT_SOURCE_FINNOVA_"
+      ],
+      "dbt_project_dir": "dbt/projects/proj_source_finnova",
+      "default_database_env": "SNOWFLAKE_SDP_DATABASE",
+      "default_schema_env": "SNOWFLAKE_SDP_CORE_SCHEMA",
+      "manifest_object_key": "",
+      "prepare_targets": [
+        {
+          "database_env": "SNOWFLAKE_SDP_DATABASE",
+          "schema_envs": [
+            "SNOWFLAKE_SDP_IN_SCHEMA",
+            "SNOWFLAKE_SDP_CORE_SCHEMA",
+            "SNOWFLAKE_SDP_ACC_SCHEMA"
+          ]
+        },
+        {
+          "database_env": "SNOWFLAKE_SDP_CUSTOMERS_DATABASE",
+          "schema_envs": [
+            "SNOWFLAKE_SDP_IN_SCHEMA",
+            "SNOWFLAKE_SDP_CORE_SCHEMA",
+            "SNOWFLAKE_SDP_ACC_SCHEMA"
+          ]
+        }
+      ],
+      "manifest_publish_keys": [
+        "dbt-loom/proj_edp_orders/manifest.json.gz",
+        "dbt-loom/proj_edp_customers/manifest.json.gz"
+      ]
+    },
+    {
+      "slug": "proj_edp_orders",
+      "kind": "edp",
+      "scope": "orders",
+      "upstream_project_slug": "proj_source_finnova",
+      "snowflake_project_names": [
+        "DEV_DBT_PROJECT_EDP_ORDERS",
+        "PRD_DBT_PROJECT_EDP_ORDERS"
+      ],
+      "snowflake_project_name_prefixes": [
+        "DBT_PROJECT_EDP_ORDERS_"
+      ],
+      "dbt_project_dir": "dbt/projects/proj_edp_orders",
+      "default_database_env": "SNOWFLAKE_EDP_DATABASE",
+      "default_schema_env": "SNOWFLAKE_EDP_CORE_SCHEMA",
+      "manifest_object_key": "dbt-loom/proj_edp_orders/manifest.json.gz",
+      "zero_copy_fact_table": "FCT_ORDER_REVENUE_STAR",
+      "prepare_targets": [
+        {
+          "database_env": "SNOWFLAKE_EDP_DATABASE",
+          "schema_envs": [
+            "SNOWFLAKE_EDP_IN_SCHEMA",
+            "SNOWFLAKE_EDP_CORE_SCHEMA",
+            "SNOWFLAKE_EDP_ACC_SCHEMA"
+          ]
+        }
+      ]
+    },
+    {
+      "slug": "proj_edp_customers",
+      "kind": "edp",
+      "scope": "customers",
+      "upstream_project_slug": "proj_source_finnova",
+      "snowflake_project_names": [
+        "DEV_DBT_PROJECT_EDP_CUSTOMERS",
+        "PRD_DBT_PROJECT_EDP_CUSTOMERS"
+      ],
+      "snowflake_project_name_prefixes": [
+        "DBT_PROJECT_EDP_CUSTOMERS_"
+      ],
+      "dbt_project_dir": "dbt/projects/proj_edp_customers",
+      "default_database_env": "SNOWFLAKE_EDP_CUSTOMERS_DATABASE",
+      "default_schema_env": "SNOWFLAKE_EDP_CORE_SCHEMA",
+      "manifest_object_key": "dbt-loom/proj_edp_customers/manifest.json.gz",
+      "zero_copy_fact_table": "FCT_CUSTOMER_VALUE_STAR",
+      "prepare_targets": [
+        {
+          "database_env": "SNOWFLAKE_EDP_CUSTOMERS_DATABASE",
+          "schema_envs": [
+            "SNOWFLAKE_EDP_IN_SCHEMA",
+            "SNOWFLAKE_EDP_CORE_SCHEMA",
+            "SNOWFLAKE_EDP_ACC_SCHEMA"
+          ]
+        }
+      ]
+    }
+  ]
+}

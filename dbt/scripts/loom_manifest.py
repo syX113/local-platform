@@ -12,13 +12,7 @@ import boto3
 from botocore.config import Config
 from botocore.exceptions import ClientError
 
-from snow_dbt_cli import (
-    default_database_for_project,
-    default_schema_for_project,
-    env,
-    prepare_project_source,
-    snow_env,
-)
+from snow_dbt_cli import default_database_for_project, default_schema_for_project, env, prepare_project_source, snow_env
 
 
 SOURCE_SCOPE_TO_DATABASE_ENV = {
@@ -65,9 +59,17 @@ def ensure_bucket_exists(client: boto3.client, bucket: str) -> None:
         client.create_bucket(Bucket=bucket)
 
 
-def run_local_dbt_parse(project_dir: Path, *, database: str, schema: str, target_name: str) -> dict[str, object]:
+def run_local_dbt_parse(
+    project_dir: Path,
+    *,
+    project_slug: str | None = None,
+    database: str,
+    schema: str,
+    target_name: str,
+) -> dict[str, object]:
     prepared_dir = prepare_project_source(
         project_dir,
+        project_slug=project_slug,
         database=database,
         schema=schema,
         target_name=target_name,
@@ -149,11 +151,19 @@ def rewrite_manifest_databases(manifest: dict[str, object]) -> dict[str, object]
     return manifest
 
 
-def publish_manifest(*, project_dir: Path, bucket: str, object_keys: list[str], target_name: str) -> None:
-    database = default_database_for_project(project_dir)
-    schema = default_schema_for_project(project_dir)
+def publish_manifest(
+    *,
+    project_dir: Path,
+    project_slug: str | None = None,
+    bucket: str,
+    object_keys: list[str],
+    target_name: str,
+) -> None:
+    database = default_database_for_project(project_dir, project_slug)
+    schema = default_schema_for_project(project_dir, project_slug)
     manifest = run_local_dbt_parse(
         project_dir,
+        project_slug=project_slug,
         database=database,
         schema=schema,
         target_name=target_name,
@@ -208,6 +218,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     publish_parser = subparsers.add_parser("publish")
     publish_parser.add_argument("--project-dir", required=True)
+    publish_parser.add_argument("--project-slug")
     publish_parser.add_argument("--bucket", default=manifest_bucket())
     publish_parser.add_argument("--object-key", action="append", required=True)
     publish_parser.add_argument("--target-name", default=_opt_env("SNOW_DBT_TARGET_NAME", "dev"))
@@ -228,6 +239,7 @@ def main() -> int:
     if args.command == "publish":
         publish_manifest(
             project_dir=Path(args.project_dir),
+            project_slug=args.project_slug,
             bucket=args.bucket,
             object_keys=args.object_key,
             target_name=args.target_name,

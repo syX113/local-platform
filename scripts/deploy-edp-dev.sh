@@ -13,6 +13,12 @@ source "${SCRIPT_DIR}/common.sh"
 ensure_platform_env
 export_dev_runtime_env
 
+project_slug="${1:-proj_edp_orders}"
+
+database_env_name="$(project_registry_lookup "${project_slug}" default_database_env)"
+export SNOWFLAKE_EDP_DATABASE="${!database_env_name:-${SNOWFLAKE_EDP_DATABASE}}"
+export SNOWFLAKE_EDP_DBT_PROJECT="$(project_registry_project_name_for_target "${project_slug}" dev)"
+
 ARTIFACT_DIR="${ROOT_DIR}/artifacts/deploy-edp-dev"
 rm -rf "${ARTIFACT_DIR}"
 mkdir -p "${ARTIFACT_DIR}"
@@ -28,7 +34,7 @@ export RUNTIME_IMAGE_PREFIX="${DEV_EDP_RUNTIME_IMAGE_PREFIX}"
 export DBT_RUNNER_IMAGE="${DEV_EDP_RUNTIME_IMAGE_PREFIX}/dbt-executor:dev"
 export SNOW_DBT_RUNNER_IMAGE="${DBT_RUNNER_IMAGE}"
 
-bash "${SCRIPT_DIR}/verify-edp-promotion.sh" | tee "${ARTIFACT_DIR}/verify_edp_dev.log"
+bash "${SCRIPT_DIR}/verify-edp-promotion.sh" "${project_slug}" | tee "${ARTIFACT_DIR}/verify_edp_dev.log"
 
 cat > "${ARTIFACT_DIR}/summary.txt" <<EOF
 edp_dev_deploy=passed

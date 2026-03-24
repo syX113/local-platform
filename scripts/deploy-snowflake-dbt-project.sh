@@ -19,19 +19,13 @@ schema_name="${4:?schema is required}"
 target_name="${5:-${SNOW_DBT_TARGET_NAME:-dev}}"
 profile_database="${SNOWFLAKE_CONTROL_DATABASE}"
 profile_schema="${SNOWFLAKE_CONTROL_SCHEMA}"
-target_kind=""
+project_kind="$(project_registry_lookup "${project_slug}" kind)"
 
 container_project_dir="$(resolve_container_dbt_project_dir "${project_slug}")"
 
 ensure_dbt_loom_manifest_for_project "${project_slug}"
 
-case "${project_slug}" in
-  proj_source_finnova)
-    target_kind="source"
-    ;;
-esac
-
-if [ -n "${target_kind}" ]; then
+if [ -n "${project_kind}" ]; then
   run_with_retry "${SNOW_DBT_RETRY_ATTEMPTS:-4}" "${SNOW_DBT_RETRY_SLEEP_SECONDS:-5}" \
     docker compose run --rm --no-deps \
       -e "SNOWFLAKE_ACCOUNT=${SNOWFLAKE_ACCOUNT}" \
@@ -50,7 +44,7 @@ if [ -n "${target_kind}" ]; then
       -e "SNOWFLAKE_EDP_ACC_SCHEMA=${SNOWFLAKE_EDP_ACC_SCHEMA:-}" \
       dbt-executor \
       python /opt/platform/dbt/scripts/ensure_target_databases.py \
-        "${target_kind}"
+        "${project_kind}"
 fi
 
 run_with_retry "${SNOW_DBT_RETRY_ATTEMPTS:-4}" "${SNOW_DBT_RETRY_SLEEP_SECONDS:-5}" \
@@ -74,9 +68,10 @@ run_with_retry "${SNOW_DBT_RETRY_ATTEMPTS:-4}" "${SNOW_DBT_RETRY_SLEEP_SECONDS:-
     -e "SNOWFLAKE_EDP_CORE_SCHEMA=${SNOWFLAKE_EDP_CORE_SCHEMA:-}" \
     -e "SNOWFLAKE_EDP_ACC_SCHEMA=${SNOWFLAKE_EDP_ACC_SCHEMA:-}" \
     dbt-executor \
-    python /opt/platform/dbt/scripts/snow_dbt_cli.py \
+      python /opt/platform/dbt/scripts/snow_dbt_cli.py \
       deploy \
       --project-dir "${container_project_dir}" \
+      --project-slug "${project_slug}" \
       --project-name "${project_name}" \
       --database "${profile_database}" \
       --schema "${profile_schema}" \

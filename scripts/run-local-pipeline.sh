@@ -32,8 +32,8 @@ if [ -n "${SNOWFLAKE_ACCOUNT:-}" ] && [ -n "${SNOWFLAKE_USER:-}" ] && [ -n "${SN
     proj_source_finnova \
     "${SNOWFLAKE_SDP_DBT_PROJECT}"
   bash ./scripts/execute-snowflake-dbt-project.sh "${SNOWFLAKE_SDP_DBT_PROJECT}" build
-  bash ./scripts/deploy-edp-dev.sh
-  bash ./scripts/deploy-edp-customers-dev.sh
+  bash ./scripts/deploy-edp-dev.sh proj_edp_orders
+  bash ./scripts/deploy-edp-dev.sh proj_edp_customers
 else
   echo "Skipping dbt build because Snowflake credentials are not set in .env"
 fi

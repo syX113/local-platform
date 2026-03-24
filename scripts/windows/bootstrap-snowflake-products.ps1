@@ -165,7 +165,7 @@ Write-Host "publishing dbt loom manifests for downstream EDP projects"
 Publish-SourceLoomManifests
 
 Write-Host "validating zero-copy clone semantics"
-Invoke-DockerCompose -Arguments @("run", "--rm", "--no-deps", "dbt-executor", "python", "/opt/platform/dbt/scripts/zero_copy_clone_check.py")
+Invoke-DockerCompose -Arguments @("run", "--rm", "--no-deps", "-e", "PROJECT_SLUG=proj_edp_customers", "-e", "PROJECT_SCOPE=customers", "dbt-executor", "python", "/opt/platform/dbt/scripts/zero_copy_clone_check.py")
 
 Set-RuntimeTarget -Target "dev"
 

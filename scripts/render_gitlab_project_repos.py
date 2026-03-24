@@ -64,6 +64,8 @@ def shared_gitignore() -> str:
         .loom/
         dbt/.loom/
         dbt/projects/**/.loom/
+        dbt/projects/**/loom/
+        loom/
         airflow/dags/deployed/
         dbt/profiles/.user.yml
         dbt/target/
@@ -83,7 +85,7 @@ def sqlfluff_lint_prepared_workspace_command(project_slug: str) -> str:
     ).format(project_slug=project_slug, workspace_name=project_slug)
 
 
-def sdp_ci_yaml() -> str:
+def sdp_ci_yaml(*, sqlfluff_lint_script: str) -> str:
     return dedent(
         """\
         workflow:
@@ -310,14 +312,28 @@ def sdp_ci_yaml() -> str:
             - ./ci/scripts/cleanup-ci-sandbox.sh artifacts/context/sdp.env
 
         """
-    )
+    ).replace("__SQLFLUFF_LINT__", sqlfluff_lint_script)
 
 
-def edp_ci_yaml() -> str:
-    return dedent(
-        """\
+def edp_ci_yaml(
+    *,
+    project_title: str,
+    project_slug: str,
+    sqlfluff_lint_script: str,
+    verify_script: str,
+    deploy_dev_script: str,
+    deploy_prd_script: str,
+    artifact_dir: str,
+    dev_environment_name: str,
+    prd_environment_name: str,
+    dev_resource_group: str,
+    prd_resource_group: str,
+) -> str:
+    return (
+        dedent(
+            """\
         workflow:
-          name: EDP Promotion
+          name: __PROJECT_TITLE__
           rules:
             - if: '$CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH != $CI_DEFAULT_BRANCH && $CI_OPEN_MERGE_REQUESTS'
               when: never
@@ -408,7 +424,7 @@ def edp_ci_yaml() -> str:
             - set -a; . artifacts/context/runtime.env; . artifacts/context/edp.env; set +a
             - docker compose config -q
             - docker compose run --rm --no-deps --entrypoint python dbt-executor -m compileall /opt/platform/dbt
-            - ./ci/scripts/lint-prepared-dbt-project.sh proj_edp_orders
+            - ./ci/scripts/lint-prepared-dbt-project.sh __PROJECT_SLUG__
 
         ci_validate_edp_models:
           stage: ci_validate
@@ -430,12 +446,12 @@ def edp_ci_yaml() -> str:
                 bash ./ci/scripts/resolve-existing-sandbox.sh edp artifacts/context/edp.env
               fi
             - set -a; . artifacts/context/runtime.env; . artifacts/context/edp.env; set +a
-            - ./ci/scripts/verify-edp-promotion.sh
+            - __VERIFY_SCRIPT__
           artifacts:
             when: always
             expire_in: 7 days
             paths:
-              - artifacts/edp/
+              - __ARTIFACT_DIR__
 
         deploy_edp_dev:
           stage: deploy_dev
@@ -446,11 +462,11 @@ def edp_ci_yaml() -> str:
             - if: '$CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH && $CI_COMMIT_TITLE =~ /^Merge branch /'
             - when: never
           environment:
-            name: DEV/EDP
-          resource_group: edp-dev
+            name: __DEV_ENVIRONMENT_NAME__
+          resource_group: __DEV_RESOURCE_GROUP__
           script:
             - set -a; . artifacts/context/runtime.env; set +a
-            - ./ci/scripts/deploy-edp-dev.sh
+            - __DEPLOY_DEV_SCRIPT__
           artifacts:
             when: always
             expire_in: 7 days
@@ -482,11 +498,11 @@ def edp_ci_yaml() -> str:
             - if: '$CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH && $CI_COMMIT_TITLE =~ /^Merge branch /'
             - when: never
           environment:
-            name: PRD/EDP
-          resource_group: edp-prd
+            name: __PRD_ENVIRONMENT_NAME__
+          resource_group: __PRD_RESOURCE_GROUP__
           script:
             - set -a; . artifacts/context/runtime.env; set +a
-            - ./ci/scripts/deploy-edp-prd.sh
+            - __DEPLOY_PRD_SCRIPT__
           artifacts:
             when: always
             expire_in: 7 days
@@ -506,24 +522,17 @@ def edp_ci_yaml() -> str:
             - ./ci/scripts/cleanup-ci-sandbox.sh artifacts/context/edp.env
 
         """
-    )
-
-
-def edp_customers_ci_yaml() -> str:
-    return (
-        edp_ci_yaml()
-        .replace("EDP Promotion", "EDP Customers Promotion")
-        .replace("./ci/scripts/verify-edp-promotion.sh", "./ci/scripts/verify-edp-customers-promotion.sh")
-        .replace("./ci/scripts/deploy-edp-dev.sh", "./ci/scripts/deploy-edp-customers-dev.sh")
-        .replace("./ci/scripts/deploy-edp-prd.sh", "./ci/scripts/deploy-edp-customers-prd.sh")
-        .replace("artifacts/edp/", "artifacts/edp_customers/")
-        .replace("artifacts/deploy-edp-dev/", "artifacts/deploy-edp-customers-dev/")
-        .replace("artifacts/deploy-edp-prd/", "artifacts/deploy-edp-customers-prd/")
-        .replace("name: DEV/EDP", "name: DEV/EDP_CUSTOMERS")
-        .replace("name: PRD/EDP", "name: PRD/EDP_CUSTOMERS")
-        .replace("resource_group: edp-dev", "resource_group: edp-customers-dev")
-        .replace("resource_group: edp-prd", "resource_group: edp-customers-prd")
-        .replace("proj_edp_orders", "proj_edp_customers")
+            )
+        .replace("__PROJECT_TITLE__", project_title)
+        .replace("__PROJECT_SLUG__", project_slug)
+        .replace("__VERIFY_SCRIPT__", verify_script)
+        .replace("__DEPLOY_DEV_SCRIPT__", deploy_dev_script)
+        .replace("__DEPLOY_PRD_SCRIPT__", deploy_prd_script)
+        .replace("__ARTIFACT_DIR__", artifact_dir)
+        .replace("__DEV_ENVIRONMENT_NAME__", dev_environment_name)
+        .replace("__PRD_ENVIRONMENT_NAME__", prd_environment_name)
+        .replace("__DEV_RESOURCE_GROUP__", dev_resource_group)
+        .replace("__PRD_RESOURCE_GROUP__", prd_resource_group)
     )
 
 
@@ -807,7 +816,7 @@ def sdp_compose_yaml() -> str:
           airflow-metadata-db-data:
           source-postgres-db-data:
           lakehouse-object-store-data:
-          airflow-logs:
+        airflow-logs:
         """
     )
 
@@ -992,6 +1001,7 @@ def render_sdp_repo(project_path: str) -> None:
         "dbt/.sqlfluff",
         "dbt/Dockerfile",
         "dbt/requirements.txt",
+        "dbt/scripts/project_registry.py",
         "dbt/scripts/apply_sql.py",
         "dbt/scripts/ensure_target_databases.py",
         "dbt/scripts/prepare_sqlfluff_workspace.py",
@@ -1004,6 +1014,7 @@ def render_sdp_repo(project_path: str) -> None:
 
     copy_path("snowflake/sql/01_snowflake_foundation.sql.tpl", repo_dir, "ci/snowflake/sql/01_snowflake_foundation.sql.tpl")
     copy_path("snowflake/data_products.json", repo_dir, "ci/snowflake/data_products.json")
+    copy_path("snowflake/project_registry.json", repo_dir, "ci/snowflake/project_registry.json")
 
     copy_path("dbt/projects/proj_source_finnova/macros", repo_dir, "dbt/macros")
     copy_path("dbt/projects/proj_source_finnova/dbt_project.yml", repo_dir, "dbt/dbt_project.yml")
@@ -1030,7 +1041,7 @@ def render_sdp_repo(project_path: str) -> None:
     write_file(repo_dir / ".gitignore", shared_gitignore())
     write_file(
         repo_dir / ".gitlab-ci.yml",
-        sdp_ci_yaml().replace("__SQLFLUFF_LINT__", sqlfluff_lint_prepared_workspace_command("proj_source_finnova")),
+        sdp_ci_yaml(sqlfluff_lint_script=sqlfluff_lint_prepared_workspace_command("proj_source_finnova")),
     )
     write_file(
         repo_dir / "README.md",
@@ -1106,6 +1117,7 @@ def render_edp_repo(project_path: str) -> None:
         "dbt/.sqlfluff",
         "dbt/Dockerfile",
         "dbt/requirements.txt",
+        "dbt/scripts/project_registry.py",
         "dbt/scripts/apply_sql.py",
         "dbt/scripts/ensure_target_databases.py",
         "dbt/scripts/prepare_sqlfluff_workspace.py",
@@ -1120,6 +1132,7 @@ def render_edp_repo(project_path: str) -> None:
 
     copy_path("snowflake/sql/01_snowflake_foundation.sql.tpl", repo_dir, "ci/snowflake/sql/01_snowflake_foundation.sql.tpl")
     copy_path("snowflake/data_products.json", repo_dir, "ci/snowflake/data_products.json")
+    copy_path("snowflake/project_registry.json", repo_dir, "ci/snowflake/project_registry.json")
 
     copy_path("dbt/projects/proj_edp_orders/macros", repo_dir, "dbt/macros")
     copy_path("dbt/projects/proj_edp_orders/dbt_project.yml", repo_dir, "dbt/dbt_project.yml")
@@ -1130,7 +1143,19 @@ def render_edp_repo(project_path: str) -> None:
     write_file(repo_dir / ".gitignore", shared_gitignore())
     write_file(
         repo_dir / ".gitlab-ci.yml",
-        edp_ci_yaml().replace("__SQLFLUFF_LINT__", sqlfluff_lint_prepared_workspace_command("proj_edp_orders")),
+        edp_ci_yaml(
+            project_title="EDP Promotion",
+            project_slug="proj_edp_orders",
+            sqlfluff_lint_script=sqlfluff_lint_prepared_workspace_command("proj_edp_orders"),
+            verify_script="./ci/scripts/verify-edp-promotion.sh proj_edp_orders",
+            deploy_dev_script="./ci/scripts/deploy-edp-dev.sh proj_edp_orders",
+            deploy_prd_script="./ci/scripts/deploy-edp-prd.sh proj_edp_orders",
+            artifact_dir="artifacts/proj_edp_orders",
+            dev_environment_name="DEV/EDP",
+            prd_environment_name="PRD/EDP",
+            dev_resource_group="edp-dev",
+            prd_resource_group="edp-prd",
+        ),
     )
     write_file(
         repo_dir / "README.md",
@@ -1143,7 +1168,7 @@ def render_edp_repo(project_path: str) -> None:
                 Managed artifacts:
 
                 - EDP dbt project for Snowflake `INBOUND`, `CORE`, and `ACCESS`, executed natively in Snowflake
-                - The upstream source manifests are fetched from MinIO into `dbt/loom/manifest.json.gz` and woven into the project with dbt-loom before Snowflake deployment
+                - The upstream source manifests are fetched from MinIO into `loom/manifest.json.gz` and woven into the project with dbt-loom before Snowflake deployment
                 - `ci/scripts/` contains only CI helper scripts
                 - `ci/` contains runner-only config and Snowflake foundation metadata
 
@@ -1154,9 +1179,9 @@ def render_edp_repo(project_path: str) -> None:
                 Main CI entrypoint:
 
                 - `./ci/scripts/prepare-ci-sandbox.sh edp artifacts/context/edp.env`
-                - `./ci/scripts/verify-edp-promotion.sh`
-                - `./ci/scripts/deploy-edp-dev.sh`
-                - `./ci/scripts/deploy-edp-prd.sh`
+                - `./ci/scripts/verify-edp-promotion.sh proj_edp_orders`
+                - `./ci/scripts/deploy-edp-dev.sh proj_edp_orders`
+                - `./ci/scripts/deploy-edp-prd.sh proj_edp_orders`
 
                 CI behaviour:
 
@@ -1196,9 +1221,9 @@ def render_edp_customers_repo(project_path: str) -> None:
         "scripts/execute-snowflake-dbt-project.sh",
         "scripts/prepare-snowflake-dbt-target.sh",
         "scripts/drop-snowflake-dbt-project.sh",
-        "scripts/deploy-edp-customers-dev.sh",
-        "scripts/deploy-edp-customers-prd.sh",
-        "scripts/verify-edp-customers-promotion.sh",
+        "scripts/deploy-edp-dev.sh",
+        "scripts/deploy-edp-prd.sh",
+        "scripts/verify-edp-promotion.sh",
     ):
         copy_path(relative_path, repo_dir, f"ci/{relative_path}")
 
@@ -1206,6 +1231,7 @@ def render_edp_customers_repo(project_path: str) -> None:
         "dbt/.sqlfluff",
         "dbt/Dockerfile",
         "dbt/requirements.txt",
+        "dbt/scripts/project_registry.py",
         "dbt/scripts/apply_sql.py",
         "dbt/scripts/ensure_target_databases.py",
         "dbt/scripts/prepare_sqlfluff_workspace.py",
@@ -1220,6 +1246,7 @@ def render_edp_customers_repo(project_path: str) -> None:
 
     copy_path("snowflake/sql/01_snowflake_foundation.sql.tpl", repo_dir, "ci/snowflake/sql/01_snowflake_foundation.sql.tpl")
     copy_path("snowflake/data_products.json", repo_dir, "ci/snowflake/data_products.json")
+    copy_path("snowflake/project_registry.json", repo_dir, "ci/snowflake/project_registry.json")
 
     copy_path("dbt/projects/proj_edp_customers/macros", repo_dir, "dbt/macros")
     copy_path("dbt/projects/proj_edp_customers/dbt_project.yml", repo_dir, "dbt/dbt_project.yml")
@@ -1228,7 +1255,22 @@ def render_edp_customers_repo(project_path: str) -> None:
     write_file(repo_dir / "compose.yaml", edp_compose_yaml())
     write_file(repo_dir / "compose.ci.yaml", edp_compose_ci_yaml())
     write_file(repo_dir / ".gitignore", shared_gitignore())
-    write_file(repo_dir / ".gitlab-ci.yml", edp_customers_ci_yaml())
+    write_file(
+        repo_dir / ".gitlab-ci.yml",
+        edp_ci_yaml(
+            project_title="EDP Customers Promotion",
+            project_slug="proj_edp_customers",
+            sqlfluff_lint_script=sqlfluff_lint_prepared_workspace_command("proj_edp_customers"),
+            verify_script="./ci/scripts/verify-edp-promotion.sh proj_edp_customers",
+            deploy_dev_script="./ci/scripts/deploy-edp-dev.sh proj_edp_customers",
+            deploy_prd_script="./ci/scripts/deploy-edp-prd.sh proj_edp_customers",
+            artifact_dir="artifacts/proj_edp_customers",
+            dev_environment_name="DEV/EDP_CUSTOMERS",
+            prd_environment_name="PRD/EDP_CUSTOMERS",
+            dev_resource_group="edp-customers-dev",
+            prd_resource_group="edp-customers-prd",
+        ),
+    )
     write_file(
         repo_dir / "README.md",
         project_readme(
@@ -1240,7 +1282,7 @@ def render_edp_customers_repo(project_path: str) -> None:
                 Managed artifacts:
 
                 - EDP customers dbt project for Snowflake `INBOUND`, `CORE`, and `ACCESS`, executed natively in Snowflake
-                - The upstream source manifests are fetched from MinIO into `dbt/loom/manifest.json.gz` and woven into the project with dbt-loom before Snowflake deployment
+                - The upstream source manifests are fetched from MinIO into `loom/manifest.json.gz` and woven into the project with dbt-loom before Snowflake deployment
                 - `ci/scripts/` contains only CI helper scripts
                 - `ci/` contains runner-only config and Snowflake foundation metadata
 
@@ -1251,9 +1293,9 @@ def render_edp_customers_repo(project_path: str) -> None:
                 Main CI entrypoint:
 
                 - `./ci/scripts/prepare-ci-sandbox.sh edp artifacts/context/edp.env`
-                - `./ci/scripts/verify-edp-customers-promotion.sh`
-                - `./ci/scripts/deploy-edp-customers-dev.sh`
-                - `./ci/scripts/deploy-edp-customers-prd.sh`
+                - `./ci/scripts/verify-edp-promotion.sh proj_edp_customers`
+                - `./ci/scripts/deploy-edp-dev.sh proj_edp_customers`
+                - `./ci/scripts/deploy-edp-prd.sh proj_edp_customers`
                 """
             ),
         ),

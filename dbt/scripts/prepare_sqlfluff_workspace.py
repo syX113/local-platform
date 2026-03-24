@@ -5,12 +5,8 @@ import os
 from pathlib import Path
 
 from loom_manifest import fetch_manifest, manifest_bucket
-from snow_dbt_cli import (
-    DOWNSTREAM_PROJECT_SLUGS,
-    default_database_for_project,
-    default_schema_for_project,
-    prepare_project_source,
-)
+from project_registry import project_by_slug
+from snow_dbt_cli import default_database_for_project, default_schema_for_project, prepare_project_source
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -39,10 +35,11 @@ def main() -> int:
         work_dir=workspace_dir,
     )
 
-    if project_slug in DOWNSTREAM_PROJECT_SLUGS:
+    manifest_object_key = str(project_by_slug(project_slug).get("manifest_object_key", "")).strip()
+    if manifest_object_key:
         fetch_manifest(
             bucket=manifest_bucket(),
-            object_key=f"dbt-loom/{project_slug}/manifest.json.gz",
+            object_key=manifest_object_key,
             project_dir=prepared_dir,
             local_path="loom/manifest.json.gz",
         )
