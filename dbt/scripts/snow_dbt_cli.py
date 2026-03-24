@@ -216,47 +216,43 @@ def prepare_project_source(
             raise SystemExit(f"missing upstream_project_slug for project: {project_identity}")
 
         local_source_project_dir = project_dir.parent / upstream_project_slug
-        if not local_source_project_dir.exists():
-            raise SystemExit(
-                f"missing local dependency project directory: {local_source_project_dir}"
+        if local_source_project_dir.exists():
+            local_dependency_dir = prepared_dir / upstream_project_slug
+            shutil.copytree(
+                local_source_project_dir,
+                local_dependency_dir,
+                ignore=shutil.ignore_patterns(*EXCLUDED_PATH_NAMES),
+            )
+            render_env_vars_in_tree(local_dependency_dir)
+
+            prepared_dir.joinpath("packages.yml").write_text(
+                "packages:\n"
+                f"  - local: {upstream_project_slug}\n",
+                encoding="utf-8",
             )
 
-        local_dependency_dir = prepared_dir / upstream_project_slug
-        shutil.copytree(
-            local_source_project_dir,
-            local_dependency_dir,
-            ignore=shutil.ignore_patterns(*EXCLUDED_PATH_NAMES),
-        )
-        render_env_vars_in_tree(local_dependency_dir)
-
-        prepared_dir.joinpath("packages.yml").write_text(
-            "packages:\n"
-            f"  - local: {upstream_project_slug}\n",
-            encoding="utf-8",
-        )
-
-        completed = subprocess.run(
-            [
-                shutil.which("dbt") or "dbt",
-                "deps",
-                "--profiles-dir",
-                str(prepared_dir),
-                "--project-dir",
-                str(prepared_dir),
-                "--target",
-                target_name,
-            ],
-            check=False,
-            text=True,
-            env=snow_env(),
-            capture_output=quiet,
-        )
-        if completed.returncode != 0:
-            if completed.stdout:
-                print(completed.stdout, file=sys.stdout, end="")
-            if completed.stderr:
-                print(completed.stderr, file=sys.stderr, end="")
-            raise SystemExit(completed.returncode)
+            completed = subprocess.run(
+                [
+                    shutil.which("dbt") or "dbt",
+                    "deps",
+                    "--profiles-dir",
+                    str(prepared_dir),
+                    "--project-dir",
+                    str(prepared_dir),
+                    "--target",
+                    target_name,
+                ],
+                check=False,
+                text=True,
+                env=snow_env(),
+                capture_output=quiet,
+            )
+            if completed.returncode != 0:
+                if completed.stdout:
+                    print(completed.stdout, file=sys.stdout, end="")
+                if completed.stderr:
+                    print(completed.stderr, file=sys.stderr, end="")
+                raise SystemExit(completed.returncode)
 
     return prepared_dir
 
