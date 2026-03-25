@@ -10,7 +10,7 @@ ensure_platform_env
 mkdir -p gitlab-runner/generated
 
 docker build -t "${GITLAB_RUNNER_JOB_IMAGE:-local-platform/gitlab-ci-tools:dev}" gitlab-ci
-docker compose build airflow-webserver dlt-extractor dbt-executor
+compose_build_services airflow-webserver dlt-extractor dbt-executor
 docker compose up -d airflow-metadata-db source-postgres-db lakehouse-object-store gitlab-platform
 docker compose up -d lakehouse-bucket-init airflow-init
 docker compose up -d airflow-webserver airflow-scheduler

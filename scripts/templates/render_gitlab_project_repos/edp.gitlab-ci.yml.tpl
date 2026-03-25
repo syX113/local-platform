@@ -14,15 +14,7 @@ default:
     - local
     - fargate
   before_script:
-    - |
-      docker() {
-        if [ "${1:-}" = "compose" ] && [ "${2:-}" = "run" ]; then
-          shift 2
-          command docker compose run "$@" 2> >(awk 'index($0, "No services to build") == 0 && index($0, "Found orphan containers") == 0 { print > "/dev/stderr" }')
-        else
-          command docker "$@"
-        fi
-      }
+    - source ./ci/scripts/common.sh
     - docker version
     - docker compose version
     - cp ci/.env.example .env
@@ -47,7 +39,7 @@ build_edp_runtime:
   script:
     - export RUNTIME_IMAGE_PREFIX="${CI_PROJECT_PATH_SLUG}-${CI_PIPELINE_ID}"
     - mkdir -p artifacts/context
-    - docker compose build dbt-executor
+    - compose_build_services dbt-executor
     - printf 'RUNTIME_IMAGE_PREFIX=%s\n' "${RUNTIME_IMAGE_PREFIX}" > artifacts/context/runtime.env
     - printf 'DBT_RUNNER_IMAGE=%s/dbt-executor:dev\n' "${RUNTIME_IMAGE_PREFIX}" >> artifacts/context/runtime.env
     - printf 'SNOW_DBT_RUNNER_IMAGE=%s/dbt-executor:dev\n' "${RUNTIME_IMAGE_PREFIX}" >> artifacts/context/runtime.env

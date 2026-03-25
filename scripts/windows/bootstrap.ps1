@@ -12,7 +12,7 @@ if (-not (Test-Path -LiteralPath $generatedDir)) {
     New-Item -ItemType Directory -Path $generatedDir | Out-Null
 }
 
-Invoke-DockerCompose -Arguments @("build", "airflow-webserver", "dlt-extractor", "dbt-executor")
+Invoke-DockerComposeBuild -Services @("airflow-webserver", "dlt-extractor", "dbt-executor")
 Invoke-DockerCompose -Arguments @("up", "-d", "airflow-metadata-db", "source-postgres-db", "lakehouse-object-store", "gitlab-platform")
 Invoke-DockerCompose -Arguments @("up", "-d", "lakehouse-bucket-init", "airflow-init")
 Invoke-DockerCompose -Arguments @("up", "-d", "airflow-webserver", "airflow-scheduler")

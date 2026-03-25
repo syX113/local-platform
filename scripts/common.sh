@@ -196,6 +196,16 @@ run_with_retry() {
   done
 }
 
+compose_build_services() {
+  local service
+  for service in "$@"; do
+    [ -n "${service}" ] || continue
+    echo "building compose service: ${service}"
+    run_with_retry "${COMPOSE_BUILD_RETRY_ATTEMPTS:-3}" "${COMPOSE_BUILD_RETRY_SLEEP_SECONDS:-5}" \
+      docker compose build "${service}"
+  done
+}
+
 trim_identifier() {
   local value="${1:?value is required}"
   local max_len="${2:?max length is required}"

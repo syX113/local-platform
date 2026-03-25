@@ -276,6 +276,37 @@ function Invoke-DockerCompose {
     }
 }
 
+function Invoke-DockerComposeBuild {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string[]]$Services
+    )
+
+    foreach ($service in $Services) {
+        if ([string]::IsNullOrWhiteSpace($service)) {
+            continue
+        }
+
+        $attempt = 1
+        while ($true) {
+            try {
+                Write-Host "building compose service: $service"
+                Invoke-DockerCompose -Arguments @("build", $service)
+                break
+            }
+            catch {
+                if ($attempt -ge 3) {
+                    throw
+                }
+
+                Write-Host "retrying compose build for $service after 5s"
+                Start-Sleep -Seconds 5
+                $attempt++
+            }
+        }
+    }
+}
+
 function Invoke-DockerComposeWithStdin {
     param(
         [Parameter(Mandatory = $true)]
