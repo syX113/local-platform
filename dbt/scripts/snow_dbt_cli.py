@@ -63,20 +63,29 @@ def snow_connection_args() -> list[str]:
     ]
 
 
-def snow_env() -> dict[str, str]:
+def snow_env(extra_env: dict[str, str] | None = None) -> dict[str, str]:
     runtime_env = os.environ.copy()
     runtime_env["SNOWFLAKE_PASSWORD"] = env("SNOWFLAKE_PASSWORD")
+    if extra_env:
+        for key, value in extra_env.items():
+            if value:
+                runtime_env[key] = value
     return runtime_env
 
 
-def run_snow(*args: str, capture_output: bool = False, allow_failure: bool = False) -> subprocess.CompletedProcess[str]:
+def run_snow(
+    *args: str,
+    capture_output: bool = False,
+    allow_failure: bool = False,
+    extra_env: dict[str, str] | None = None,
+) -> subprocess.CompletedProcess[str]:
     cli_path = ensure_snow_cli_available()
     completed = subprocess.run(
         [cli_path, *args],
         check=False,
         capture_output=capture_output,
         text=True,
-        env=snow_env(),
+        env=snow_env(extra_env),
     )
     if completed.returncode != 0 and not allow_failure:
         if completed.stdout:
@@ -146,6 +155,13 @@ def render_env_vars_in_tree(root_dir: Path) -> None:
         config_path.write_text(render_env_vars(config_path.read_text(encoding="utf-8")), encoding="utf-8")
 
 
+def dbt_loom_config_path(project_dir: Path) -> Path | None:
+    config_path = project_dir / "dbt_loom.config.yml"
+    if config_path.exists():
+        return config_path
+    return None
+
+
 def project_profile_name(project_dir: Path) -> str:
     match = re.search(r"^\s*profile:\s*([A-Za-z0-9_]+)\s*$", project_dir.joinpath("dbt_project.yml").read_text(encoding="utf-8"), re.MULTILINE)
     if not match:
@@ -210,6 +226,9 @@ def prepare_project_source(
         encoding="utf-8",
     )
 
+    loom_config_path = dbt_loom_config_path(prepared_dir)
+    loom_env = {"DBT_LOOM_CONFIG": str(loom_config_path)} if loom_config_path else None
+
     if copy_downstream_dependencies and project_kind == "edp":
         upstream_project_slug = str(spec.get("upstream_project_slug", "")).strip()
         if not upstream_project_slug:
@@ -244,7 +263,7 @@ def prepare_project_source(
                 ],
                 check=False,
                 text=True,
-                env=snow_env(),
+                env=snow_env(loom_env),
                 capture_output=quiet,
             )
             if completed.returncode != 0:
@@ -278,6 +297,7 @@ def deploy_project(*, project_dir: Path, project_name: str, database: str, schem
             "--default-target",
             target_name,
             "--force",
+            extra_env={"DBT_LOOM_CONFIG": str(prepared_dir / "dbt_loom.config.yml")},
         )
     finally:
         shutil.rmtree(prepared_dir.parent, ignore_errors=True)
@@ -311,6 +331,8 @@ def run_local_dbt(
         target_name=target_name,
     )
     try:
+        loom_config_path = prepared_dir / "dbt_loom.config.yml"
+        extra_env = {"DBT_LOOM_CONFIG": str(loom_config_path)} if loom_config_path.exists() else None
         completed = subprocess.run(
             [
                 shutil.which("dbt") or "dbt",
@@ -324,7 +346,7 @@ def run_local_dbt(
             ],
             check=False,
             text=True,
-            env=snow_env(),
+            env=snow_env(extra_env),
         )
         if completed.returncode != 0:
             raise SystemExit(completed.returncode)
