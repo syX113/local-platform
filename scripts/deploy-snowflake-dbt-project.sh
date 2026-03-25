@@ -22,15 +22,6 @@ profile_schema="${SNOWFLAKE_CONTROL_SCHEMA}"
 project_kind="$(project_registry_lookup "${project_slug}" kind)"
 
 container_project_dir="$(resolve_container_dbt_project_dir "${project_slug}")"
-loom_config_path=""
-loom_env_args=""
-
-if [ -f "${container_project_dir}/dbt_loom.config.yml" ]; then
-  loom_config_path="${container_project_dir}/dbt_loom.config.yml"
-  loom_env_args="-e DBT_LOOM_CONFIG=${loom_config_path}"
-fi
-
-ensure_dbt_loom_manifest_for_project "${project_slug}"
 
 if [ -n "${project_kind}" ]; then
   run_with_retry "${SNOW_DBT_RETRY_ATTEMPTS:-4}" "${SNOW_DBT_RETRY_SLEEP_SECONDS:-5}" \
@@ -49,7 +40,6 @@ if [ -n "${project_kind}" ]; then
       -e "SNOWFLAKE_EDP_IN_SCHEMA=${SNOWFLAKE_EDP_IN_SCHEMA:-}" \
       -e "SNOWFLAKE_EDP_CORE_SCHEMA=${SNOWFLAKE_EDP_CORE_SCHEMA:-}" \
       -e "SNOWFLAKE_EDP_ACC_SCHEMA=${SNOWFLAKE_EDP_ACC_SCHEMA:-}" \
-      ${loom_env_args} \
       dbt-executor \
       python /opt/platform/dbt/scripts/ensure_target_databases.py \
         "${project_kind}"
@@ -75,7 +65,6 @@ run_with_retry "${SNOW_DBT_RETRY_ATTEMPTS:-4}" "${SNOW_DBT_RETRY_SLEEP_SECONDS:-
     -e "SNOWFLAKE_EDP_IN_SCHEMA=${SNOWFLAKE_EDP_IN_SCHEMA:-}" \
     -e "SNOWFLAKE_EDP_CORE_SCHEMA=${SNOWFLAKE_EDP_CORE_SCHEMA:-}" \
     -e "SNOWFLAKE_EDP_ACC_SCHEMA=${SNOWFLAKE_EDP_ACC_SCHEMA:-}" \
-    ${loom_env_args} \
     dbt-executor \
       python /opt/platform/dbt/scripts/snow_dbt_cli.py \
       deploy \

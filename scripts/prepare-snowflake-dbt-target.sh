@@ -48,8 +48,6 @@ run_prepare() {
       --schemas "${schemas[@]}"
 }
 
-ensure_dbt_loom_manifest_for_project "${project_slug}"
-
 while IFS='|' read -r database_env schema_envs_csv; do
   [ -n "${database_env}" ] || continue
   database_name="${!database_env:-}"

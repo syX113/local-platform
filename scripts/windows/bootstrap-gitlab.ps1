@@ -276,6 +276,8 @@ Render-RunnerConfig `
     -EdpRunnerDescription $edpRunnerDescription `
     -EdpRunnerToken $edpRunnerToken
 
+New-Item -ItemType Directory -Force -Path (Join-Path $RepoRoot "gitlab-branch-provisioner/state") | Out-Null
+
 Invoke-DockerCompose -Arguments @("up", "-d", "gitlab-branch-provisioner")
 
 $branchHookUrl = "http://$branchProvisionerHost`:$branchProvisionerPort/gitlab/webhook"

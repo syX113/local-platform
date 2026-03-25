@@ -149,7 +149,7 @@ for key in "${env_keys[@]}"; do
 done
 
 if [ "${LOCAL_PLATFORM_SHARED_STACK:-false}" = "true" ]; then
-  airflow_cli=(docker compose exec -T airflow-scheduler)
+  airflow_cli=(docker compose exec -T "${exec_env_args[@]}" airflow-scheduler)
 else
   airflow_cli=(docker compose run --rm --no-deps "${exec_env_args[@]}" airflow-scheduler)
 fi

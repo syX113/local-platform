@@ -109,11 +109,6 @@ def prepare_targets(slug: str) -> int:
     return 0
 
 
-def project_slug_for_name(project_name: str) -> int:
-    print(project_by_name(project_name).get("slug", ""))
-    return 0
-
-
 def project_name_for_target(slug: str, target_name: str) -> int:
     project = project_by_slug(slug)
     snowflake_names = project.get("snowflake_project_names", [])
@@ -154,9 +149,6 @@ def build_parser() -> argparse.ArgumentParser:
     prepare_targets_parser = subparsers.add_parser("prepare-targets")
     prepare_targets_parser.add_argument("--project-slug", required=True)
 
-    name_parser = subparsers.add_parser("project-slug-for-name")
-    name_parser.add_argument("--project-name", required=True)
-
     project_name_parser = subparsers.add_parser("project-name")
     project_name_parser.add_argument("--project-slug", required=True)
     project_name_parser.add_argument("--target-name", required=True)
@@ -176,8 +168,6 @@ def main() -> int:
         return manifest_publish_keys(args.project_slug)
     if args.command == "prepare-targets":
         return prepare_targets(args.project_slug)
-    if args.command == "project-slug-for-name":
-        return project_slug_for_name(args.project_name)
     if args.command == "project-name":
         return project_name_for_target(args.project_slug, args.target_name)
     raise SystemExit(f"unsupported command: {args.command}")

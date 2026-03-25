@@ -1,6 +1,10 @@
 from __future__ import annotations
 
 import os
+import subprocess
+import sys
+import tempfile
+import shutil
 from pathlib import Path
 
 import psycopg2
@@ -73,10 +77,123 @@ ENV_KEYS = [
 ]
 
 SOURCE_SQL_DIR = Path("/opt/platform/postgres/source-init")
+DLT_RUNTIME_PYTHON = Path("/home/airflow/dlt-runtime/bin/python")
+DBT_RUNTIME_PYTHON = Path("/home/airflow/dbt-runtime/bin/python")
 DEFAULT_SOURCE_SQL_FILES = [
     SOURCE_SQL_DIR / "01-create-source-schema.sql",
     SOURCE_SQL_DIR / "02-seed-sample-data.sql",
 ]
+DLT_ENTRYPOINT_ROOT = Path("/opt/platform")
+
+
+def _is_dlt_script(script_path: str) -> bool:
+    return "dlt" in Path(script_path).parts
+
+
+def _build_dlt_secrets_toml() -> str:
+    object_store_bucket = os.environ["OBJECT_STORE_BUCKET"]
+    object_store_access_key_id = os.environ["OBJECT_STORE_ACCESS_KEY_ID"]
+    object_store_secret_access_key = os.environ["OBJECT_STORE_SECRET_ACCESS_KEY"]
+    object_store_endpoint_url = os.environ["OBJECT_STORE_ENDPOINT_URL"]
+    object_store_region = os.environ["OBJECT_STORE_REGION"]
+    object_store_use_ssl = os.environ.get("OBJECT_STORE_USE_SSL", "false")
+    iceberg_catalog_name = os.environ["ICEBERG_CATALOG_NAME"]
+    iceberg_catalog_type = os.environ["ICEBERG_CATALOG_TYPE"]
+
+    lines = [
+        "[destination.filesystem]",
+        f'bucket_url = "{object_store_bucket}"',
+        "",
+        "[destination.filesystem.credentials]",
+        f'aws_access_key_id = "{object_store_access_key_id}"',
+        f'aws_secret_access_key = "{object_store_secret_access_key}"',
+        f'endpoint_url = "{object_store_endpoint_url}"',
+        f'region_name = "{object_store_region}"',
+        "",
+        "[destination.filesystem.kwargs]",
+        f"use_ssl = {object_store_use_ssl}",
+        "",
+        "[iceberg_catalog]",
+        f'iceberg_catalog_name = "{iceberg_catalog_name}"',
+        f'iceberg_catalog_type = "{iceberg_catalog_type}"',
+        "",
+    ]
+
+    if iceberg_catalog_type == "rest":
+        lines.extend(
+            [
+                "[iceberg_catalog.iceberg_catalog_config]",
+                f'uri = "{os.environ["OPEN_CATALOG_URI"]}"',
+                'type = "rest"',
+                f'warehouse = "{os.environ["OPEN_CATALOG_NAME"]}"',
+                f'credential = "{os.environ["OPEN_CATALOG_CLIENT_ID"]}:{os.environ["OPEN_CATALOG_CLIENT_SECRET"]}"',
+                f'scope = "{os.environ["OPEN_CATALOG_SCOPE"]}"',
+                f'header.X-Iceberg-Access-Delegation = "{os.environ["OPEN_CATALOG_ACCESS_DELEGATION"]}"',
+                'py-io-impl = "pyiceberg.io.pyarrow.PyArrowFileIO"',
+                f'client.access-key-id = "{object_store_access_key_id}"',
+                f'client.secret-access-key = "{object_store_secret_access_key}"',
+                f'client.region = "{object_store_region}"',
+                f's3.endpoint = "{object_store_endpoint_url}"',
+                f's3.access-key-id = "{object_store_access_key_id}"',
+                f's3.secret-access-key = "{object_store_secret_access_key}"',
+                f's3.region = "{object_store_region}"',
+                "s3.force-virtual-addressing = false",
+                "",
+            ]
+        )
+    else:
+        lines.extend(
+            [
+                "[iceberg_catalog.iceberg_catalog_config]",
+                'type = "sql"',
+                f'uri = "{os.environ["ICEBERG_SQL_URI"]}"',
+                f'warehouse = "{object_store_bucket}"',
+                'py-io-impl = "pyiceberg.io.pyarrow.PyArrowFileIO"',
+                f'client.access-key-id = "{object_store_access_key_id}"',
+                f'client.secret-access-key = "{object_store_secret_access_key}"',
+                f'client.region = "{object_store_region}"',
+                f's3.endpoint = "{object_store_endpoint_url}"',
+                f's3.access-key-id = "{object_store_access_key_id}"',
+                f's3.secret-access-key = "{object_store_secret_access_key}"',
+                f's3.region = "{object_store_region}"',
+                "s3.force-virtual-addressing = false",
+                "",
+            ]
+        )
+
+    return "\n".join(lines)
+
+
+def _prepare_dlt_runtime_root() -> Path:
+    runtime_root = Path(tempfile.mkdtemp(prefix="local-platform-dlt-"))
+    dlt_dir = runtime_root / ".dlt"
+    dlt_dir.mkdir(parents=True, exist_ok=True)
+    (dlt_dir / "secrets.toml").write_text(_build_dlt_secrets_toml(), encoding="utf-8")
+    return runtime_root
+
+
+def _run_subprocess(command: list[str], *, env: dict[str, str], cwd: str | None = None) -> None:
+    completed = subprocess.run(command, check=False, env=env, cwd=cwd)
+    if completed.returncode != 0:
+        raise SystemExit(completed.returncode)
+
+
+def python_interpreter_for_script(script_path: str) -> str:
+    script = Path(script_path)
+    if "dlt" in script.parts and DLT_RUNTIME_PYTHON.exists():
+        return str(DLT_RUNTIME_PYTHON)
+    if "dbt" in script.parts and DBT_RUNTIME_PYTHON.exists():
+        return str(DBT_RUNTIME_PYTHON)
+    return sys.executable
+
+
+def python_runtime_bin_dir(script_path: str) -> Path | None:
+    script = Path(script_path)
+    if "dlt" in script.parts and DLT_RUNTIME_PYTHON.exists():
+        return DLT_RUNTIME_PYTHON.parent
+    if "dbt" in script.parts and DBT_RUNTIME_PYTHON.exists():
+        return DBT_RUNTIME_PYTHON.parent
+    return None
 
 
 def docker_environment(overrides: dict[str, str] | None = None) -> dict[str, str]:
@@ -84,6 +201,40 @@ def docker_environment(overrides: dict[str, str] | None = None) -> dict[str, str
     if overrides:
         env.update(overrides)
     return env
+
+
+def run_python_script(
+    script_path: str,
+    *,
+    runtime_overrides: dict[str, str] | None = None,
+    args: list[str] | None = None,
+    cwd: str | None = None,
+) -> None:
+    command = [python_interpreter_for_script(script_path), script_path, *(args or [])]
+    env = os.environ.copy()
+    env.update(docker_environment(runtime_overrides))
+    runtime_bin_dir = python_runtime_bin_dir(script_path)
+    if runtime_bin_dir is not None:
+        env["PATH"] = f"{runtime_bin_dir}:{env.get('PATH', '')}"
+    if _is_dlt_script(script_path):
+        runtime_root = _prepare_dlt_runtime_root()
+        dlt_env = env.copy()
+        dlt_env["HOME"] = str(runtime_root)
+        dlt_env["PYTHONUNBUFFERED"] = dlt_env.get("PYTHONUNBUFFERED", "1")
+        try:
+            if Path(script_path).name != "init_catalog.py":
+                init_catalog_script = str(DLT_ENTRYPOINT_ROOT / "dlt" / "init_catalog.py")
+                _run_subprocess(
+                    [python_interpreter_for_script(init_catalog_script), init_catalog_script],
+                    env=dlt_env,
+                    cwd=str(runtime_root),
+                )
+            _run_subprocess(command, env=dlt_env, cwd=str(runtime_root))
+        finally:
+            shutil.rmtree(runtime_root, ignore_errors=True)
+        return
+
+    subprocess.run(command, check=True, env=env, cwd=cwd)
 
 
 def snowflake_configured() -> bool:

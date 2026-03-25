@@ -629,10 +629,6 @@ def sdp_compose_yaml() -> str:
           AIRFLOW_ADMIN_PASSWORD: ${AIRFLOW_ADMIN_PASSWORD}
           AIRFLOW_ADMIN_EMAIL: ${AIRFLOW_ADMIN_EMAIL}
           AIRFLOW_UID: ${AIRFLOW_UID:-50000}
-          DOCKER_URL: unix:///var/run/docker.sock
-          DLT_RUNNER_IMAGE: ${RUNTIME_IMAGE_PREFIX:-${COMPOSE_PROJECT_NAME:-proj-sdp-local}}/dlt-extractor:dev
-          DBT_RUNNER_IMAGE: ${RUNTIME_IMAGE_PREFIX:-${COMPOSE_PROJECT_NAME:-proj-sdp-local}}/dbt-executor:dev
-          SNOW_DBT_RUNNER_IMAGE: ${RUNTIME_IMAGE_PREFIX:-${COMPOSE_PROJECT_NAME:-proj-sdp-local}}/dbt-executor:dev
 
         services:
           airflow-metadata-db:
@@ -767,12 +763,11 @@ def sdp_compose_yaml() -> str:
             command: ["airflow", "scheduler"]
             networks:
               - platform
-            user: "0:0"
+            user: "${AIRFLOW_UID:-50000}:0"
             volumes:
               - airflow-logs:/opt/airflow/logs
               - ./airflow/dags:/opt/airflow/dags
               - ./postgres:/opt/platform/postgres:ro
-              - /var/run/docker.sock:/var/run/docker.sock
 
           dlt-extractor:
             build:
@@ -834,7 +829,6 @@ def sdp_compose_ci_yaml() -> str:
           airflow-scheduler:
             volumes: !override
               - airflow-logs:/opt/airflow/logs
-              - /var/run/docker.sock:/var/run/docker.sock
 
           dlt-extractor:
             volumes: !reset []
@@ -951,7 +945,7 @@ def source_repo_dag_file(*, dag_id: str, scope: str, description: str) -> str:
             dag_id="{dag_id}",
             description="{description}",
             runtime_overrides={{
-                "DLT_COMMAND": "python /opt/platform/dlt/pipeline_{scope}.py",
+                "DLT_SCRIPT_PATH": "/opt/platform/dlt/pipeline_{scope}.py",
                 "SNOWFLAKE_RAW_SYNC_SCOPE": "{scope}",
                 "SNOWFLAKE_SDP_DBT_SELECT": "{scope}",
             }},

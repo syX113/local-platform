@@ -104,10 +104,6 @@ x-airflow-env: &airflow-env
   AIRFLOW_ADMIN_PASSWORD: ${AIRFLOW_ADMIN_PASSWORD}
   AIRFLOW_ADMIN_EMAIL: ${AIRFLOW_ADMIN_EMAIL}
   AIRFLOW_UID: ${AIRFLOW_UID:-50000}
-  DOCKER_URL: unix:///var/run/docker.sock
-  DLT_RUNNER_IMAGE: ${RUNTIME_IMAGE_PREFIX:-${COMPOSE_PROJECT_NAME:-local-platform}}/dlt-extractor:dev
-  DBT_RUNNER_IMAGE: ${RUNTIME_IMAGE_PREFIX:-${COMPOSE_PROJECT_NAME:-local-platform}}/dbt-executor:dev
-  SNOW_DBT_RUNNER_IMAGE: ${RUNTIME_IMAGE_PREFIX:-${COMPOSE_PROJECT_NAME:-local-platform}}/dbt-executor:dev
 
 services:
   airflow-metadata-db:
@@ -208,9 +204,9 @@ services:
         gitlab_exporter['enable'] = false
         prometheus['enable'] = false
         puma['worker_processes'] = 1
-        puma['min_threads'] = 4
-        puma['max_threads'] = 4
-        sidekiq['concurrency'] = 5
+        puma['min_threads'] = 2
+        puma['max_threads'] = 2
+        sidekiq['concurrency'] = 2
         gitlab_kas['enable'] = false
         registry['enable'] = false
         prometheus_monitoring['enable'] = false
@@ -281,6 +277,9 @@ services:
     volumes:
       - airflow-logs:/opt/airflow/logs
       - ./airflow/dags:/opt/airflow/dags
+      - ./dlt:/opt/platform/dlt:ro
+      - ./dbt:/opt/platform/dbt:ro
+      - ./snowflake:/opt/platform/snowflake:ro
       - ./postgres:/opt/platform/postgres:ro
 
   airflow-webserver:
@@ -310,6 +309,9 @@ services:
     volumes:
       - airflow-logs:/opt/airflow/logs
       - ./airflow/dags:/opt/airflow/dags
+      - ./dlt:/opt/platform/dlt:ro
+      - ./dbt:/opt/platform/dbt:ro
+      - ./snowflake:/opt/platform/snowflake:ro
       - ./postgres:/opt/platform/postgres:ro
 
   airflow-scheduler:
@@ -328,12 +330,14 @@ services:
     command: ["airflow", "scheduler"]
     networks:
       - platform
-    user: "0:0"
+    user: "${AIRFLOW_UID:-50000}:0"
     volumes:
       - airflow-logs:/opt/airflow/logs
       - ./airflow/dags:/opt/airflow/dags
+      - ./dlt:/opt/platform/dlt:ro
+      - ./dbt:/opt/platform/dbt:ro
+      - ./snowflake:/opt/platform/snowflake:ro
       - ./postgres:/opt/platform/postgres:ro
-      - /var/run/docker.sock:/var/run/docker.sock
 
   dlt-extractor:
     build:

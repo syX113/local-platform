@@ -22,6 +22,97 @@ resolve_platform_root() {
   printf '%s\n' "${ROOT_DIR:-$(pwd)}"
 }
 
+docker_cli_bin_dir() {
+  local candidates=(
+    "/Applications/Rancher Desktop.app/Contents/Resources/resources/darwin/bin"
+    "${HOME}/.rd/bin"
+  )
+  local candidate
+  for candidate in "${candidates[@]}"; do
+    if [ -x "${candidate}/docker" ]; then
+      printf '%s\n' "${candidate}"
+      return 0
+    fi
+  done
+
+  return 1
+}
+
+docker_cli_plugin_dir_for_bin() {
+  local bin_dir="${1:?docker bin dir is required}"
+  local candidate="${bin_dir%/bin}/docker-cli-plugins"
+
+  if [ -d "${candidate}" ]; then
+    printf '%s\n' "${candidate}"
+    return 0
+  fi
+
+  return 1
+}
+
+ensure_docker_cli_runtime() {
+  local bin_dir candidate plugin_dir plugin_home
+
+  if ! type -P docker >/dev/null 2>&1; then
+    if bin_dir="$(docker_cli_bin_dir 2>/dev/null)"; then
+      case ":${PATH}:" in
+        *":${bin_dir}:"*) ;;
+        *) export PATH="${bin_dir}:${PATH}" ;;
+      esac
+    fi
+  fi
+
+  if docker compose version >/dev/null 2>&1; then
+    return 0
+  fi
+
+  for candidate in \
+    "${bin_dir:-}" \
+    "/Applications/Rancher Desktop.app/Contents/Resources/resources/darwin/bin" \
+    "${HOME}/.rd/bin" \
+    "${HOME}/.docker/cli-plugins" \
+    "/usr/local/lib/docker/cli-plugins" \
+    "/usr/lib/docker/cli-plugins"; do
+    if [ -n "${candidate}" ] && [ -d "${candidate}/../docker-cli-plugins" ]; then
+      plugin_dir="${candidate}/../docker-cli-plugins"
+      break
+    fi
+    if [ -n "${candidate}" ] && [ -x "${candidate}/docker-compose" ]; then
+      plugin_dir="${candidate}"
+      break
+    fi
+  done
+
+  if [ -n "${plugin_dir:-}" ] && [ -x "${plugin_dir}/docker-compose" ]; then
+    export DOCKER_CLI_PLUGIN_PATH="${plugin_dir}"
+    if [ -z "${DOCKER_CONFIG:-}" ]; then
+      export DOCKER_CONFIG="${HOME}/.docker"
+    fi
+    plugin_home="${DOCKER_CONFIG}/cli-plugins"
+    mkdir -p "${plugin_home}"
+    rm -f "${plugin_home}/docker-compose"
+    ln -s "${plugin_dir}/docker-compose" "${plugin_home}/docker-compose"
+    if [ -x "${plugin_dir}/docker-buildx" ]; then
+      rm -f "${plugin_home}/docker-buildx"
+      ln -s "${plugin_dir}/docker-buildx" "${plugin_home}/docker-buildx"
+    fi
+  fi
+
+  return 0
+}
+
+ensure_docker_socket_access() {
+  local socket_host socket_path
+
+  socket_host="$(docker context inspect --format '{{.Endpoints.docker.Host}}' 2>/dev/null | head -n 1 || true)"
+  case "${socket_host}" in
+    unix://*)
+      socket_path="${socket_host#unix://}"
+      chmod a+rw "${socket_path}" 2>/dev/null || true
+      ;;
+  esac
+}
+
 project_registry_script_path() {
   local candidates=(
     "${ROOT_DIR}/dbt/scripts/project_registry.py"
@@ -64,12 +155,6 @@ project_registry_prepare_targets() {
   local project_slug="${1:?project slug is required}"
   python3 "$(project_registry_script_path)" prepare-targets \
     --project-slug "${project_slug}"
-}
-
-project_registry_project_slug_for_name() {
-  local project_name="${1:?project name is required}"
-  python3 "$(project_registry_script_path)" project-slug-for-name \
-    --project-name "${project_name}"
 }
 
 project_registry_project_name_for_target() {
@@ -196,13 +281,13 @@ activate_source_scope_runtime() {
   case "${scope}" in
     orders)
       base_pipeline_name="$(source_orders_pipeline_basename)"
-      export DLT_COMMAND="python /opt/platform/dlt/pipeline_orders.py"
+      export DLT_SCRIPT_PATH="/opt/platform/dlt/pipeline_orders.py"
       export SNOWFLAKE_RAW_SYNC_SCOPE="orders"
       export SNOWFLAKE_SDP_DBT_SELECT="orders"
       ;;
     customers)
       base_pipeline_name="$(source_customers_pipeline_basename)"
-      export DLT_COMMAND="python /opt/platform/dlt/pipeline_customers.py"
+      export DLT_SCRIPT_PATH="/opt/platform/dlt/pipeline_customers.py"
       export SNOWFLAKE_RAW_SYNC_SCOPE="customers"
       export SNOWFLAKE_SDP_DBT_SELECT="customers"
       ;;
@@ -372,6 +457,10 @@ ensure_platform_env() {
   fi
 
   load_env_preserving_existing .env
+  ensure_docker_cli_runtime
+  ensure_docker_socket_access
+
+  export AIRFLOW_UID="${AIRFLOW_UID:-50000}"
 
   local root_dir="${ROOT_DIR:-$(pwd)}"
   local platform_root="${LOCAL_PLATFORM_ROOT:-}"
@@ -445,15 +534,6 @@ dbt_loom_manifest_bucket() {
   printf '%s' "${MINIO_MANIFEST_BUCKET:-dbt-manifests}"
 }
 
-dbt_loom_manifest_object_name_for_repo() {
-  local repo_path="${1:?GitLab repo path is required}"
-  printf 'dbt-loom/%s/manifest.json.gz' "${repo_path}"
-}
-
-dbt_loom_manifest_local_path() {
-  printf '%s' 'loom/manifest.json.gz'
-}
-
 run_dbt_loom_manifest_helper() {
   local command="${1:?loom manifest command is required}"
   shift
@@ -480,25 +560,6 @@ publish_source_loom_manifests() {
   done < <(project_registry_manifest_publish_keys "${source_project_slug}")
 
   run_dbt_loom_manifest_helper "${publish_args[@]}"
-}
-
-ensure_dbt_loom_manifest_for_project() {
-  local project_slug="${1:?dbt project slug is required}"
-  local manifest_object_key
-
-  manifest_object_key="$(project_registry_manifest_key "${project_slug}")"
-  if [ -z "${manifest_object_key}" ]; then
-    return 0
-  fi
-
-  local project_dir bucket_name
-  project_dir="$(resolve_container_dbt_project_dir "${project_slug}")"
-  bucket_name="$(dbt_loom_manifest_bucket)"
-
-  run_dbt_loom_manifest_helper fetch \
-    --project-dir "${project_dir}" \
-    --bucket "${bucket_name}" \
-    --object-key "${manifest_object_key}"
 }
 
 export_prd_runtime_env() {

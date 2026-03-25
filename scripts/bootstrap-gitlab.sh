@@ -448,6 +448,7 @@ render_runner_config \
   "${EDP_RUNNER_DESCRIPTION}" "${EDP_RUNNER_TOKEN}" \
   "${EDP_CUSTOMERS_RUNNER_DESCRIPTION}" "${EDP_CUSTOMERS_RUNNER_TOKEN}"
 
+mkdir -p gitlab-branch-provisioner/state
 docker compose up -d gitlab-branch-provisioner
 docker compose restart gitlab-branch-provisioner
 

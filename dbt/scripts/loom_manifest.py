@@ -90,6 +90,7 @@ def run_local_dbt_parse(
             check=False,
             text=True,
             env=snow_env(),
+            cwd=str(prepared_dir),
         )
         if completed.returncode != 0:
             raise SystemExit(completed.returncode)

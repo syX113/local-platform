@@ -78,6 +78,7 @@ def run_snow(
     capture_output: bool = False,
     allow_failure: bool = False,
     extra_env: dict[str, str] | None = None,
+    cwd: Path | None = None,
 ) -> subprocess.CompletedProcess[str]:
     cli_path = ensure_snow_cli_available()
     completed = subprocess.run(
@@ -86,6 +87,7 @@ def run_snow(
         capture_output=capture_output,
         text=True,
         env=snow_env(extra_env),
+        cwd=str(cwd) if cwd is not None else None,
     )
     if completed.returncode != 0 and not allow_failure:
         if completed.stdout:
@@ -162,6 +164,68 @@ def dbt_loom_config_path(project_dir: Path) -> Path | None:
     return None
 
 
+def dbt_loom_manifest_bucket() -> str:
+    return opt_env("MINIO_MANIFEST_BUCKET") or "dbt-manifests"
+
+
+def fetch_loom_manifest_for_prepared_project(
+    prepared_dir: Path,
+    *,
+    manifest_object_key: str,
+    loom_config_path: Path,
+    quiet: bool = False,
+) -> None:
+    if not manifest_object_key:
+        return
+    if not loom_config_path.exists():
+        raise SystemExit(f"missing dbt_loom.config.yml in prepared project: {prepared_dir}")
+
+    manifest_helper = Path(__file__).resolve().with_name("loom_manifest.py")
+    completed = subprocess.run(
+        [
+            sys.executable,
+            str(manifest_helper),
+            "fetch",
+            "--project-dir",
+            str(prepared_dir),
+            "--bucket",
+            dbt_loom_manifest_bucket(),
+            "--object-key",
+            manifest_object_key,
+            "--local-path",
+            "loom/manifest.json.gz",
+        ],
+        check=False,
+        text=True,
+        env=snow_env({"DBT_LOOM_CONFIG": str(loom_config_path)}),
+        capture_output=quiet,
+    )
+    if completed.returncode != 0:
+        if completed.stdout:
+            print(completed.stdout, file=sys.stdout, end="")
+        if completed.stderr:
+            print(completed.stderr, file=sys.stderr, end="")
+        raise SystemExit(completed.returncode)
+
+
+def rewrite_loom_config_for_prepared_project(prepared_dir: Path, loom_config_path: Path) -> None:
+    if not loom_config_path.exists():
+        return
+
+    manifest_path = prepared_dir / "loom" / "manifest.json.gz"
+    if not manifest_path.exists():
+        return
+
+    config_text = loom_config_path.read_text(encoding="utf-8")
+    rendered_manifest_path = json.dumps(str(manifest_path))
+    updated_config_text = config_text.replace(
+        "path: loom/manifest.json.gz",
+        f"path: {rendered_manifest_path}",
+    )
+    if updated_config_text != config_text:
+        loom_config_path.write_text(updated_config_text, encoding="utf-8")
+
+
 def project_profile_name(project_dir: Path) -> str:
     match = re.search(r"^\s*profile:\s*([A-Za-z0-9_]+)\s*$", project_dir.joinpath("dbt_project.yml").read_text(encoding="utf-8"), re.MULTILINE)
     if not match:
@@ -196,6 +260,7 @@ def prepare_project_source(
     target_name: str,
     quiet: bool = False,
     copy_downstream_dependencies: bool = True,
+    enable_loom: bool = True,
     work_dir: Path | None = None,
 ) -> Path:
     if not project_dir.joinpath("dbt_project.yml").exists():
@@ -221,13 +286,20 @@ def prepare_project_source(
 
     render_env_vars_in_tree(prepared_dir)
 
+    if not enable_loom:
+        shutil.rmtree(prepared_dir / "loom", ignore_errors=True)
+        loom_config_copy = prepared_dir / "dbt_loom.config.yml"
+        if loom_config_copy.exists():
+            loom_config_copy.unlink()
+
     prepared_dir.joinpath("profiles.yml").write_text(
         build_profiles_yml(project_dir, database=database, schema=schema, target_name=target_name),
         encoding="utf-8",
     )
 
-    loom_config_path = dbt_loom_config_path(prepared_dir)
+    loom_config_path = dbt_loom_config_path(prepared_dir) if enable_loom else None
     loom_env = {"DBT_LOOM_CONFIG": str(loom_config_path)} if loom_config_path else None
+    manifest_object_key = str(spec.get("manifest_object_key", "")).strip()
 
     if copy_downstream_dependencies and project_kind == "edp":
         upstream_project_slug = str(spec.get("upstream_project_slug", "")).strip()
@@ -250,33 +322,77 @@ def prepare_project_source(
                 encoding="utf-8",
             )
 
-            completed = subprocess.run(
-                [
-                    shutil.which("dbt") or "dbt",
-                    "deps",
-                    "--profiles-dir",
-                    str(prepared_dir),
-                    "--project-dir",
-                    str(prepared_dir),
-                    "--target",
-                    target_name,
-                ],
-                check=False,
-                text=True,
-                env=snow_env(loom_env),
-                capture_output=quiet,
-            )
-            if completed.returncode != 0:
-                if completed.stdout:
-                    print(completed.stdout, file=sys.stdout, end="")
-                if completed.stderr:
-                    print(completed.stderr, file=sys.stderr, end="")
-                raise SystemExit(completed.returncode)
+            loom_config_backup: Path | None = None
+            if loom_config_path is not None:
+                loom_config_backup = prepared_dir / "dbt_loom.config.yml.disabled"
+                if loom_config_path.exists():
+                    loom_config_path.rename(loom_config_backup)
+
+            try:
+                completed = subprocess.run(
+                    [
+                        shutil.which("dbt") or "dbt",
+                        "deps",
+                        "--profiles-dir",
+                        str(prepared_dir),
+                        "--project-dir",
+                        str(prepared_dir),
+                        "--target",
+                        target_name,
+                    ],
+                    check=False,
+                    text=True,
+                    env=snow_env(loom_env),
+                    capture_output=quiet,
+                )
+                if completed.returncode != 0:
+                    if completed.stdout:
+                        print(completed.stdout, file=sys.stdout, end="")
+                    if completed.stderr:
+                        print(completed.stderr, file=sys.stderr, end="")
+                    raise SystemExit(completed.returncode)
+            finally:
+                if loom_config_backup and loom_config_backup.exists():
+                    loom_config_backup.rename(prepared_dir / "dbt_loom.config.yml")
+
+    if enable_loom and manifest_object_key:
+        if loom_config_path is None:
+            raise SystemExit(f"missing dbt_loom.config.yml for project: {project_identity}")
+        fetch_loom_manifest_for_prepared_project(
+            prepared_dir,
+            manifest_object_key=manifest_object_key,
+            loom_config_path=loom_config_path,
+            quiet=quiet,
+        )
+        rewrite_loom_config_for_prepared_project(prepared_dir, loom_config_path)
 
     return prepared_dir
 
 
 def deploy_project(*, project_dir: Path, project_name: str, database: str, schema: str, target_name: str, project_slug: str | None = None) -> None:
+    spec = project_spec(project_dir, project_slug)
+    prepare_targets = spec.get("prepare_targets", [])
+    if isinstance(prepare_targets, list):
+        for target in prepare_targets:
+            if not isinstance(target, dict):
+                continue
+            database_env = str(target.get("database_env", "")).strip()
+            schema_envs = target.get("schema_envs", [])
+            if not database_env or not isinstance(schema_envs, list):
+                continue
+            target_database = env(database_env)
+            target_schemas = [env(schema_env) for schema_env in schema_envs if str(schema_env).strip()]
+            if not target_schemas:
+                continue
+            prepare_target(
+                project_dir=project_dir,
+                project_slug=project_slug,
+                database=target_database,
+                schema=target_schemas[0],
+                target_name=target_name,
+                schemas=target_schemas,
+            )
+
     prepared_dir = prepare_project_source(
         project_dir,
         project_slug=project_slug,
@@ -298,6 +414,7 @@ def deploy_project(*, project_dir: Path, project_name: str, database: str, schem
             target_name,
             "--force",
             extra_env={"DBT_LOOM_CONFIG": str(prepared_dir / "dbt_loom.config.yml")},
+            cwd=prepared_dir,
         )
     finally:
         shutil.rmtree(prepared_dir.parent, ignore_errors=True)
@@ -322,17 +439,23 @@ def run_local_dbt(
     schema: str,
     target_name: str,
     dbt_args: list[str],
+    connection_database: str | None = None,
+    connection_schema: str | None = None,
+    enable_loom: bool = True,
 ) -> None:
+    profile_database = connection_database or database
+    profile_schema = connection_schema or schema
     prepared_dir = prepare_project_source(
         project_dir,
         project_slug=project_slug,
-        database=database,
-        schema=schema,
+        database=profile_database,
+        schema=profile_schema,
         target_name=target_name,
+        enable_loom=enable_loom,
     )
     try:
-        loom_config_path = prepared_dir / "dbt_loom.config.yml"
-        extra_env = {"DBT_LOOM_CONFIG": str(loom_config_path)} if loom_config_path.exists() else None
+        loom_config_path = prepared_dir / "dbt_loom.config.yml" if enable_loom else None
+        extra_env = {"DBT_LOOM_CONFIG": str(loom_config_path)} if loom_config_path and loom_config_path.exists() else None
         completed = subprocess.run(
             [
                 shutil.which("dbt") or "dbt",
@@ -347,6 +470,7 @@ def run_local_dbt(
             check=False,
             text=True,
             env=snow_env(extra_env),
+            cwd=str(prepared_dir),
         )
         if completed.returncode != 0:
             raise SystemExit(completed.returncode)
@@ -369,12 +493,15 @@ def prepare_target(
         database=database,
         schema=schema,
         target_name=target_name,
+        enable_loom=False,
         dbt_args=[
             "run-operation",
             "ensure_target_database_and_schemas",
             "--args",
             json.dumps({"database_name": database, "schemas": schemas}),
         ],
+        connection_database=control_database(),
+        connection_schema=control_schema(),
     )
 
 

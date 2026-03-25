@@ -4,8 +4,6 @@ import argparse
 import os
 from pathlib import Path
 
-from loom_manifest import fetch_manifest, manifest_bucket
-from project_registry import project_by_slug
 from snow_dbt_cli import default_database_for_project, default_schema_for_project, prepare_project_source
 
 
@@ -34,15 +32,6 @@ def main() -> int:
         copy_downstream_dependencies=False,
         work_dir=workspace_dir,
     )
-
-    manifest_object_key = str(project_by_slug(project_slug).get("manifest_object_key", "")).strip()
-    if manifest_object_key:
-        fetch_manifest(
-            bucket=manifest_bucket(),
-            object_key=manifest_object_key,
-            project_dir=prepared_dir,
-            local_path="loom/manifest.json.gz",
-        )
 
     print(f"prepared sqlfluff workspace: {prepared_dir}")
     return 0

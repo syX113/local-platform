@@ -18,9 +18,6 @@ case "${target_env}" in
   dev)
     export_dev_runtime_env
     activate_source_scope_runtime "${scope}"
-    export DLT_RUNNER_IMAGE="${DLT_RUNNER_IMAGE:-${DEV_SDP_RUNTIME_IMAGE_PREFIX}/dlt-extractor:dev}"
-    export DBT_RUNNER_IMAGE="${DBT_RUNNER_IMAGE:-${DEV_SDP_RUNTIME_IMAGE_PREFIX}/dbt-executor:dev}"
-    export SNOW_DBT_RUNNER_IMAGE="${SNOW_DBT_RUNNER_IMAGE:-${DBT_RUNNER_IMAGE}}"
     airflow_dag_id="${AIRFLOW_ACTIVE_DAG_ID}"
     airflow_module_prefix="${AIRFLOW_ACTIVE_MODULE_PREFIX}"
     airflow_dag_filename="${AIRFLOW_ACTIVE_DAG_FILENAME}"
@@ -29,9 +26,6 @@ case "${target_env}" in
   prd)
     export_prd_runtime_env
     activate_source_scope_runtime "${scope}"
-    export DLT_RUNNER_IMAGE="${DLT_RUNNER_IMAGE:-${PRD_SDP_RUNTIME_IMAGE_PREFIX}/dlt-extractor:dev}"
-    export DBT_RUNNER_IMAGE="${DBT_RUNNER_IMAGE:-${PRD_SDP_RUNTIME_IMAGE_PREFIX}/dbt-executor:dev}"
-    export SNOW_DBT_RUNNER_IMAGE="${SNOW_DBT_RUNNER_IMAGE:-${DBT_RUNNER_IMAGE}}"
     airflow_dag_id="${AIRFLOW_ACTIVE_DAG_ID}"
     airflow_module_prefix="${AIRFLOW_ACTIVE_MODULE_PREFIX}"
     airflow_dag_filename="${AIRFLOW_ACTIVE_DAG_FILENAME}"
@@ -54,9 +48,6 @@ ARTIFACT_DIR="${ROOT_DIR}/artifacts/deploy-sdp-${target_label}"
 mkdir -p "${ARTIFACT_DIR}"
 
 target_label_upper="$(printf '%s' "${target_label}" | tr '[:lower:]' '[:upper:]')"
-DLT_RUNNER_IMAGE="${DLT_RUNNER_IMAGE:-$(runtime_image_ref dlt-extractor)}"
-DBT_RUNNER_IMAGE="${DBT_RUNNER_IMAGE:-$(runtime_image_ref dbt-executor)}"
-SNOW_DBT_RUNNER_IMAGE="${SNOW_DBT_RUNNER_IMAGE:-${DBT_RUNNER_IMAGE}}"
 
 python_literal() {
   local value="${1:?value is required}"
@@ -128,7 +119,7 @@ dag = build_ingest_dag(
         "SNOWFLAKE_CONTROL_DATABASE": $(python_literal "${SNOWFLAKE_CONTROL_DATABASE}"),
         "SNOWFLAKE_CONTROL_SCHEMA": $(python_literal "${SNOWFLAKE_CONTROL_SCHEMA}"),
         "SNOWFLAKE_DBT_STAGE": $(python_literal "${SNOWFLAKE_DBT_STAGE}"),
-        "DLT_COMMAND": $(python_literal "${DLT_COMMAND:-python /opt/platform/dlt/pipeline_${scope}.py}"),
+        "DLT_SCRIPT_PATH": $(python_literal "${DLT_SCRIPT_PATH:-/opt/platform/dlt/pipeline_${scope}.py}"),
         "SNOWFLAKE_RAW_SYNC_SCOPE": $(python_literal "${SNOWFLAKE_RAW_SYNC_SCOPE:-}"),
         "SNOWFLAKE_SDP_DBT_SELECT": $(python_literal "${SNOWFLAKE_SDP_DBT_SELECT:-}"),
         "SNOWFLAKE_SDP_DATABASE": $(python_literal "${SNOWFLAKE_SDP_DATABASE}"),
@@ -137,10 +128,8 @@ dag = build_ingest_dag(
         "SNOWFLAKE_EDP_CUSTOMERS_DATABASE": $(python_literal "${SNOWFLAKE_EDP_CUSTOMERS_DATABASE:-}"),
         "SNOWFLAKE_SDP_DBT_PROJECT": $(python_literal "${SNOWFLAKE_SDP_DBT_PROJECT}"),
         "SNOWFLAKE_EDP_DBT_PROJECT": $(python_literal "${SNOWFLAKE_EDP_DBT_PROJECT}"),
+        "SNOWFLAKE_LOCAL_RAW_SYNC": $(python_literal "${SNOWFLAKE_LOCAL_RAW_SYNC:-false}"),
         "SNOW_DBT_TARGET_NAME": $(python_literal "${SNOW_DBT_TARGET_NAME:-dev}"),
-        "DLT_RUNNER_IMAGE": $(python_literal "${DLT_RUNNER_IMAGE}"),
-        "DBT_RUNNER_IMAGE": $(python_literal "${DBT_RUNNER_IMAGE:-}"),
-        "SNOW_DBT_RUNNER_IMAGE": $(python_literal "${SNOW_DBT_RUNNER_IMAGE:-${DBT_RUNNER_IMAGE:-}}"),
     },
     tags=DEFAULT_TAGS + [$(python_literal "${target_label}"), $(python_literal "${scope}"), "deployment"],
 )
@@ -153,12 +142,8 @@ cp "${wrapper_file}" "${host_deployed_dir}/${dag_filename}"
 
 ensure_shared_airflow_services
 
-scheduler_container_id="$(docker compose ps -q airflow-scheduler || true)"
-if [ -n "${scheduler_container_id}" ]; then
-  docker compose exec -T airflow-scheduler mkdir -p /opt/airflow/dags/deployed
-  docker cp "${support_file}" "${scheduler_container_id}:/opt/airflow/dags/deployed/$(basename "${support_file}")"
-  docker cp "${impl_file}" "${scheduler_container_id}:/opt/airflow/dags/deployed/$(basename "${impl_file}")"
-  docker cp "${wrapper_file}" "${scheduler_container_id}:${wrapper_path}"
+if [ -n "$(docker compose ps -q airflow-scheduler || true)" ]; then
+  echo "airflow-scheduler container is running; deployed DAG files are available via the bind-mounted ${host_deployed_dir}" >&2
 else
   echo "airflow-scheduler container is not running; deployed DAG files were written to ${host_deployed_dir}" >&2
 fi
@@ -176,8 +161,6 @@ cat > "${ARTIFACT_DIR}/${target_label}_airflow_summary.txt" <<EOF
 airflow.${target_label}_dag_id=${airflow_dag_id}
 airflow.${target_label}_dag_subdir=${wrapper_path}
 airflow.${target_label}_scope=${scope}
-runtime.dlt_image=${DLT_RUNNER_IMAGE}
-runtime.snow_dbt_image=${SNOW_DBT_RUNNER_IMAGE:-${DBT_RUNNER_IMAGE:-}}
 snowflake.sdp_dbt_project=${SNOWFLAKE_SDP_DBT_PROJECT}
 snowflake.edp_dbt_project=${SNOWFLAKE_EDP_DBT_PROJECT}
 snowflake.dbt_target=${SNOW_DBT_TARGET_NAME:-dev}

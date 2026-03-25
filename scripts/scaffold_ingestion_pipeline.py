@@ -126,9 +126,8 @@ def main() -> int:
             from airflow import DAG
             from airflow.operators.empty import EmptyOperator
             from airflow.operators.python import PythonOperator
-            from airflow.providers.docker.operators.docker import DockerOperator
 
-            from platform_support import docker_environment, seed_source_postgres
+            from platform_support import docker_environment, run_python_script, seed_source_postgres
 
 
             with DAG(
@@ -146,24 +145,21 @@ def main() -> int:
                     python_callable=seed_source_postgres,
                 )
 
-                run_dlt = DockerOperator(
+                run_dlt = PythonOperator(
                     task_id="run_dlt_pipeline",
-                    image=os.environ.get("DLT_RUNNER_IMAGE", "local-platform/dlt-extractor:dev"),
-                    docker_url=os.environ.get("DOCKER_URL", "unix:///var/run/docker.sock"),
-                    command="python /opt/platform/dlt/{slug}_pipeline.py",
-                    network_mode=os.environ.get("PLATFORM_DOCKER_NETWORK", "local-platform-net"),
-                    mount_tmp_dir=False,
-                    auto_remove="force",
-                    tty=True,
-                    environment=docker_environment(
-                        {{
-                            "DLT_PIPELINE_NAME": "{dag_id}",
-                            "ICEBERG_CATALOG_NAME": "{catalog_name}",
-                            "ICEBERG_NAMESPACE": "{namespace}",
-                            "MINIO_PREFIX": "{object_prefix}",
-                            "OBJECT_STORE_BUCKET": "s3://lakehouse/{object_prefix}",
-                        }}
-                    ),
+                    python_callable=run_python_script,
+                    op_kwargs={{
+                        "script_path": "/opt/platform/dlt/{slug}_pipeline.py",
+                        "runtime_overrides": docker_environment(
+                            {{
+                                "DLT_PIPELINE_NAME": "{dag_id}",
+                                "ICEBERG_CATALOG_NAME": "{catalog_name}",
+                                "ICEBERG_NAMESPACE": "{namespace}",
+                                "MINIO_PREFIX": "{object_prefix}",
+                                "OBJECT_STORE_BUCKET": "s3://lakehouse/{object_prefix}",
+                            }}
+                        ),
+                    }},
                 )
 
                 finish = EmptyOperator(task_id="finish")

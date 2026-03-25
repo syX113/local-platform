@@ -76,8 +76,6 @@ function Resolve-ScopeConfig {
             }
             $cfg.TargetLabel = "dev-$SourceScope"
             $cfg.SnowDbtTargetName = "dev"
-            $cfg.DltRunnerImage = if ([string]::IsNullOrEmpty((Get-EnvValue -Name "DLT_RUNNER_IMAGE"))) { Get-RuntimeImageRef -ServiceName "dlt-extractor" } else { Get-EnvValue -Name "DLT_RUNNER_IMAGE" }
-            $cfg.SnowDbtRunnerImage = if ([string]::IsNullOrEmpty((Get-EnvValue -Name "SNOW_DBT_RUNNER_IMAGE"))) { Get-RuntimeImageRef -ServiceName "dbt-executor" } else { Get-EnvValue -Name "SNOW_DBT_RUNNER_IMAGE" }
         }
         "prd" {
             $cfg.DagId = if ($SourceScope -eq "orders") { Get-EnvValue -Name "PRD_ORDERS_AIRFLOW_DAG_ID" } else { Get-EnvValue -Name "PRD_CUSTOMERS_AIRFLOW_DAG_ID" }
@@ -101,9 +99,6 @@ function Resolve-ScopeConfig {
             }
             $cfg.TargetLabel = "prd-$SourceScope"
             $cfg.SnowDbtTargetName = "prd"
-            $runtimePrefix = if ([string]::IsNullOrEmpty((Get-EnvValue -Name "PRD_SDP_RUNTIME_IMAGE_PREFIX"))) { "local-platform-prd-sdp" } else { Get-EnvValue -Name "PRD_SDP_RUNTIME_IMAGE_PREFIX" }
-            $cfg.DltRunnerImage = if ([string]::IsNullOrEmpty((Get-EnvValue -Name "DLT_RUNNER_IMAGE"))) { "$runtimePrefix/dlt-extractor`:dev" } else { Get-EnvValue -Name "DLT_RUNNER_IMAGE" }
-            $cfg.SnowDbtRunnerImage = if ([string]::IsNullOrEmpty((Get-EnvValue -Name "SNOW_DBT_RUNNER_IMAGE"))) { "$runtimePrefix/dbt-executor`:dev" } else { Get-EnvValue -Name "SNOW_DBT_RUNNER_IMAGE" }
         }
         "current" {
             $cfg.DagId = Get-EnvValue -Name "AIRFLOW_ACTIVE_DAG_ID"
@@ -120,8 +115,6 @@ function Resolve-ScopeConfig {
             $cfg.SnowflakeEdpDbtProject = Get-EnvValue -Name "SNOWFLAKE_EDP_DBT_PROJECT"
             $cfg.TargetLabel = if ([string]::IsNullOrEmpty($CurrentLabel)) { "current-$SourceScope" } else { $CurrentLabel }
             $cfg.SnowDbtTargetName = if ([string]::IsNullOrEmpty((Get-EnvValue -Name "SNOW_DBT_TARGET_NAME"))) { "dev" } else { Get-EnvValue -Name "SNOW_DBT_TARGET_NAME" }
-            $cfg.DltRunnerImage = if ([string]::IsNullOrEmpty((Get-EnvValue -Name "DLT_RUNNER_IMAGE"))) { Get-RuntimeImageRef -ServiceName "dlt-extractor" } else { Get-EnvValue -Name "DLT_RUNNER_IMAGE" }
-            $cfg.SnowDbtRunnerImage = if ([string]::IsNullOrEmpty((Get-EnvValue -Name "SNOW_DBT_RUNNER_IMAGE"))) { Get-RuntimeImageRef -ServiceName "dbt-executor" } else { Get-EnvValue -Name "SNOW_DBT_RUNNER_IMAGE" }
         }
     }
 
@@ -146,7 +139,6 @@ $objectStoreBucket = "s3://$minioBucket/$($cfg.MinioPrefix)"
 $snowflakeControlDatabase = if ([string]::IsNullOrEmpty((Get-EnvValue -Name "SNOWFLAKE_CONTROL_DATABASE"))) { "LOCAL_PLATFORM_CONTROL" } else { Get-EnvValue -Name "SNOWFLAKE_CONTROL_DATABASE" }
 $snowflakeControlSchema = if ([string]::IsNullOrEmpty((Get-EnvValue -Name "SNOWFLAKE_CONTROL_SCHEMA"))) { "OPERATIONS" } else { Get-EnvValue -Name "SNOWFLAKE_CONTROL_SCHEMA" }
 $snowflakeDbtStage = if ([string]::IsNullOrEmpty((Get-EnvValue -Name "SNOWFLAKE_DBT_STAGE"))) { "DBT_PROJECT_STAGE" } else { Get-EnvValue -Name "SNOWFLAKE_DBT_STAGE" }
-$dbtRunnerImage = if ([string]::IsNullOrEmpty((Get-EnvValue -Name "DBT_RUNNER_IMAGE"))) { $cfg.SnowDbtRunnerImage } else { Get-EnvValue -Name "DBT_RUNNER_IMAGE" }
 $targetLabelUpper = $cfg.TargetLabel.ToUpperInvariant()
 
 $tmpDir = New-Item -ItemType Directory -Path ([System.IO.Path]::GetTempPath()) -Name ("airflow-$TargetEnv-$Scope-" + [guid]::NewGuid().ToString("N"))
@@ -194,17 +186,15 @@ dag = build_ingest_dag(
         "SNOWFLAKE_CONTROL_DATABASE": $(Convert-ToPythonStringLiteral -Value $snowflakeControlDatabase),
         "SNOWFLAKE_CONTROL_SCHEMA": $(Convert-ToPythonStringLiteral -Value $snowflakeControlSchema),
         "SNOWFLAKE_DBT_STAGE": $(Convert-ToPythonStringLiteral -Value $snowflakeDbtStage),
-        "DLT_COMMAND": $(Convert-ToPythonStringLiteral -Value "python /opt/platform/dlt/pipeline_$Scope.py"),
+        "DLT_SCRIPT_PATH": $(Convert-ToPythonStringLiteral -Value "/opt/platform/dlt/pipeline_$Scope.py"),
         "SNOWFLAKE_RAW_SYNC_SCOPE": $(Convert-ToPythonStringLiteral -Value $Scope),
         "SNOWFLAKE_SDP_DBT_SELECT": $(Convert-ToPythonStringLiteral -Value $Scope),
         "SNOWFLAKE_SDP_DATABASE": $(Convert-ToPythonStringLiteral -Value $cfg.SnowflakeSdpDatabase),
         "SNOWFLAKE_EDP_DATABASE": $(Convert-ToPythonStringLiteral -Value $cfg.SnowflakeEdpDatabase),
         "SNOWFLAKE_SDP_DBT_PROJECT": $(Convert-ToPythonStringLiteral -Value $cfg.SnowflakeSdpDbtProject),
         "SNOWFLAKE_EDP_DBT_PROJECT": $(Convert-ToPythonStringLiteral -Value $cfg.SnowflakeEdpDbtProject),
+        "SNOWFLAKE_LOCAL_RAW_SYNC": $(Convert-ToPythonStringLiteral -Value (Get-EnvValue -Name "SNOWFLAKE_LOCAL_RAW_SYNC")),
         "SNOW_DBT_TARGET_NAME": $(Convert-ToPythonStringLiteral -Value $cfg.SnowDbtTargetName),
-        "DLT_RUNNER_IMAGE": $(Convert-ToPythonStringLiteral -Value $cfg.DltRunnerImage),
-        "DBT_RUNNER_IMAGE": $(Convert-ToPythonStringLiteral -Value $dbtRunnerImage),
-        "SNOW_DBT_RUNNER_IMAGE": $(Convert-ToPythonStringLiteral -Value $cfg.SnowDbtRunnerImage),
     },
     tags=DEFAULT_TAGS + [$(Convert-ToPythonStringLiteral -Value $cfg.TargetLabel), $(Convert-ToPythonStringLiteral -Value $Scope), "deployment"],
 )
@@ -216,10 +206,7 @@ dag = build_ingest_dag(
         throw "unable to resolve airflow-scheduler container id"
     }
 
-    Invoke-DockerCompose -Arguments @("exec", "-T", "airflow-scheduler", "mkdir", "-p", "/opt/airflow/dags/deployed")
-    & docker cp $supportFile "${schedulerContainerId}:/opt/airflow/dags/deployed/$([System.IO.Path]::GetFileName($supportFile))" | Out-Null
-    & docker cp $implFile "${schedulerContainerId}:/opt/airflow/dags/deployed/$([System.IO.Path]::GetFileName($implFile))" | Out-Null
-    & docker cp $wrapperFile "${schedulerContainerId}:/opt/airflow/dags/deployed/$dagFilename" | Out-Null
+    Write-Host "airflow-scheduler container is running; deployed DAG files are available via the bind-mounted $hostDeployedDir"
 
     $artifactDir = Join-Path $rootDir "artifacts/deploy-sdp-$($cfg.TargetLabel)"
     if (-not (Test-Path -LiteralPath $artifactDir)) {
