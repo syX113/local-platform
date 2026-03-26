@@ -13,7 +13,7 @@ source "${SCRIPT_DIR}/common.sh"
 ensure_platform_env
 
 target_env="${1:?target environment is required (dev|prd|current)}"
-scope="${2:?source scope is required (orders|customers)}"
+scope="${2:?source scope is required (orders|customers|taxes|depot_transactions)}"
 case "${target_env}" in
   dev)
     export_dev_runtime_env
@@ -123,9 +123,15 @@ dag = build_ingest_dag(
         "SNOWFLAKE_RAW_SYNC_SCOPE": $(python_literal "${SNOWFLAKE_RAW_SYNC_SCOPE:-}"),
         "SNOWFLAKE_SDP_DBT_SELECT": $(python_literal "${SNOWFLAKE_SDP_DBT_SELECT:-}"),
         "SNOWFLAKE_SDP_DATABASE": $(python_literal "${SNOWFLAKE_SDP_DATABASE}"),
+        "SNOWFLAKE_SDP_ORDERS_DATABASE": $(python_literal "${SNOWFLAKE_SDP_ORDERS_DATABASE:-}"),
         "SNOWFLAKE_SDP_CUSTOMERS_DATABASE": $(python_literal "${SNOWFLAKE_SDP_CUSTOMERS_DATABASE:-}"),
+        "SNOWFLAKE_SDP_TAXES_DATABASE": $(python_literal "${SNOWFLAKE_SDP_TAXES_DATABASE:-}"),
+        "SNOWFLAKE_SDP_DEPOT_TRANSACTIONS_DATABASE": $(python_literal "${SNOWFLAKE_SDP_DEPOT_TRANSACTIONS_DATABASE:-}"),
         "SNOWFLAKE_EDP_DATABASE": $(python_literal "${SNOWFLAKE_EDP_DATABASE}"),
+        "SNOWFLAKE_EDP_ORDERS_DATABASE": $(python_literal "${SNOWFLAKE_EDP_ORDERS_DATABASE:-}"),
         "SNOWFLAKE_EDP_CUSTOMERS_DATABASE": $(python_literal "${SNOWFLAKE_EDP_CUSTOMERS_DATABASE:-}"),
+        "SNOWFLAKE_EDP_TAXES_DATABASE": $(python_literal "${SNOWFLAKE_EDP_TAXES_DATABASE:-}"),
+        "SNOWFLAKE_EDP_DEPOT_TRANSACTIONS_DATABASE": $(python_literal "${SNOWFLAKE_EDP_DEPOT_TRANSACTIONS_DATABASE:-}"),
         "SNOWFLAKE_SDP_DBT_PROJECT": $(python_literal "${SNOWFLAKE_SDP_DBT_PROJECT}"),
         "SNOWFLAKE_EDP_DBT_PROJECT": $(python_literal "${SNOWFLAKE_EDP_DBT_PROJECT}"),
         "SNOWFLAKE_LOCAL_RAW_SYNC": $(python_literal "${SNOWFLAKE_LOCAL_RAW_SYNC:-false}"),

@@ -12,6 +12,16 @@ sources:
     schema: "{{ env_var('SNOWFLAKE_SDP_IN_SCHEMA', 'INBOUND') }}"
     tables:
       - name: EXT_CUSTOMERS_RAW
+  - name: source_sdp_taxes_inbound
+    database: "{{ env_var('SNOWFLAKE_SDP_TAXES_DATABASE') }}"
+    schema: "{{ env_var('SNOWFLAKE_SDP_IN_SCHEMA', 'INBOUND') }}"
+    tables:
+      - name: EXT_TAXES_RAW
+  - name: source_sdp_depot_transactions_inbound
+    database: "{{ env_var('SNOWFLAKE_SDP_DEPOT_TRANSACTIONS_DATABASE') }}"
+    schema: "{{ env_var('SNOWFLAKE_SDP_IN_SCHEMA', 'INBOUND') }}"
+    tables:
+      - name: EXT_DEPOT_TRANSACTIONS_RAW
 
 models:
   - name: model_sdp_orders_core_orders_clean
@@ -55,6 +65,36 @@ models:
   - name: model_sdp_customers_core_customer_segment_summary
     columns:
       - name: segment
+        tests:
+          - not_null
+          - unique
+  - name: model_sdp_taxes_core_taxes_clean
+    columns:
+      - name: tax_code
+        tests:
+          - not_null
+          - unique
+      - name: rate
+        tests:
+          - not_null
+  - name: model_sdp_taxes_access_taxes_grain
+    columns:
+      - name: tax_code
+        tests:
+          - not_null
+          - unique
+  - name: model_sdp_depot_transactions_core_transactions_clean
+    columns:
+      - name: transaction_id
+        tests:
+          - not_null
+          - unique
+      - name: amount
+        tests:
+          - not_null
+  - name: model_sdp_depot_transactions_access_transactions_grain
+    columns:
+      - name: transaction_id
         tests:
           - not_null
           - unique

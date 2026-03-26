@@ -31,3 +31,23 @@ models:
         +schema: "{{ env_var('SNOWFLAKE_SDP_ACC_SCHEMA', 'ACCESS') }}"
         +materialized: table
         +access: public
+    taxes:
+      core:
+        +database: "{{ env_var('SNOWFLAKE_SDP_TAXES_DATABASE') }}"
+        +schema: "{{ env_var('SNOWFLAKE_SDP_CORE_SCHEMA', 'CORE') }}"
+        +materialized: table
+      access:
+        +database: "{{ env_var('SNOWFLAKE_SDP_TAXES_DATABASE') }}"
+        +schema: "{{ env_var('SNOWFLAKE_SDP_ACC_SCHEMA', 'ACCESS') }}"
+        +materialized: table
+        +access: public
+    depot_transactions:
+      core:
+        +database: "{{ env_var('SNOWFLAKE_SDP_DEPOT_TRANSACTIONS_DATABASE') }}"
+        +schema: "{{ env_var('SNOWFLAKE_SDP_CORE_SCHEMA', 'CORE') }}"
+        +materialized: table
+      access:
+        +database: "{{ env_var('SNOWFLAKE_SDP_DEPOT_TRANSACTIONS_DATABASE') }}"
+        +schema: "{{ env_var('SNOWFLAKE_SDP_ACC_SCHEMA', 'ACCESS') }}"
+        +materialized: table
+        +access: public

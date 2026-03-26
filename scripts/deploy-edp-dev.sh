@@ -13,7 +13,7 @@ source "${SCRIPT_DIR}/common.sh"
 ensure_platform_env
 export_dev_runtime_env
 
-project_slug="${1:-proj_edp_orders}"
+project_slug="${1:?project slug is required}"
 
 database_env_name="$(project_registry_lookup "${project_slug}" default_database_env)"
 export SNOWFLAKE_EDP_DATABASE="${!database_env_name:-${SNOWFLAKE_EDP_DATABASE}}"

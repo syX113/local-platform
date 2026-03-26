@@ -37,7 +37,15 @@ export DLT_RUNNER_IMAGE="${DEV_SDP_RUNTIME_IMAGE_PREFIX}/dlt-extractor:dev"
 export DBT_RUNNER_IMAGE="${DEV_SDP_RUNTIME_IMAGE_PREFIX}/dbt-executor:dev"
 export SNOW_DBT_RUNNER_IMAGE="${DBT_RUNNER_IMAGE}"
 
-for scope in orders customers; do
+source_scopes=()
+while IFS= read -r scope; do
+  [ -n "${scope}" ] || continue
+  source_scopes+=("${scope}")
+done < <(project_registry_product_scopes proj_source_finnova)
+
+for scope in "${source_scopes[@]}"; do
+  [ -n "${scope}" ] || continue
+  echo "deploying SDP source scope: ${scope}"
   activate_source_scope_runtime "${scope}"
   bash "${SCRIPT_DIR}/deploy-airflow-dag.sh" dev "${scope}" | tee "${ARTIFACT_DIR}/deploy_airflow_dev_${scope}.log"
   SOURCE_SCOPE="${scope}" bash "${SCRIPT_DIR}/verify-ingestion-promotion.sh" \

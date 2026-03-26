@@ -14,10 +14,22 @@ compose_build_services airflow-webserver dlt-extractor dbt-executor
 docker compose up -d airflow-metadata-db source-postgres-db lakehouse-object-store gitlab-platform
 docker compose up -d lakehouse-bucket-init airflow-init
 docker compose up -d airflow-webserver airflow-scheduler
-./scripts/deploy-airflow-dag.sh dev orders
-./scripts/deploy-airflow-dag.sh dev customers
-./scripts/deploy-airflow-dag.sh prd orders
-./scripts/deploy-airflow-dag.sh prd customers
+
+source_scopes=()
+while IFS= read -r scope; do
+  [ -n "${scope}" ] || continue
+  source_scopes+=("${scope}")
+done < <(project_registry_product_scopes proj_source_finnova)
+
+for scope in "${source_scopes[@]}"; do
+  [ -n "${scope}" ] || continue
+  ./scripts/deploy-airflow-dag.sh dev "${scope}"
+done
+
+for scope in "${source_scopes[@]}"; do
+  [ -n "${scope}" ] || continue
+  ./scripts/deploy-airflow-dag.sh prd "${scope}"
+done
 
 echo "bootstrapping Snowflake foundation and data products"
 ./scripts/bootstrap-snowflake-products.sh

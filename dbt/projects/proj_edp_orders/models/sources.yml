@@ -25,3 +25,21 @@ models:
       - name: status_sk
         tests:
           - not_null
+  - name: model_edp_orders_inbound_depot_transactions_grain
+    columns:
+      - name: transaction_id
+        tests:
+          - not_null
+          - unique
+  - name: model_edp_orders_core_depot_transactions_3nf
+    columns:
+      - name: transaction_id
+        tests:
+          - not_null
+          - unique
+  - name: model_edp_orders_access_depot_transactions_only
+    columns:
+      - name: transaction_id
+        tests:
+          - not_null
+          - unique

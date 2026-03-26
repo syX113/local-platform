@@ -18,6 +18,8 @@ from snow_dbt_cli import default_database_for_project, default_schema_for_projec
 SOURCE_SCOPE_TO_DATABASE_ENV = {
     "orders": "SNOWFLAKE_SDP_DATABASE",
     "customers": "SNOWFLAKE_SDP_CUSTOMERS_DATABASE",
+    "taxes": "SNOWFLAKE_SDP_TAXES_DATABASE",
+    "depot_transactions": "SNOWFLAKE_SDP_DEPOT_TRANSACTIONS_DATABASE",
 }
 
 
@@ -104,8 +106,12 @@ def run_local_dbt_parse(
 
 def infer_scope(text: str) -> str | None:
     lowered = text.lower()
+    if "depot_transactions" in lowered:
+        return "depot_transactions"
     if "customers" in lowered:
         return "customers"
+    if "taxes" in lowered:
+        return "taxes"
     if "orders" in lowered:
         return "orders"
     return None

@@ -107,10 +107,8 @@ ci_validate_sdp_ingestion:
         bash ./ci/scripts/resolve-existing-sandbox.sh sdp artifacts/context/sdp.env
       fi
     - set -a; . artifacts/context/runtime.env; . artifacts/context/sdp.env; set +a
-    - ./ci/scripts/deploy-airflow-dag.sh current orders "current-sdp-orders-ci"
-    - SOURCE_SCOPE=orders ./ci/scripts/verify-ingestion-promotion.sh
-    - ./ci/scripts/deploy-airflow-dag.sh current customers "current-sdp-customers-ci"
-    - SOURCE_SCOPE=customers ./ci/scripts/verify-ingestion-promotion.sh
+    - |
+      __SOURCE_INGESTION_VALIDATE__
   artifacts:
     when: always
     expire_in: 7 days
@@ -137,8 +135,8 @@ ci_validate_sdp_models:
         bash ./ci/scripts/resolve-existing-sandbox.sh sdp artifacts/context/sdp.env
       fi
     - set -a; . artifacts/context/runtime.env; . artifacts/context/sdp.env; set +a
-    - SOURCE_SCOPE=orders ./ci/scripts/verify-sdp-promotion.sh
-    - SOURCE_SCOPE=customers ./ci/scripts/verify-sdp-promotion.sh
+    - |
+      __SOURCE_MODEL_VALIDATE__
   artifacts:
     when: always
     expire_in: 7 days

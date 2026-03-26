@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
+import json
 import os
 import shutil
 from pathlib import Path
@@ -10,12 +11,63 @@ from textwrap import dedent
 ROOT_DIR = Path(__file__).resolve().parent.parent
 GENERATED_ROOT = ROOT_DIR / "gitlab-projects" / "generated"
 TEMPLATE_ROOT = ROOT_DIR / "scripts" / "templates" / "render_gitlab_project_repos"
+REGISTRY_PATH = ROOT_DIR / "snowflake" / "project_registry.json"
 IGNORE_NAMES = {".DS_Store", "__pycache__", ".dlt", ".loom", "target", "logs", "deployed"}
+
+COMMON_CI_SCRIPTS = [
+    "scripts/common.sh",
+    "scripts/ensure-snowflake-foundation.sh",
+    "scripts/lint-prepared-dbt-project.sh",
+    "scripts/prepare-ci-sandbox.sh",
+    "scripts/resolve-existing-sandbox.sh",
+    "scripts/cleanup-ci-sandbox.sh",
+    "scripts/require-approver-match-commit.sh",
+    "scripts/deploy-snowflake-dbt-project.sh",
+    "scripts/execute-snowflake-dbt-project.sh",
+    "scripts/prepare-snowflake-dbt-target.sh",
+    "scripts/drop-snowflake-dbt-project.sh",
+]
+
+SOURCE_CI_SCRIPTS = COMMON_CI_SCRIPTS + [
+    "scripts/load-source-sample-data.sh",
+    "scripts/test-airflow-dag.sh",
+    "scripts/deploy-airflow-dag.sh",
+    "scripts/deploy-sdp-dev.sh",
+    "scripts/deploy-sdp-prd.sh",
+    "scripts/verify-ingestion-promotion.sh",
+    "scripts/verify-sdp-promotion.sh",
+]
+
+DOMAIN_CI_SCRIPTS = COMMON_CI_SCRIPTS + [
+    "scripts/deploy-edp-dev.sh",
+    "scripts/deploy-edp-prd.sh",
+    "scripts/verify-edp-promotion.sh",
+]
 
 
 def env(name: str, default: str) -> str:
     value = os.environ.get(name, "").strip()
     return value or default
+
+
+def load_registry() -> dict[str, object]:
+    payload = json.loads(REGISTRY_PATH.read_text(encoding="utf-8"))
+    if not isinstance(payload, dict) or not isinstance(payload.get("projects"), list):
+        raise SystemExit(f"invalid project registry: {REGISTRY_PATH}")
+    return payload
+
+
+def projects() -> list[dict[str, object]]:
+    registry = load_registry()
+    return [project for project in registry["projects"] if isinstance(project, dict)]
+
+
+def project_by_slug(slug: str) -> dict[str, object]:
+    normalized_slug = slug.strip()
+    for project in projects():
+        if str(project.get("slug", "")).strip() == normalized_slug:
+            return project
+    raise SystemExit(f"unknown project slug: {slug}")
 
 
 def reset_repo(repo_dir: Path) -> None:
@@ -54,8 +106,7 @@ def write_file(destination: Path, content: str) -> None:
 
 
 def template_text(name: str) -> str:
-    template_path = TEMPLATE_ROOT / name
-    return template_path.read_text(encoding="utf-8")
+    return (TEMPLATE_ROOT / name).read_text(encoding="utf-8")
 
 
 def render_template(name: str, **replacements: str) -> str:
@@ -88,63 +139,20 @@ def shared_gitignore() -> str:
 
 
 def sqlfluff_lint_prepared_workspace_command(project_slug: str) -> str:
-    return dedent(
-        """\
-            - mkdir -p artifacts/sqlfluff/{workspace_name}
-            - docker compose run --rm --no-deps dbt-executor python /opt/platform/dbt/scripts/prepare_sqlfluff_workspace.py --project-dir /opt/platform/dbt --project-slug {project_slug} --workspace-dir /opt/platform/artifacts/sqlfluff/{workspace_name}
-            - docker compose run --rm --no-deps dbt-executor sqlfluff lint --config /opt/platform/artifacts/sqlfluff/{workspace_name}/.sqlfluff /opt/platform/artifacts/sqlfluff/{workspace_name}/models
-            - rm -rf artifacts/sqlfluff/{workspace_name}
-        """
-    ).format(project_slug=project_slug, workspace_name=project_slug)
+    return f"./ci/scripts/lint-prepared-dbt-project.sh {project_slug}"
 
 
-def sdp_ci_yaml(*, sqlfluff_lint_script: str) -> str:
-    return render_template("sdp.gitlab-ci.yml.tpl", __SQLFLUFF_LINT__=sqlfluff_lint_script)
+def source_ingestion_validation_script(scopes: list[str]) -> str:
+    lines: list[str] = []
+    for scope in scopes:
+        lines.append(f'./ci/scripts/deploy-airflow-dag.sh current {scope} "current-sdp-{scope}-ci"')
+        lines.append(f"SOURCE_SCOPE={scope} ./ci/scripts/verify-ingestion-promotion.sh")
+    return "\n".join(lines)
 
 
-def edp_ci_yaml(
-    *,
-    project_title: str,
-    project_slug: str,
-    sqlfluff_lint_script: str,
-    verify_script: str,
-    deploy_dev_script: str,
-    deploy_prd_script: str,
-    artifact_dir: str,
-    dev_environment_name: str,
-    prd_environment_name: str,
-    dev_resource_group: str,
-    prd_resource_group: str,
-) -> str:
-    return render_template(
-        "edp.gitlab-ci.yml.tpl",
-        __PROJECT_TITLE__=project_title,
-        __PROJECT_SLUG__=project_slug,
-        __VERIFY_SCRIPT__=verify_script,
-        __DEPLOY_DEV_SCRIPT__=deploy_dev_script,
-        __DEPLOY_PRD_SCRIPT__=deploy_prd_script,
-        __ARTIFACT_DIR__=artifact_dir,
-        __DEV_ENVIRONMENT_NAME__=dev_environment_name,
-        __PRD_ENVIRONMENT_NAME__=prd_environment_name,
-        __DEV_RESOURCE_GROUP__=dev_resource_group,
-        __PRD_RESOURCE_GROUP__=prd_resource_group,
-    )
-
-
-def sdp_compose_yaml() -> str:
-    return template_text("sdp.compose.yaml.tpl")
-
-
-def sdp_compose_ci_yaml() -> str:
-    return template_text("sdp.compose.ci.yaml.tpl")
-
-
-def edp_compose_yaml() -> str:
-    return template_text("edp.compose.yaml.tpl")
-
-
-def edp_compose_ci_yaml() -> str:
-    return template_text("edp.compose.ci.yaml.tpl")
+def source_model_validation_script(scopes: list[str]) -> str:
+    lines = [f"SOURCE_SCOPE={scope} ./ci/scripts/verify-sdp-promotion.sh" for scope in scopes]
+    return "\n".join(lines)
 
 
 def project_readme(project_name: str, body: str) -> str:
@@ -181,259 +189,156 @@ def source_repo_dag_file(*, dag_id: str, scope: str, description: str) -> str:
     )
 
 
-def render_sdp_repo(project_path: str) -> None:
-    repo_dir = GENERATED_ROOT / project_path
+def copy_registered_project(project_slug: str, repo_dir: Path) -> None:
+    project_dir = str(project_by_slug(project_slug).get("dbt_project_dir", "")).strip()
+    if not project_dir:
+        raise SystemExit(f"missing dbt_project_dir for project: {project_slug}")
+    copy_path(project_dir, repo_dir)
+
+
+def render_source_repo(project_slug: str) -> None:
+    spec = project_by_slug(project_slug)
+    repo_dir = GENERATED_ROOT / project_slug
     reset_repo(repo_dir)
 
+    copy_path(".dockerignore", repo_dir)
+    copy_path(".env.example", repo_dir, "ci/.env.example")
+
     for relative_path in (
-        ".dockerignore",
         "airflow",
         "dlt",
         "postgres",
         "minio",
     ):
         copy_path(relative_path, repo_dir)
-    copy_path(".env.example", repo_dir, "ci/.env.example")
 
-    for relative_path in (
-        "scripts/common.sh",
-        "scripts/ensure-snowflake-foundation.sh",
-        "scripts/lint-prepared-dbt-project.sh",
-        "scripts/prepare-ci-sandbox.sh",
-        "scripts/resolve-existing-sandbox.sh",
-        "scripts/cleanup-ci-sandbox.sh",
-        "scripts/require-approver-match-commit.sh",
-        "scripts/load-source-sample-data.sh",
-        "scripts/test-airflow-dag.sh",
-        "scripts/deploy-airflow-dag.sh",
-        "scripts/deploy-snowflake-dbt-project.sh",
-        "scripts/execute-snowflake-dbt-project.sh",
-        "scripts/prepare-snowflake-dbt-target.sh",
-        "scripts/drop-snowflake-dbt-project.sh",
-        "scripts/deploy-sdp-dev.sh",
-        "scripts/deploy-sdp-prd.sh",
-        "scripts/verify-ingestion-promotion.sh",
-        "scripts/verify-sdp-promotion.sh",
-    ):
+    for relative_path in SOURCE_CI_SCRIPTS:
         copy_path(relative_path, repo_dir, f"ci/{relative_path}")
 
     for relative_path in (
         "dbt/.sqlfluff",
         "dbt/Dockerfile",
         "dbt/requirements.txt",
-        "dbt/scripts/project_registry.py",
-        "dbt/scripts/apply_sql.py",
-        "dbt/scripts/ensure_target_databases.py",
-        "dbt/scripts/prepare_sqlfluff_workspace.py",
-        "dbt/scripts/loom_manifest.py",
-        "dbt/scripts/manage_ci_clones.py",
-        "dbt/scripts/snow_dbt_cli.py",
+        "dbt/scripts",
+        "dbt/profiles",
     ):
         copy_path(relative_path, repo_dir)
-    copy_path("dbt/profiles/profiles.yml", repo_dir, "dbt/profiles/profiles.yml")
 
     copy_path("snowflake/sql/01_snowflake_foundation.sql.tpl", repo_dir, "ci/snowflake/sql/01_snowflake_foundation.sql.tpl")
     copy_path("snowflake/data_products.json", repo_dir, "ci/snowflake/data_products.json")
     copy_path("snowflake/project_registry.json", repo_dir, "ci/snowflake/project_registry.json")
 
-    copy_path("dbt/projects/proj_source_finnova/macros", repo_dir, "dbt/macros")
-    copy_path("dbt/projects/proj_source_finnova/dbt_project.yml", repo_dir, "dbt/dbt_project.yml")
-    copy_path("dbt/projects/proj_source_finnova/models", repo_dir, "dbt/models")
-    write_file(
-        repo_dir / "airflow/dags/source_finnova_orders_ingest.py",
-        source_repo_dag_file(
-            dag_id="source_finnova_orders_ingest",
-            scope="orders",
-            description="Finnova source ingestion pipeline for orders into the SDP orders product.",
-        ),
-    )
-    write_file(
-        repo_dir / "airflow/dags/source_finnova_customers_ingest.py",
-        source_repo_dag_file(
-            dag_id="source_finnova_customers_ingest",
-            scope="customers",
-            description="Finnova source ingestion pipeline for customers into the SDP customers product.",
-        ),
-    )
+    copy_registered_project(project_slug, repo_dir)
 
-    write_file(repo_dir / "compose.yaml", sdp_compose_yaml())
-    write_file(repo_dir / "compose.ci.yaml", sdp_compose_ci_yaml())
+    scopes = [str(scope).strip() for scope in spec.get("product_scopes", []) if str(scope).strip()]
+    for scope in scopes:
+        dag_id = f"source_finnova_{scope}_ingest"
+        scope_title = scope.replace("_", " ").title()
+        write_file(
+            repo_dir / f"airflow/dags/{dag_id}.py",
+            source_repo_dag_file(
+                dag_id=dag_id,
+                scope=scope,
+                description=f"Finnova source ingestion pipeline for {scope_title} into the SDP {scope} product.",
+            ),
+        )
+
+    write_file(repo_dir / "compose.yaml", render_template("sdp.compose.yaml.tpl"))
+    write_file(repo_dir / "compose.ci.yaml", render_template("sdp.compose.ci.yaml.tpl"))
     write_file(repo_dir / ".gitignore", shared_gitignore())
     write_file(
         repo_dir / ".gitlab-ci.yml",
-        sdp_ci_yaml(sqlfluff_lint_script=sqlfluff_lint_prepared_workspace_command("proj_source_finnova")),
+        render_template(
+            "sdp.gitlab-ci.yml.tpl",
+            __SQLFLUFF_LINT__=sqlfluff_lint_prepared_workspace_command(project_slug),
+            __SOURCE_INGESTION_VALIDATE__=source_ingestion_validation_script(scopes),
+            __SOURCE_MODEL_VALIDATE__=source_model_validation_script(scopes),
+        ),
     )
-    write_file(
-        repo_dir / "README.md",
-        project_readme(project_path, template_text("sdp.README.md.tpl")),
-    )
+    write_file(repo_dir / "README.md", project_readme(project_slug, template_text("sdp.README.md.tpl")))
 
 
-def render_edp_repo(project_path: str) -> None:
-    repo_dir = GENERATED_ROOT / project_path
+def render_domain_repo(project_slug: str) -> None:
+    spec = project_by_slug(project_slug)
+    repo_dir = GENERATED_ROOT / project_slug
     reset_repo(repo_dir)
 
     copy_path(".dockerignore", repo_dir)
     copy_path(".env.example", repo_dir, "ci/.env.example")
 
-    for relative_path in (
-        "scripts/common.sh",
-        "scripts/ensure-snowflake-foundation.sh",
-        "scripts/lint-prepared-dbt-project.sh",
-        "scripts/prepare-ci-sandbox.sh",
-        "scripts/resolve-existing-sandbox.sh",
-        "scripts/cleanup-ci-sandbox.sh",
-        "scripts/require-approver-match-commit.sh",
-        "scripts/deploy-snowflake-dbt-project.sh",
-        "scripts/execute-snowflake-dbt-project.sh",
-        "scripts/prepare-snowflake-dbt-target.sh",
-        "scripts/drop-snowflake-dbt-project.sh",
-        "scripts/deploy-edp-dev.sh",
-        "scripts/deploy-edp-prd.sh",
-        "scripts/verify-edp-promotion.sh",
-    ):
+    for relative_path in DOMAIN_CI_SCRIPTS:
         copy_path(relative_path, repo_dir, f"ci/{relative_path}")
 
     for relative_path in (
         "dbt/.sqlfluff",
         "dbt/Dockerfile",
         "dbt/requirements.txt",
-        "dbt/scripts/project_registry.py",
-        "dbt/scripts/apply_sql.py",
-        "dbt/scripts/ensure_target_databases.py",
-        "dbt/scripts/prepare_sqlfluff_workspace.py",
-        "dbt/scripts/loom_manifest.py",
-        "dbt/scripts/manage_ci_clones.py",
-        "dbt/scripts/snow_dbt_cli.py",
-        "dbt/scripts/zero_copy_clone_check.py",
+        "dbt/scripts",
+        "dbt/profiles",
     ):
         copy_path(relative_path, repo_dir)
-    copy_path("dbt/profiles/profiles.yml", repo_dir, "dbt/profiles/profiles.yml")
-    copy_path("dbt/projects/proj_edp_orders/dbt_loom.config.yml", repo_dir, "dbt/dbt_loom.config.yml")
 
     copy_path("snowflake/sql/01_snowflake_foundation.sql.tpl", repo_dir, "ci/snowflake/sql/01_snowflake_foundation.sql.tpl")
     copy_path("snowflake/data_products.json", repo_dir, "ci/snowflake/data_products.json")
     copy_path("snowflake/project_registry.json", repo_dir, "ci/snowflake/project_registry.json")
 
-    copy_path("dbt/projects/proj_edp_orders/macros", repo_dir, "dbt/macros")
-    copy_path("dbt/projects/proj_edp_orders/dbt_project.yml", repo_dir, "dbt/dbt_project.yml")
-    copy_path("dbt/projects/proj_edp_orders/models", repo_dir, "dbt/models")
+    copy_registered_project(project_slug, repo_dir)
+    upstream_project_slug = str(spec.get("upstream_project_slug", "")).strip()
+    if upstream_project_slug:
+        copy_registered_project(upstream_project_slug, repo_dir)
 
-    write_file(repo_dir / "compose.yaml", edp_compose_yaml())
-    write_file(repo_dir / "compose.ci.yaml", edp_compose_ci_yaml())
+    project_title = f"Domain {str(spec.get('domain', project_slug)).replace('_', ' ').title()} Promotion"
+    scopes = [str(scope).strip() for scope in spec.get("product_scopes", []) if str(scope).strip()]
+    upstream_scopes = [str(scope).strip() for scope in project_by_slug(upstream_project_slug).get("product_scopes", [])] if upstream_project_slug else []
+    write_file(repo_dir / "compose.yaml", render_template("edp.compose.yaml.tpl"))
+    write_file(repo_dir / "compose.ci.yaml", render_template("edp.compose.ci.yaml.tpl"))
     write_file(repo_dir / ".gitignore", shared_gitignore())
     write_file(
         repo_dir / ".gitlab-ci.yml",
-        edp_ci_yaml(
-            project_title="EDP Promotion",
-            project_slug="proj_edp_orders",
-            sqlfluff_lint_script=sqlfluff_lint_prepared_workspace_command("proj_edp_orders"),
-            verify_script="./ci/scripts/verify-edp-promotion.sh proj_edp_orders",
-            deploy_dev_script="./ci/scripts/deploy-edp-dev.sh proj_edp_orders",
-            deploy_prd_script="./ci/scripts/deploy-edp-prd.sh proj_edp_orders",
-            artifact_dir="artifacts/proj_edp_orders",
-            dev_environment_name="DEV/EDP",
-            prd_environment_name="PRD/EDP",
-            dev_resource_group="edp-dev",
-            prd_resource_group="edp-prd",
+        render_template(
+            "edp.gitlab-ci.yml.tpl",
+            __PROJECT_TITLE__=project_title,
+            __PROJECT_SLUG__=project_slug,
+            __VERIFY_SCRIPT__=f"./ci/scripts/verify-edp-promotion.sh {project_slug}",
+            __DEPLOY_DEV_SCRIPT__=f"./ci/scripts/deploy-edp-dev.sh {project_slug}",
+            __DEPLOY_PRD_SCRIPT__=f"./ci/scripts/deploy-edp-prd.sh {project_slug}",
+            __ARTIFACT_DIR__=f"artifacts/{project_slug}",
+            __DEV_ENVIRONMENT_NAME__=f"DEV/{str(spec.get('domain', project_slug)).replace('_', ' ').upper()}",
+            __PRD_ENVIRONMENT_NAME__=f"PRD/{str(spec.get('domain', project_slug)).replace('_', ' ').upper()}",
+            __DEV_RESOURCE_GROUP__=f"{project_slug}-dev",
+            __PRD_RESOURCE_GROUP__=f"{project_slug}-prd",
         ),
     )
     write_file(
         repo_dir / "README.md",
-        project_readme(project_path, template_text("edp_orders.README.md.tpl")),
-    )
-
-
-def render_edp_customers_repo(project_path: str) -> None:
-    repo_dir = GENERATED_ROOT / project_path
-    reset_repo(repo_dir)
-
-    copy_path(".dockerignore", repo_dir)
-    copy_path(".env.example", repo_dir, "ci/.env.example")
-
-    for relative_path in (
-        "scripts/common.sh",
-        "scripts/ensure-snowflake-foundation.sh",
-        "scripts/lint-prepared-dbt-project.sh",
-        "scripts/prepare-ci-sandbox.sh",
-        "scripts/resolve-existing-sandbox.sh",
-        "scripts/cleanup-ci-sandbox.sh",
-        "scripts/require-approver-match-commit.sh",
-        "scripts/deploy-snowflake-dbt-project.sh",
-        "scripts/execute-snowflake-dbt-project.sh",
-        "scripts/prepare-snowflake-dbt-target.sh",
-        "scripts/drop-snowflake-dbt-project.sh",
-        "scripts/deploy-edp-dev.sh",
-        "scripts/deploy-edp-prd.sh",
-        "scripts/verify-edp-promotion.sh",
-    ):
-        copy_path(relative_path, repo_dir, f"ci/{relative_path}")
-
-    for relative_path in (
-        "dbt/.sqlfluff",
-        "dbt/Dockerfile",
-        "dbt/requirements.txt",
-        "dbt/scripts/project_registry.py",
-        "dbt/scripts/apply_sql.py",
-        "dbt/scripts/ensure_target_databases.py",
-        "dbt/scripts/prepare_sqlfluff_workspace.py",
-        "dbt/scripts/loom_manifest.py",
-        "dbt/scripts/manage_ci_clones.py",
-        "dbt/scripts/snow_dbt_cli.py",
-        "dbt/scripts/zero_copy_clone_check.py",
-    ):
-        copy_path(relative_path, repo_dir)
-    copy_path("dbt/profiles/profiles.yml", repo_dir, "dbt/profiles/profiles.yml")
-    copy_path("dbt/projects/proj_edp_customers/dbt_loom.config.yml", repo_dir, "dbt/dbt_loom.config.yml")
-
-    copy_path("snowflake/sql/01_snowflake_foundation.sql.tpl", repo_dir, "ci/snowflake/sql/01_snowflake_foundation.sql.tpl")
-    copy_path("snowflake/data_products.json", repo_dir, "ci/snowflake/data_products.json")
-    copy_path("snowflake/project_registry.json", repo_dir, "ci/snowflake/project_registry.json")
-
-    copy_path("dbt/projects/proj_edp_customers/macros", repo_dir, "dbt/macros")
-    copy_path("dbt/projects/proj_edp_customers/dbt_project.yml", repo_dir, "dbt/dbt_project.yml")
-    copy_path("dbt/projects/proj_edp_customers/models", repo_dir, "dbt/models")
-
-    write_file(repo_dir / "compose.yaml", edp_compose_yaml())
-    write_file(repo_dir / "compose.ci.yaml", edp_compose_ci_yaml())
-    write_file(repo_dir / ".gitignore", shared_gitignore())
-    write_file(
-        repo_dir / ".gitlab-ci.yml",
-        edp_ci_yaml(
-            project_title="EDP Customers Promotion",
-            project_slug="proj_edp_customers",
-            sqlfluff_lint_script=sqlfluff_lint_prepared_workspace_command("proj_edp_customers"),
-            verify_script="./ci/scripts/verify-edp-promotion.sh proj_edp_customers",
-            deploy_dev_script="./ci/scripts/deploy-edp-dev.sh proj_edp_customers",
-            deploy_prd_script="./ci/scripts/deploy-edp-prd.sh proj_edp_customers",
-            artifact_dir="artifacts/proj_edp_customers",
-            dev_environment_name="DEV/EDP_CUSTOMERS",
-            prd_environment_name="PRD/EDP_CUSTOMERS",
-            dev_resource_group="edp-customers-dev",
-            prd_resource_group="edp-customers-prd",
+        render_template(
+            "domain.README.md.tpl",
+            __PROJECT_TITLE__=project_title,
+            __PROJECT_SLUG__=project_slug,
+            __DOMAIN_LABEL__=str(spec.get("domain", project_slug)).replace("_", " ").title(),
+            __UPSTREAM_PROJECT_SLUG__=upstream_project_slug,
+            __SOURCE_SCOPES__=", ".join(upstream_scopes),
+            __DOMAIN_SCOPES__=", ".join(scopes),
         ),
-    )
-    write_file(
-        repo_dir / "README.md",
-        project_readme(project_path, template_text("edp_customers.README.md.tpl")),
     )
 
 
 def main() -> int:
-    sdp_project_path = env("GITLAB_SDP_PROJECT_PATH", "proj_source_finnova")
-    edp_project_path = env("GITLAB_EDP_PROJECT_PATH", "proj_edp_orders")
-    edp_customers_project_path = env("GITLAB_EDP_CUSTOMERS_PROJECT_PATH", "proj_edp_customers")
+    source_spec = project_by_slug(env("GITLAB_SDP_PROJECT_PATH", "proj_source_finnova"))
+    domain_transactions_spec = project_by_slug(env("GITLAB_EDP_PROJECT_PATH", "proj_domain_transactions"))
+    domain_customer_spec = project_by_slug(env("GITLAB_EDP_CUSTOMERS_PROJECT_PATH", "proj_domain_customer"))
 
-    if len({sdp_project_path, edp_project_path, edp_customers_project_path}) != 3:
-        raise SystemExit("GitLab source and EDP project paths must all be different")
+    slugs = [str(source_spec["slug"]), str(domain_transactions_spec["slug"]), str(domain_customer_spec["slug"])]
+    if len(set(slugs)) != 3:
+        raise SystemExit("GitLab source and domain project paths must all be different")
 
-    render_sdp_repo(sdp_project_path)
-    render_edp_repo(edp_project_path)
-    render_edp_customers_repo(edp_customers_project_path)
+    render_source_repo(str(source_spec["slug"]))
+    render_domain_repo(str(domain_transactions_spec["slug"]))
+    render_domain_repo(str(domain_customer_spec["slug"]))
 
-    print(f"rendered source project repo: {GENERATED_ROOT / sdp_project_path}")
-    print(f"rendered EDP orders project repo: {GENERATED_ROOT / edp_project_path}")
-    print(f"rendered EDP customers project repo: {GENERATED_ROOT / edp_customers_project_path}")
+    print(f"rendered source project repo: {GENERATED_ROOT / source_spec['slug']}")
+    print(f"rendered domain transactions project repo: {GENERATED_ROOT / domain_transactions_spec['slug']}")
+    print(f"rendered domain customer project repo: {GENERATED_ROOT / domain_customer_spec['slug']}")
     return 0
 
 

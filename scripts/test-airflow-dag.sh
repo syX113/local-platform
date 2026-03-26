@@ -25,6 +25,15 @@ resolve_sandbox_dag_id() {
     customers)
       printf '%s' "${AIRFLOW_SANDBOX_CUSTOMERS_DAG_ID:-${AIRFLOW_SANDBOX_DAG_ID:-${DEV_CUSTOMERS_AIRFLOW_DAG_ID:-DEV_local_platform_customers_ingest}}}"
       ;;
+    taxes)
+      printf '%s' "${AIRFLOW_SANDBOX_TAXES_DAG_ID:-${AIRFLOW_SANDBOX_DAG_ID:-${DEV_TAXES_AIRFLOW_DAG_ID:-DEV_local_platform_taxes_ingest}}}"
+      ;;
+    depot_transactions)
+      printf '%s' "${AIRFLOW_SANDBOX_DEPOT_TRANSACTIONS_DAG_ID:-${AIRFLOW_SANDBOX_DAG_ID:-${DEV_DEPOT_TRANSACTIONS_AIRFLOW_DAG_ID:-DEV_local_platform_depot_transactions_ingest}}}"
+      ;;
+    all)
+      printf '%s' "${AIRFLOW_SANDBOX_DAG_ID:-${DEV_ORDERS_AIRFLOW_DAG_ID:-DEV_local_platform_orders_ingest}}"
+      ;;
     *)
       echo "unsupported source scope for DAG resolution: ${scope}" >&2
       exit 1
@@ -34,7 +43,7 @@ resolve_sandbox_dag_id() {
 
 if [ -n "${2:-}" ]; then
   dag_id="${2}"
-elif [ -n "${AIRFLOW_SANDBOX_ORDERS_DAG_ID:-}" ] || [ -n "${AIRFLOW_SANDBOX_CUSTOMERS_DAG_ID:-}" ] || [ -n "${AIRFLOW_SANDBOX_DAG_ID:-}" ]; then
+elif [ -n "${AIRFLOW_SANDBOX_ORDERS_DAG_ID:-}" ] || [ -n "${AIRFLOW_SANDBOX_CUSTOMERS_DAG_ID:-}" ] || [ -n "${AIRFLOW_SANDBOX_TAXES_DAG_ID:-}" ] || [ -n "${AIRFLOW_SANDBOX_DEPOT_TRANSACTIONS_DAG_ID:-}" ] || [ -n "${AIRFLOW_SANDBOX_DAG_ID:-}" ]; then
   dag_id="$(resolve_sandbox_dag_id "${source_scope}")"
 else
   case "${source_scope}" in
@@ -43,6 +52,15 @@ else
       ;;
     customers)
       dag_id="${DEV_CUSTOMERS_AIRFLOW_DAG_ID:-DEV_local_platform_customers_ingest}"
+      ;;
+    taxes)
+      dag_id="${DEV_TAXES_AIRFLOW_DAG_ID:-DEV_local_platform_taxes_ingest}"
+      ;;
+    depot_transactions)
+      dag_id="${DEV_DEPOT_TRANSACTIONS_AIRFLOW_DAG_ID:-DEV_local_platform_depot_transactions_ingest}"
+      ;;
+    all)
+      dag_id="${DEV_ORDERS_AIRFLOW_DAG_ID:-DEV_local_platform_orders_ingest}"
       ;;
     *)
       echo "unsupported source scope for DAG test: ${source_scope}" >&2
@@ -53,7 +71,7 @@ fi
 
 if [ -n "${3:-}" ]; then
   dag_subdir="${3}"
-elif [ -n "${AIRFLOW_SANDBOX_ORDERS_DAG_ID:-}" ] || [ -n "${AIRFLOW_SANDBOX_CUSTOMERS_DAG_ID:-}" ] || [ -n "${AIRFLOW_SANDBOX_DAG_ID:-}" ]; then
+elif [ -n "${AIRFLOW_SANDBOX_ORDERS_DAG_ID:-}" ] || [ -n "${AIRFLOW_SANDBOX_CUSTOMERS_DAG_ID:-}" ] || [ -n "${AIRFLOW_SANDBOX_TAXES_DAG_ID:-}" ] || [ -n "${AIRFLOW_SANDBOX_DEPOT_TRANSACTIONS_DAG_ID:-}" ] || [ -n "${AIRFLOW_SANDBOX_DAG_ID:-}" ]; then
   dag_subdir="/opt/airflow/dags/deployed/$(sanitize_branch_token "$(resolve_sandbox_dag_id "${source_scope}")").py"
 else
   case "${source_scope}" in
@@ -62,6 +80,15 @@ else
       ;;
     customers)
       dag_subdir="/opt/airflow/dags/deployed/dev_local_platform_customers_ingest.py"
+      ;;
+    taxes)
+      dag_subdir="/opt/airflow/dags/deployed/dev_local_platform_taxes_ingest.py"
+      ;;
+    depot_transactions)
+      dag_subdir="/opt/airflow/dags/deployed/dev_local_platform_depot_transactions_ingest.py"
+      ;;
+    all)
+      dag_subdir="/opt/airflow/dags/deployed/dev_local_platform_orders_ingest.py"
       ;;
     *)
       echo "unsupported source scope for DAG subdir: ${source_scope}" >&2

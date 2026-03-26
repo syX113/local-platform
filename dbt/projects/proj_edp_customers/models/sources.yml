@@ -25,3 +25,21 @@ models:
       - name: segment_sk
         tests:
           - not_null
+  - name: model_edp_customers_inbound_taxes_grain
+    columns:
+      - name: tax_code
+        tests:
+          - not_null
+          - unique
+  - name: model_edp_customers_core_taxes_3nf
+    columns:
+      - name: tax_code
+        tests:
+          - not_null
+          - unique
+  - name: model_edp_customers_access_taxes_only
+    columns:
+      - name: tax_code
+        tests:
+          - not_null
+          - unique

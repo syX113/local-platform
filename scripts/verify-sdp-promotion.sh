@@ -54,7 +54,10 @@ required_vars=(
   SNOWFLAKE_ROLE
   SNOWFLAKE_WAREHOUSE
   SNOWFLAKE_SDP_DATABASE
+  SNOWFLAKE_SDP_ORDERS_DATABASE
   SNOWFLAKE_SDP_CUSTOMERS_DATABASE
+  SNOWFLAKE_SDP_TAXES_DATABASE
+  SNOWFLAKE_SDP_DEPOT_TRANSACTIONS_DATABASE
   SNOWFLAKE_SDP_IN_SCHEMA
   SNOWFLAKE_SDP_CORE_SCHEMA
   SNOWFLAKE_SDP_ACC_SCHEMA
@@ -114,6 +117,24 @@ if scope in {"all", "customers"}:
             "sdp_customers_ext_customers_raw": (
                 f"select count(*) from {ident(os.environ['SNOWFLAKE_SDP_CUSTOMERS_DATABASE'], os.environ['SNOWFLAKE_SDP_IN_SCHEMA'], 'EXT_CUSTOMERS_RAW')}",
                 12,
+            ),
+        }
+    )
+if scope in {"all", "taxes"}:
+    queries.update(
+        {
+            "sdp_taxes_ext_taxes_raw": (
+                f"select count(*) from {ident(os.environ['SNOWFLAKE_SDP_TAXES_DATABASE'], os.environ['SNOWFLAKE_SDP_IN_SCHEMA'], 'EXT_TAXES_RAW')}",
+                8,
+            ),
+        }
+    )
+if scope in {"all", "depot_transactions"}:
+    queries.update(
+        {
+            "sdp_depot_transactions_ext_depot_transactions_raw": (
+                f"select count(*) from {ident(os.environ['SNOWFLAKE_SDP_DEPOT_TRANSACTIONS_DATABASE'], os.environ['SNOWFLAKE_SDP_IN_SCHEMA'], 'EXT_DEPOT_TRANSACTIONS_RAW')}",
+                18,
             ),
         }
     )
@@ -246,6 +267,40 @@ if scope in {"all", "customers"}:
             "sdp_customers_access_segment_grain": (
                 f"select count(*) from {ident(os.environ['SNOWFLAKE_SDP_CUSTOMERS_DATABASE'], os.environ['SNOWFLAKE_SDP_ACC_SCHEMA'], 'T_CUSTOMERS_SEGMENT_GRAIN')}",
                 3,
+            ),
+        }
+    )
+if scope in {"all", "taxes"}:
+    queries.update(
+        {
+            "sdp_taxes_ext_taxes_raw": (
+                f"select count(*) from {ident(os.environ['SNOWFLAKE_SDP_TAXES_DATABASE'], os.environ['SNOWFLAKE_SDP_IN_SCHEMA'], 'EXT_TAXES_RAW')}",
+                8,
+            ),
+            "sdp_taxes_core_taxes_clean": (
+                f"select count(*) from {ident(os.environ['SNOWFLAKE_SDP_TAXES_DATABASE'], os.environ['SNOWFLAKE_SDP_CORE_SCHEMA'], 'T_TAXES_CLEAN')}",
+                8,
+            ),
+            "sdp_taxes_access_taxes_grain": (
+                f"select count(*) from {ident(os.environ['SNOWFLAKE_SDP_TAXES_DATABASE'], os.environ['SNOWFLAKE_SDP_ACC_SCHEMA'], 'T_TAXES_GRAIN')}",
+                8,
+            ),
+        }
+    )
+if scope in {"all", "depot_transactions"}:
+    queries.update(
+        {
+            "sdp_depot_transactions_ext_depot_transactions_raw": (
+                f"select count(*) from {ident(os.environ['SNOWFLAKE_SDP_DEPOT_TRANSACTIONS_DATABASE'], os.environ['SNOWFLAKE_SDP_IN_SCHEMA'], 'EXT_DEPOT_TRANSACTIONS_RAW')}",
+                18,
+            ),
+            "sdp_depot_transactions_core_transactions_clean": (
+                f"select count(*) from {ident(os.environ['SNOWFLAKE_SDP_DEPOT_TRANSACTIONS_DATABASE'], os.environ['SNOWFLAKE_SDP_CORE_SCHEMA'], 'T_DEPOT_TRANSACTIONS_CLEAN')}",
+                18,
+            ),
+            "sdp_depot_transactions_access_transactions_grain": (
+                f"select count(*) from {ident(os.environ['SNOWFLAKE_SDP_DEPOT_TRANSACTIONS_DATABASE'], os.environ['SNOWFLAKE_SDP_ACC_SCHEMA'], 'T_DEPOT_TRANSACTIONS_GRAIN')}",
+                18,
             ),
         }
     )

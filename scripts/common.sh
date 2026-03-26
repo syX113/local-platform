@@ -151,10 +151,90 @@ project_registry_manifest_publish_keys() {
     --project-slug "${project_slug}"
 }
 
+project_registry_product_scopes() {
+  local project_slug="${1:?project slug is required}"
+  python3 "$(project_registry_script_path)" product-scopes \
+    --project-slug "${project_slug}"
+}
+
 project_registry_prepare_targets() {
   local project_slug="${1:?project slug is required}"
   python3 "$(project_registry_script_path)" prepare-targets \
     --project-slug "${project_slug}"
+}
+
+project_registry_slugs() {
+  python3 "$(project_registry_script_path)" project-slugs
+}
+
+project_registry_kind() {
+  local project_slug="${1:?project slug is required}"
+  project_registry_lookup "${project_slug}" kind ""
+}
+
+project_registry_clone_owner_token() {
+  local project_slug="${1:?project slug is required}"
+  local kind
+
+  kind="$(project_registry_kind "${project_slug}")"
+  case "${kind}" in
+    source) printf 'SOURCE' ;;
+    domain) printf 'EDP' ;;
+    *)
+      echo "unsupported project kind for clone owner token: ${kind}" >&2
+      return 1
+      ;;
+  esac
+}
+
+project_registry_project_name_token() {
+  local project_slug="${1:?project slug is required}"
+  local token
+
+  token="${project_slug#proj_}"
+  token="$(sanitize_branch_token "${token}")"
+  printf '%s' "${token}" | tr '[:lower:]' '[:upper:]'
+}
+
+project_registry_branch_dbt_project_name() {
+  local project_slug="${1:?project slug is required}"
+  local suffix="${2:?db suffix is required}"
+  printf 'DBT_PROJECT_%s_%s' "$(project_registry_project_name_token "${project_slug}")" "${suffix}"
+}
+
+project_registry_default_database_env() {
+  local project_slug="${1:?project slug is required}"
+  project_registry_lookup "${project_slug}" default_database_env ""
+}
+
+project_registry_scope_env_prefix() {
+  local project_slug="${1:?project slug is required}"
+  local kind
+
+  kind="$(project_registry_kind "${project_slug}")"
+  case "${kind}" in
+    source) printf 'SNOWFLAKE_SDP' ;;
+    domain) printf 'SNOWFLAKE_EDP' ;;
+    *)
+      echo "unsupported project kind for scope env prefix: ${kind}" >&2
+      return 1
+      ;;
+  esac
+}
+
+project_registry_scope_database_env() {
+  local project_slug="${1:?project slug is required}"
+  local scope="${2:?scope is required}"
+  local scope_upper
+
+  scope_upper="$(printf '%s' "${scope}" | tr '[:lower:]' '[:upper:]')"
+  printf '%s_%s_DATABASE' "$(project_registry_scope_env_prefix "${project_slug}")" "${scope_upper}"
+}
+
+project_registry_scope_database_base_env() {
+  local project_slug="${1:?project slug is required}"
+  local scope="${2:?scope is required}"
+  printf '%s_BASE' "$(project_registry_scope_database_env "${project_slug}" "${scope}")"
 }
 
 project_registry_project_name_for_target() {
@@ -282,30 +362,61 @@ source_customers_pipeline_basename() {
   printf '%s' "${SOURCE_CUSTOMERS_PIPELINE_BASENAME:-local_platform_customers_ingest}"
 }
 
-activate_source_scope_runtime() {
-  local scope="${1:?source scope is required (orders|customers)}"
-  local scope_upper base_pipeline_name dlt_pipeline_name dag_id dag_id_var dlt_name_var
+source_taxes_pipeline_basename() {
+  printf '%s' "${SOURCE_TAXES_PIPELINE_BASENAME:-local_platform_taxes_ingest}"
+}
 
-  scope_upper="$(printf '%s' "${scope}" | tr '[:lower:]' '[:upper:]')"
+source_depot_transactions_pipeline_basename() {
+  printf '%s' "${SOURCE_DEPOT_TRANSACTIONS_PIPELINE_BASENAME:-local_platform_depot_transactions_ingest}"
+}
 
+source_pipeline_basename_for_scope() {
+  local scope="${1:?source scope is required}"
   case "${scope}" in
     orders)
-      base_pipeline_name="$(source_orders_pipeline_basename)"
-      export DLT_SCRIPT_PATH="/opt/platform/dlt/pipeline_orders.py"
-      export SNOWFLAKE_RAW_SYNC_SCOPE="orders"
-      export SNOWFLAKE_SDP_DBT_SELECT="orders"
+      source_orders_pipeline_basename
       ;;
     customers)
-      base_pipeline_name="$(source_customers_pipeline_basename)"
-      export DLT_SCRIPT_PATH="/opt/platform/dlt/pipeline_customers.py"
-      export SNOWFLAKE_RAW_SYNC_SCOPE="customers"
-      export SNOWFLAKE_SDP_DBT_SELECT="customers"
+      source_customers_pipeline_basename
+      ;;
+    taxes)
+      source_taxes_pipeline_basename
+      ;;
+    depot_transactions)
+      source_depot_transactions_pipeline_basename
       ;;
     *)
       echo "unsupported source scope: ${scope}" >&2
       return 1
       ;;
   esac
+}
+
+source_dlt_script_for_scope() {
+  local scope="${1:?source scope is required}"
+  case "${scope}" in
+    orders) printf '/opt/platform/dlt/pipeline_orders.py' ;;
+    customers) printf '/opt/platform/dlt/pipeline_customers.py' ;;
+    taxes) printf '/opt/platform/dlt/pipeline_taxes.py' ;;
+    depot_transactions) printf '/opt/platform/dlt/pipeline_depot_transactions.py' ;;
+    *)
+      echo "unsupported source scope: ${scope}" >&2
+      return 1
+      ;;
+  esac
+}
+
+activate_source_scope_runtime() {
+  local scope="${1:?source scope is required (orders|customers|taxes|depot_transactions)}"
+  local scope_upper base_pipeline_name dlt_pipeline_name dag_id dag_id_var dlt_name_var scope_database_var
+
+  scope_upper="$(printf '%s' "${scope}" | tr '[:lower:]' '[:upper:]')"
+
+  base_pipeline_name="$(source_pipeline_basename_for_scope "${scope}")"
+  export DLT_SCRIPT_PATH="$(source_dlt_script_for_scope "${scope}")"
+  export SNOWFLAKE_RAW_SYNC_SCOPE="${scope}"
+  export SNOWFLAKE_SDP_DBT_SELECT="${scope}"
+  scope_database_var="SNOWFLAKE_SDP_${scope_upper}_DATABASE"
 
   if [ -n "${CI_SANDBOX_KIND:-}" ]; then
     dlt_name_var="SOURCE_${scope_upper}_DLT_PIPELINE_NAME"
@@ -331,6 +442,9 @@ activate_source_scope_runtime() {
   export AIRFLOW_ACTIVE_DAG_ID="${dag_id}"
   export AIRFLOW_ACTIVE_MODULE_PREFIX="$(sanitize_branch_token "${AIRFLOW_ACTIVE_DAG_ID}")"
   export AIRFLOW_ACTIVE_DAG_FILENAME="${AIRFLOW_ACTIVE_MODULE_PREFIX}.py"
+  if [ -n "${!scope_database_var:-}" ]; then
+    export SNOWFLAKE_SDP_DATABASE="${!scope_database_var}"
+  fi
 }
 
 build_clone_database_name() {
@@ -439,7 +553,9 @@ load_env_preserving_existing() {
   # Use null-delimited env output so CI variables containing newlines do not
   # corrupt the restore file.
   while IFS='=' read -r -d '' key value; do
-    printf 'export %s=%q\n' "${key}" "${value}"
+    if [ -n "${value}" ]; then
+      printf 'export %s=%q\n' "${key}" "${value}"
+    fi
   done < <(env -0) > "${preserved_env}"
 
   set -a
@@ -451,6 +567,51 @@ load_env_preserving_existing() {
   source "${preserved_env}"
 
   rm -f "${preserved_env}"
+}
+
+merge_env_file_with_example() {
+  local env_file="${1:?env file is required}"
+  local example_file="${2:?example env file is required}"
+
+  [ -f "${example_file}" ] || return 0
+  if [ ! -f "${env_file}" ]; then
+    cp "${example_file}" "${env_file}"
+    return 0
+  fi
+
+  python3 - "${env_file}" "${example_file}" <<'PY'
+from pathlib import Path
+import re
+import sys
+
+env_path = Path(sys.argv[1])
+example_path = Path(sys.argv[2])
+env_lines = env_path.read_text().splitlines()
+example_lines = example_path.read_text().splitlines()
+key_pattern = re.compile(r"^\s*([A-Za-z_][A-Za-z0-9_]*)=")
+present = set()
+
+for line in env_lines:
+    match = key_pattern.match(line)
+    if match:
+        present.add(match.group(1))
+
+merged = list(env_lines)
+appended = False
+for line in example_lines:
+    match = key_pattern.match(line)
+    if not match:
+        continue
+    key = match.group(1)
+    if key in present:
+        continue
+    merged.append(line)
+    present.add(key)
+    appended = True
+
+if appended:
+    env_path.write_text("\n".join(merged) + "\n")
+PY
 }
 
 ensure_platform_env() {
@@ -465,6 +626,8 @@ ensure_platform_env() {
     fi
     echo "created .env from .env.example"
   fi
+
+  merge_env_file_with_example .env .env.example
 
   load_env_preserving_existing .env
   ensure_docker_cli_runtime
@@ -508,6 +671,13 @@ ensure_platform_env() {
 
 resolve_host_dbt_project_dir() {
   local project_slug="${1:?dbt project slug is required}"
+  local registry_dir
+
+  registry_dir="$(project_registry_lookup "${project_slug}" dbt_project_dir "")"
+  if [ -n "${registry_dir}" ] && [ -f "${ROOT_DIR}/${registry_dir}/dbt_project.yml" ]; then
+    printf '%s/%s\n' "${ROOT_DIR}" "${registry_dir}"
+    return 0
+  fi
 
   if [ -f "${ROOT_DIR}/dbt/projects/${project_slug}/dbt_project.yml" ]; then
     printf '%s/dbt/projects/%s\n' "${ROOT_DIR}" "${project_slug}"
@@ -525,6 +695,13 @@ resolve_host_dbt_project_dir() {
 
 resolve_container_dbt_project_dir() {
   local project_slug="${1:?dbt project slug is required}"
+  local registry_dir
+
+  registry_dir="$(project_registry_lookup "${project_slug}" dbt_project_dir "")"
+  if [ -n "${registry_dir}" ] && [ -f "${ROOT_DIR}/${registry_dir}/dbt_project.yml" ]; then
+    printf '/opt/platform/%s\n' "${registry_dir}"
+    return 0
+  fi
 
   if [ -f "${ROOT_DIR}/dbt/projects/${project_slug}/dbt_project.yml" ]; then
     printf '/opt/platform/dbt/projects/%s\n' "${project_slug}"
@@ -574,8 +751,8 @@ publish_source_loom_manifests() {
 
 export_prd_runtime_env() {
   local prd_prefix source_dlt_pipeline source_iceberg_namespace source_minio_prefix
-  local source_sdp_database source_sdp_customers_database
-  local source_edp_database source_edp_customers_database
+  local source_sdp_database source_sdp_customers_database source_sdp_taxes_database source_sdp_depot_transactions_database
+  local source_edp_database source_edp_customers_database source_edp_taxes_database source_edp_depot_transactions_database
   local source_system_slug_value
 
   prd_prefix="${PRD_DEPLOYMENT_PREFIX:-PRD}"
@@ -583,10 +760,14 @@ export_prd_runtime_env() {
   source_dlt_pipeline="${PRD_SOURCE_DLT_PIPELINE_NAME:-${DLT_PIPELINE_NAME:-local_platform_ingest}}"
   source_iceberg_namespace="${PRD_SOURCE_ICEBERG_NAMESPACE:-${source_system_slug_value}}"
   source_minio_prefix="${PRD_SOURCE_MINIO_PREFIX:-landing/prd}"
-  source_sdp_database="${PRD_SOURCE_SDP_DATABASE:-${SNOWFLAKE_SDP_DATABASE_BASE:-${SNOWFLAKE_SDP_DATABASE}}}"
-  source_sdp_customers_database="${PRD_SOURCE_SDP_CUSTOMERS_DATABASE:-${SNOWFLAKE_SDP_CUSTOMERS_DATABASE_BASE:-${SNOWFLAKE_SDP_CUSTOMERS_DATABASE}}}"
-  source_edp_database="${PRD_SOURCE_EDP_DATABASE:-${SNOWFLAKE_EDP_DATABASE_BASE:-${SNOWFLAKE_EDP_DATABASE}}}"
-  source_edp_customers_database="${PRD_SOURCE_EDP_CUSTOMERS_DATABASE:-${SNOWFLAKE_EDP_CUSTOMERS_DATABASE_BASE:-${SNOWFLAKE_EDP_CUSTOMERS_DATABASE}}}"
+  source_sdp_database="${PRD_SOURCE_SDP_DATABASE:-${SNOWFLAKE_SDP_DATABASE_BASE:-${SNOWFLAKE_SDP_DATABASE:-}}}"
+  source_sdp_customers_database="${PRD_SOURCE_SDP_CUSTOMERS_DATABASE:-${SNOWFLAKE_SDP_CUSTOMERS_DATABASE_BASE:-${SNOWFLAKE_SDP_CUSTOMERS_DATABASE:-}}}"
+  source_sdp_taxes_database="${PRD_SOURCE_SDP_TAXES_DATABASE:-${SNOWFLAKE_SDP_TAXES_DATABASE_BASE:-${SNOWFLAKE_SDP_TAXES_DATABASE:-}}}"
+  source_sdp_depot_transactions_database="${PRD_SOURCE_SDP_DEPOT_TRANSACTIONS_DATABASE:-${SNOWFLAKE_SDP_DEPOT_TRANSACTIONS_DATABASE_BASE:-${SNOWFLAKE_SDP_DEPOT_TRANSACTIONS_DATABASE:-}}}"
+  source_edp_database="${PRD_SOURCE_EDP_DATABASE:-${SNOWFLAKE_EDP_DATABASE_BASE:-${SNOWFLAKE_EDP_DATABASE:-}}}"
+  source_edp_customers_database="${PRD_SOURCE_EDP_CUSTOMERS_DATABASE:-${SNOWFLAKE_EDP_CUSTOMERS_DATABASE_BASE:-${SNOWFLAKE_EDP_CUSTOMERS_DATABASE:-}}}"
+  source_edp_taxes_database="${PRD_SOURCE_EDP_TAXES_DATABASE:-${SNOWFLAKE_EDP_TAXES_DATABASE_BASE:-${SNOWFLAKE_EDP_TAXES_DATABASE:-}}}"
+  source_edp_depot_transactions_database="${PRD_SOURCE_EDP_DEPOT_TRANSACTIONS_DATABASE:-${SNOWFLAKE_EDP_DEPOT_TRANSACTIONS_DATABASE_BASE:-${SNOWFLAKE_EDP_DEPOT_TRANSACTIONS_DATABASE:-}}}"
 
   export PRD_DEPLOYMENT_PREFIX="${prd_prefix}"
   export ACTIVE_RUNTIME_ENV="prd"
@@ -600,8 +781,12 @@ export_prd_runtime_env() {
   export PRD_SOURCE_MINIO_PREFIX="${source_minio_prefix}"
   export PRD_SOURCE_SDP_DATABASE="${source_sdp_database}"
   export PRD_SOURCE_SDP_CUSTOMERS_DATABASE="${source_sdp_customers_database}"
+  export PRD_SOURCE_SDP_TAXES_DATABASE="${source_sdp_taxes_database}"
+  export PRD_SOURCE_SDP_DEPOT_TRANSACTIONS_DATABASE="${source_sdp_depot_transactions_database}"
   export PRD_SOURCE_EDP_DATABASE="${source_edp_database}"
   export PRD_SOURCE_EDP_CUSTOMERS_DATABASE="${source_edp_customers_database}"
+  export PRD_SOURCE_EDP_TAXES_DATABASE="${source_edp_taxes_database}"
+  export PRD_SOURCE_EDP_DEPOT_TRANSACTIONS_DATABASE="${source_edp_depot_transactions_database}"
 
   export PRD_AIRFLOW_DAG_ID="${PRD_AIRFLOW_DAG_ID:-$(prefixed_identifier "${source_dlt_pipeline}" "${prd_prefix}")}"
   export PRD_ORDERS_AIRFLOW_DAG_ID="${PRD_ORDERS_AIRFLOW_DAG_ID:-$(prefixed_identifier "$(source_orders_pipeline_basename)" "${prd_prefix}")}"
@@ -615,28 +800,40 @@ export_prd_runtime_env() {
   export PRD_SNOWFLAKE_SDP_DATABASE="${PRD_SNOWFLAKE_SDP_DATABASE:-$(prefixed_identifier "${source_sdp_database}" "${prd_prefix}")}"
   export PRD_SNOWFLAKE_SDP_ORDERS_DATABASE="${PRD_SNOWFLAKE_SDP_ORDERS_DATABASE:-${PRD_SNOWFLAKE_SDP_DATABASE}}"
   export PRD_SNOWFLAKE_SDP_CUSTOMERS_DATABASE="${PRD_SNOWFLAKE_SDP_CUSTOMERS_DATABASE:-$(prefixed_identifier "${source_sdp_customers_database}" "${prd_prefix}")}"
+  export PRD_SNOWFLAKE_SDP_TAXES_DATABASE="${PRD_SNOWFLAKE_SDP_TAXES_DATABASE:-$(prefixed_identifier "${source_sdp_taxes_database}" "${prd_prefix}")}"
+  export PRD_SNOWFLAKE_SDP_DEPOT_TRANSACTIONS_DATABASE="${PRD_SNOWFLAKE_SDP_DEPOT_TRANSACTIONS_DATABASE:-$(prefixed_identifier "${source_sdp_depot_transactions_database}" "${prd_prefix}")}"
   export PRD_SNOWFLAKE_EDP_DATABASE="${PRD_SNOWFLAKE_EDP_DATABASE:-$(prefixed_identifier "${source_edp_database}" "${prd_prefix}")}"
   export PRD_SNOWFLAKE_EDP_ORDERS_DATABASE="${PRD_SNOWFLAKE_EDP_ORDERS_DATABASE:-${PRD_SNOWFLAKE_EDP_DATABASE}}"
   export PRD_SNOWFLAKE_EDP_CUSTOMERS_DATABASE="${PRD_SNOWFLAKE_EDP_CUSTOMERS_DATABASE:-$(prefixed_identifier "${source_edp_customers_database}" "${prd_prefix}")}"
+  export PRD_SNOWFLAKE_EDP_TAXES_DATABASE="${PRD_SNOWFLAKE_EDP_TAXES_DATABASE:-$(prefixed_identifier "${source_edp_taxes_database}" "${prd_prefix}")}"
+  export PRD_SNOWFLAKE_EDP_DEPOT_TRANSACTIONS_DATABASE="${PRD_SNOWFLAKE_EDP_DEPOT_TRANSACTIONS_DATABASE:-$(prefixed_identifier "${source_edp_depot_transactions_database}" "${prd_prefix}")}"
   export PRD_SDP_RUNTIME_IMAGE_PREFIX="${PRD_SDP_RUNTIME_IMAGE_PREFIX:-local-platform-prd-sdp}"
   export PRD_EDP_RUNTIME_IMAGE_PREFIX="${PRD_EDP_RUNTIME_IMAGE_PREFIX:-local-platform-prd-edp}"
   export PRD_SNOWFLAKE_SDP_DBT_PROJECT="${PRD_SNOWFLAKE_SDP_DBT_PROJECT:-$(snowflake_dbt_project_object_name source_finnova "${prd_prefix}")}"
-  export PRD_SNOWFLAKE_EDP_DBT_PROJECT="${PRD_SNOWFLAKE_EDP_DBT_PROJECT:-$(snowflake_dbt_project_object_name edp_orders "${prd_prefix}")}"
-  export PRD_SNOWFLAKE_EDP_CUSTOMERS_DBT_PROJECT="${PRD_SNOWFLAKE_EDP_CUSTOMERS_DBT_PROJECT:-$(snowflake_dbt_project_object_name edp_customers "${prd_prefix}")}"
+  export PRD_SNOWFLAKE_EDP_DBT_PROJECT="${PRD_SNOWFLAKE_EDP_DBT_PROJECT:-$(snowflake_dbt_project_object_name domain_transactions "${prd_prefix}")}"
+  export PRD_SNOWFLAKE_EDP_CUSTOMERS_DBT_PROJECT="${PRD_SNOWFLAKE_EDP_CUSTOMERS_DBT_PROJECT:-$(snowflake_dbt_project_object_name domain_customer "${prd_prefix}")}"
   export PRD_SNOW_DBT_TARGET_NAME="${PRD_SNOW_DBT_TARGET_NAME:-prd}"
 
   export SNOWFLAKE_SDP_DATABASE_BASE="${source_sdp_database}"
   export SNOWFLAKE_SDP_ORDERS_DATABASE_BASE="${source_sdp_database}"
   export SNOWFLAKE_SDP_CUSTOMERS_DATABASE_BASE="${source_sdp_customers_database}"
+  export SNOWFLAKE_SDP_TAXES_DATABASE_BASE="${source_sdp_taxes_database}"
+  export SNOWFLAKE_SDP_DEPOT_TRANSACTIONS_DATABASE_BASE="${source_sdp_depot_transactions_database}"
   export SNOWFLAKE_EDP_DATABASE_BASE="${source_edp_database}"
   export SNOWFLAKE_EDP_ORDERS_DATABASE_BASE="${source_edp_database}"
   export SNOWFLAKE_EDP_CUSTOMERS_DATABASE_BASE="${source_edp_customers_database}"
+  export SNOWFLAKE_EDP_TAXES_DATABASE_BASE="${source_edp_taxes_database}"
+  export SNOWFLAKE_EDP_DEPOT_TRANSACTIONS_DATABASE_BASE="${source_edp_depot_transactions_database}"
   export SNOWFLAKE_SDP_DATABASE="${PRD_SNOWFLAKE_SDP_DATABASE}"
   export SNOWFLAKE_SDP_ORDERS_DATABASE="${PRD_SNOWFLAKE_SDP_ORDERS_DATABASE}"
   export SNOWFLAKE_SDP_CUSTOMERS_DATABASE="${PRD_SNOWFLAKE_SDP_CUSTOMERS_DATABASE}"
+  export SNOWFLAKE_SDP_TAXES_DATABASE="${PRD_SNOWFLAKE_SDP_TAXES_DATABASE}"
+  export SNOWFLAKE_SDP_DEPOT_TRANSACTIONS_DATABASE="${PRD_SNOWFLAKE_SDP_DEPOT_TRANSACTIONS_DATABASE}"
   export SNOWFLAKE_EDP_DATABASE="${PRD_SNOWFLAKE_EDP_DATABASE}"
   export SNOWFLAKE_EDP_ORDERS_DATABASE="${PRD_SNOWFLAKE_EDP_ORDERS_DATABASE}"
   export SNOWFLAKE_EDP_CUSTOMERS_DATABASE="${PRD_SNOWFLAKE_EDP_CUSTOMERS_DATABASE}"
+  export SNOWFLAKE_EDP_TAXES_DATABASE="${PRD_SNOWFLAKE_EDP_TAXES_DATABASE}"
+  export SNOWFLAKE_EDP_DEPOT_TRANSACTIONS_DATABASE="${PRD_SNOWFLAKE_EDP_DEPOT_TRANSACTIONS_DATABASE}"
   export SNOWFLAKE_SDP_DBT_PROJECT="${PRD_SNOWFLAKE_SDP_DBT_PROJECT}"
   export SNOWFLAKE_EDP_DBT_PROJECT="${PRD_SNOWFLAKE_EDP_DBT_PROJECT}"
   export SNOWFLAKE_EDP_CUSTOMERS_DBT_PROJECT="${PRD_SNOWFLAKE_EDP_CUSTOMERS_DBT_PROJECT}"
@@ -650,8 +847,8 @@ export_prd_runtime_env() {
 
 export_dev_runtime_env() {
   local dev_prefix source_dlt_pipeline source_iceberg_namespace source_minio_prefix
-  local source_sdp_database source_sdp_customers_database
-  local source_edp_database source_edp_customers_database
+  local source_sdp_database source_sdp_customers_database source_sdp_taxes_database source_sdp_depot_transactions_database
+  local source_edp_database source_edp_customers_database source_edp_taxes_database source_edp_depot_transactions_database
   local source_system_slug_value
 
   dev_prefix="${DEV_DEPLOYMENT_PREFIX:-DEV}"
@@ -659,10 +856,14 @@ export_dev_runtime_env() {
   source_dlt_pipeline="${DEV_SOURCE_DLT_PIPELINE_NAME:-${DLT_PIPELINE_NAME:-local_platform_ingest}}"
   source_iceberg_namespace="${DEV_SOURCE_ICEBERG_NAMESPACE:-${source_system_slug_value}}"
   source_minio_prefix="${DEV_SOURCE_MINIO_PREFIX:-landing/dev}"
-  source_sdp_database="${DEV_SOURCE_SDP_DATABASE:-${SNOWFLAKE_SDP_DATABASE_BASE:-${SNOWFLAKE_SDP_DATABASE}}}"
-  source_sdp_customers_database="${DEV_SOURCE_SDP_CUSTOMERS_DATABASE:-${SNOWFLAKE_SDP_CUSTOMERS_DATABASE_BASE:-${SNOWFLAKE_SDP_CUSTOMERS_DATABASE}}}"
-  source_edp_database="${DEV_SOURCE_EDP_DATABASE:-${SNOWFLAKE_EDP_DATABASE_BASE:-${SNOWFLAKE_EDP_DATABASE}}}"
-  source_edp_customers_database="${DEV_SOURCE_EDP_CUSTOMERS_DATABASE:-${SNOWFLAKE_EDP_CUSTOMERS_DATABASE_BASE:-${SNOWFLAKE_EDP_CUSTOMERS_DATABASE}}}"
+  source_sdp_database="${DEV_SOURCE_SDP_DATABASE:-${SNOWFLAKE_SDP_DATABASE_BASE:-${SNOWFLAKE_SDP_DATABASE:-}}}"
+  source_sdp_customers_database="${DEV_SOURCE_SDP_CUSTOMERS_DATABASE:-${SNOWFLAKE_SDP_CUSTOMERS_DATABASE_BASE:-${SNOWFLAKE_SDP_CUSTOMERS_DATABASE:-}}}"
+  source_sdp_taxes_database="${DEV_SOURCE_SDP_TAXES_DATABASE:-${SNOWFLAKE_SDP_TAXES_DATABASE_BASE:-${SNOWFLAKE_SDP_TAXES_DATABASE:-}}}"
+  source_sdp_depot_transactions_database="${DEV_SOURCE_SDP_DEPOT_TRANSACTIONS_DATABASE:-${SNOWFLAKE_SDP_DEPOT_TRANSACTIONS_DATABASE_BASE:-${SNOWFLAKE_SDP_DEPOT_TRANSACTIONS_DATABASE:-}}}"
+  source_edp_database="${DEV_SOURCE_EDP_DATABASE:-${SNOWFLAKE_EDP_DATABASE_BASE:-${SNOWFLAKE_EDP_DATABASE:-}}}"
+  source_edp_customers_database="${DEV_SOURCE_EDP_CUSTOMERS_DATABASE:-${SNOWFLAKE_EDP_CUSTOMERS_DATABASE_BASE:-${SNOWFLAKE_EDP_CUSTOMERS_DATABASE:-}}}"
+  source_edp_taxes_database="${DEV_SOURCE_EDP_TAXES_DATABASE:-${SNOWFLAKE_EDP_TAXES_DATABASE_BASE:-${SNOWFLAKE_EDP_TAXES_DATABASE:-}}}"
+  source_edp_depot_transactions_database="${DEV_SOURCE_EDP_DEPOT_TRANSACTIONS_DATABASE:-${SNOWFLAKE_EDP_DEPOT_TRANSACTIONS_DATABASE_BASE:-${SNOWFLAKE_EDP_DEPOT_TRANSACTIONS_DATABASE:-}}}"
 
   export DEV_DEPLOYMENT_PREFIX="${dev_prefix}"
   export ACTIVE_RUNTIME_ENV="dev"
@@ -676,8 +877,12 @@ export_dev_runtime_env() {
   export DEV_SOURCE_MINIO_PREFIX="${source_minio_prefix}"
   export DEV_SOURCE_SDP_DATABASE="${source_sdp_database}"
   export DEV_SOURCE_SDP_CUSTOMERS_DATABASE="${source_sdp_customers_database}"
+  export DEV_SOURCE_SDP_TAXES_DATABASE="${source_sdp_taxes_database}"
+  export DEV_SOURCE_SDP_DEPOT_TRANSACTIONS_DATABASE="${source_sdp_depot_transactions_database}"
   export DEV_SOURCE_EDP_DATABASE="${source_edp_database}"
   export DEV_SOURCE_EDP_CUSTOMERS_DATABASE="${source_edp_customers_database}"
+  export DEV_SOURCE_EDP_TAXES_DATABASE="${source_edp_taxes_database}"
+  export DEV_SOURCE_EDP_DEPOT_TRANSACTIONS_DATABASE="${source_edp_depot_transactions_database}"
 
   export DEV_AIRFLOW_DAG_ID="${DEV_AIRFLOW_DAG_ID:-$(prefixed_identifier "${source_dlt_pipeline}" "${dev_prefix}")}"
   export DEV_ORDERS_AIRFLOW_DAG_ID="${DEV_ORDERS_AIRFLOW_DAG_ID:-$(prefixed_identifier "$(source_orders_pipeline_basename)" "${dev_prefix}")}"
@@ -691,28 +896,40 @@ export_dev_runtime_env() {
   export DEV_SNOWFLAKE_SDP_DATABASE="${DEV_SNOWFLAKE_SDP_DATABASE:-${source_sdp_database}}"
   export DEV_SNOWFLAKE_SDP_ORDERS_DATABASE="${DEV_SNOWFLAKE_SDP_ORDERS_DATABASE:-${DEV_SNOWFLAKE_SDP_DATABASE}}"
   export DEV_SNOWFLAKE_SDP_CUSTOMERS_DATABASE="${DEV_SNOWFLAKE_SDP_CUSTOMERS_DATABASE:-${source_sdp_customers_database}}"
+  export DEV_SNOWFLAKE_SDP_TAXES_DATABASE="${DEV_SNOWFLAKE_SDP_TAXES_DATABASE:-${source_sdp_taxes_database}}"
+  export DEV_SNOWFLAKE_SDP_DEPOT_TRANSACTIONS_DATABASE="${DEV_SNOWFLAKE_SDP_DEPOT_TRANSACTIONS_DATABASE:-${source_sdp_depot_transactions_database}}"
   export DEV_SNOWFLAKE_EDP_DATABASE="${DEV_SNOWFLAKE_EDP_DATABASE:-${source_edp_database}}"
   export DEV_SNOWFLAKE_EDP_ORDERS_DATABASE="${DEV_SNOWFLAKE_EDP_ORDERS_DATABASE:-${DEV_SNOWFLAKE_EDP_DATABASE}}"
   export DEV_SNOWFLAKE_EDP_CUSTOMERS_DATABASE="${DEV_SNOWFLAKE_EDP_CUSTOMERS_DATABASE:-${source_edp_customers_database}}"
+  export DEV_SNOWFLAKE_EDP_TAXES_DATABASE="${DEV_SNOWFLAKE_EDP_TAXES_DATABASE:-${source_edp_taxes_database}}"
+  export DEV_SNOWFLAKE_EDP_DEPOT_TRANSACTIONS_DATABASE="${DEV_SNOWFLAKE_EDP_DEPOT_TRANSACTIONS_DATABASE:-${source_edp_depot_transactions_database}}"
   export DEV_SDP_RUNTIME_IMAGE_PREFIX="${DEV_SDP_RUNTIME_IMAGE_PREFIX:-local-platform-dev-sdp}"
   export DEV_EDP_RUNTIME_IMAGE_PREFIX="${DEV_EDP_RUNTIME_IMAGE_PREFIX:-local-platform-dev-edp}"
   export DEV_SNOWFLAKE_SDP_DBT_PROJECT="${DEV_SNOWFLAKE_SDP_DBT_PROJECT:-$(snowflake_dbt_project_object_name source_finnova "${dev_prefix}")}"
-  export DEV_SNOWFLAKE_EDP_DBT_PROJECT="${DEV_SNOWFLAKE_EDP_DBT_PROJECT:-$(snowflake_dbt_project_object_name edp_orders "${dev_prefix}")}"
-  export DEV_SNOWFLAKE_EDP_CUSTOMERS_DBT_PROJECT="${DEV_SNOWFLAKE_EDP_CUSTOMERS_DBT_PROJECT:-$(snowflake_dbt_project_object_name edp_customers "${dev_prefix}")}"
+  export DEV_SNOWFLAKE_EDP_DBT_PROJECT="${DEV_SNOWFLAKE_EDP_DBT_PROJECT:-$(snowflake_dbt_project_object_name domain_transactions "${dev_prefix}")}"
+  export DEV_SNOWFLAKE_EDP_CUSTOMERS_DBT_PROJECT="${DEV_SNOWFLAKE_EDP_CUSTOMERS_DBT_PROJECT:-$(snowflake_dbt_project_object_name domain_customer "${dev_prefix}")}"
   export DEV_SNOW_DBT_TARGET_NAME="${DEV_SNOW_DBT_TARGET_NAME:-dev}"
 
   export SNOWFLAKE_SDP_DATABASE_BASE="${source_sdp_database}"
   export SNOWFLAKE_SDP_ORDERS_DATABASE_BASE="${source_sdp_database}"
   export SNOWFLAKE_SDP_CUSTOMERS_DATABASE_BASE="${source_sdp_customers_database}"
+  export SNOWFLAKE_SDP_TAXES_DATABASE_BASE="${source_sdp_taxes_database}"
+  export SNOWFLAKE_SDP_DEPOT_TRANSACTIONS_DATABASE_BASE="${source_sdp_depot_transactions_database}"
   export SNOWFLAKE_EDP_DATABASE_BASE="${source_edp_database}"
   export SNOWFLAKE_EDP_ORDERS_DATABASE_BASE="${source_edp_database}"
   export SNOWFLAKE_EDP_CUSTOMERS_DATABASE_BASE="${source_edp_customers_database}"
+  export SNOWFLAKE_EDP_TAXES_DATABASE_BASE="${source_edp_taxes_database}"
+  export SNOWFLAKE_EDP_DEPOT_TRANSACTIONS_DATABASE_BASE="${source_edp_depot_transactions_database}"
   export SNOWFLAKE_SDP_DATABASE="${DEV_SNOWFLAKE_SDP_DATABASE}"
   export SNOWFLAKE_SDP_ORDERS_DATABASE="${DEV_SNOWFLAKE_SDP_ORDERS_DATABASE}"
   export SNOWFLAKE_SDP_CUSTOMERS_DATABASE="${DEV_SNOWFLAKE_SDP_CUSTOMERS_DATABASE}"
+  export SNOWFLAKE_SDP_TAXES_DATABASE="${DEV_SNOWFLAKE_SDP_TAXES_DATABASE}"
+  export SNOWFLAKE_SDP_DEPOT_TRANSACTIONS_DATABASE="${DEV_SNOWFLAKE_SDP_DEPOT_TRANSACTIONS_DATABASE}"
   export SNOWFLAKE_EDP_DATABASE="${DEV_SNOWFLAKE_EDP_DATABASE}"
   export SNOWFLAKE_EDP_ORDERS_DATABASE="${DEV_SNOWFLAKE_EDP_ORDERS_DATABASE}"
   export SNOWFLAKE_EDP_CUSTOMERS_DATABASE="${DEV_SNOWFLAKE_EDP_CUSTOMERS_DATABASE}"
+  export SNOWFLAKE_EDP_TAXES_DATABASE="${DEV_SNOWFLAKE_EDP_TAXES_DATABASE}"
+  export SNOWFLAKE_EDP_DEPOT_TRANSACTIONS_DATABASE="${DEV_SNOWFLAKE_EDP_DEPOT_TRANSACTIONS_DATABASE}"
   export SNOWFLAKE_SDP_DBT_PROJECT="${DEV_SNOWFLAKE_SDP_DBT_PROJECT}"
   export SNOWFLAKE_EDP_DBT_PROJECT="${DEV_SNOWFLAKE_EDP_DBT_PROJECT}"
   export SNOWFLAKE_EDP_CUSTOMERS_DBT_PROJECT="${DEV_SNOWFLAKE_EDP_CUSTOMERS_DBT_PROJECT}"

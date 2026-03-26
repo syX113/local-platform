@@ -45,6 +45,12 @@ resolve_sandbox_dag_id() {
     customers)
       printf '%s' "${AIRFLOW_SANDBOX_CUSTOMERS_DAG_ID:-${AIRFLOW_SANDBOX_DAG_ID:-${DEV_CUSTOMERS_AIRFLOW_DAG_ID:-DEV_local_platform_customers_ingest}}}"
       ;;
+    taxes)
+      printf '%s' "${AIRFLOW_SANDBOX_TAXES_DAG_ID:-${AIRFLOW_SANDBOX_DAG_ID:-${DEV_TAXES_AIRFLOW_DAG_ID:-DEV_local_platform_taxes_ingest}}}"
+      ;;
+    depot_transactions)
+      printf '%s' "${AIRFLOW_SANDBOX_DEPOT_TRANSACTIONS_DAG_ID:-${AIRFLOW_SANDBOX_DAG_ID:-${DEV_DEPOT_TRANSACTIONS_AIRFLOW_DAG_ID:-DEV_local_platform_depot_transactions_ingest}}}"
+      ;;
     *)
       echo "unsupported ingestion scope: ${scope}" >&2
       exit 1
@@ -54,7 +60,7 @@ resolve_sandbox_dag_id() {
 
 if [ -n "${2:-}" ]; then
   dag_id="${2}"
-elif [ -n "${AIRFLOW_SANDBOX_ORDERS_DAG_ID:-}" ] || [ -n "${AIRFLOW_SANDBOX_CUSTOMERS_DAG_ID:-}" ] || [ -n "${AIRFLOW_SANDBOX_DAG_ID:-}" ]; then
+elif [ -n "${AIRFLOW_SANDBOX_ORDERS_DAG_ID:-}" ] || [ -n "${AIRFLOW_SANDBOX_CUSTOMERS_DAG_ID:-}" ] || [ -n "${AIRFLOW_SANDBOX_TAXES_DAG_ID:-}" ] || [ -n "${AIRFLOW_SANDBOX_DEPOT_TRANSACTIONS_DAG_ID:-}" ] || [ -n "${AIRFLOW_SANDBOX_DAG_ID:-}" ]; then
   dag_id="$(resolve_sandbox_dag_id "${scope}")"
 else
   case "${scope}" in
@@ -63,6 +69,12 @@ else
       ;;
     customers)
       dag_id="${DEV_CUSTOMERS_AIRFLOW_DAG_ID:-DEV_local_platform_customers_ingest}"
+      ;;
+    taxes)
+      dag_id="${DEV_TAXES_AIRFLOW_DAG_ID:-DEV_local_platform_taxes_ingest}"
+      ;;
+    depot_transactions)
+      dag_id="${DEV_DEPOT_TRANSACTIONS_AIRFLOW_DAG_ID:-DEV_local_platform_depot_transactions_ingest}"
       ;;
     all)
       dag_id="${DEV_ORDERS_AIRFLOW_DAG_ID:-DEV_local_platform_orders_ingest}"
@@ -76,7 +88,7 @@ fi
 
 if [ -n "${3:-}" ]; then
   dag_subdir="${3}"
-elif [ -n "${AIRFLOW_SANDBOX_ORDERS_DAG_ID:-}" ] || [ -n "${AIRFLOW_SANDBOX_CUSTOMERS_DAG_ID:-}" ] || [ -n "${AIRFLOW_SANDBOX_DAG_ID:-}" ]; then
+elif [ -n "${AIRFLOW_SANDBOX_ORDERS_DAG_ID:-}" ] || [ -n "${AIRFLOW_SANDBOX_CUSTOMERS_DAG_ID:-}" ] || [ -n "${AIRFLOW_SANDBOX_TAXES_DAG_ID:-}" ] || [ -n "${AIRFLOW_SANDBOX_DEPOT_TRANSACTIONS_DAG_ID:-}" ] || [ -n "${AIRFLOW_SANDBOX_DAG_ID:-}" ]; then
   dag_subdir="/opt/airflow/dags/deployed/$(sanitize_branch_token "$(resolve_sandbox_dag_id "${scope}")").py"
 else
   case "${scope}" in
@@ -85,6 +97,12 @@ else
       ;;
     customers)
       dag_subdir="/opt/airflow/dags/deployed/${AIRFLOW_ACTIVE_DAG_FILENAME:-dev_local_platform_customers_ingest.py}"
+      ;;
+    taxes)
+      dag_subdir="/opt/airflow/dags/deployed/${AIRFLOW_ACTIVE_DAG_FILENAME:-dev_local_platform_taxes_ingest.py}"
+      ;;
+    depot_transactions)
+      dag_subdir="/opt/airflow/dags/deployed/${AIRFLOW_ACTIVE_DAG_FILENAME:-dev_local_platform_depot_transactions_ingest.py}"
       ;;
     *)
       echo "unsupported ingestion scope: ${scope}" >&2
@@ -112,21 +130,29 @@ source_counts="$(
         (select count(*) from customers),
         (select count(*) from orders),
         (select count(*) from order_items),
+        (select count(*) from taxes),
+        (select count(*) from depot_transactions),
         (select count(*) from raw_customers_export),
         (select count(*) from raw_orders_export),
-        (select count(*) from raw_order_items_export);
+        (select count(*) from raw_order_items_export),
+        (select count(*) from raw_taxes_export),
+        (select count(*) from raw_depot_transactions_export);
     "
 )"
 printf '%s\n' "${source_counts}" | tee "${ARTIFACT_DIR}/source_counts.csv"
 
-IFS=',' read -r customer_count order_count order_item_count raw_customers_count raw_orders_count raw_order_items_count <<<"${source_counts}"
+IFS=',' read -r customer_count order_count order_item_count tax_count depot_transaction_count raw_customers_count raw_orders_count raw_order_items_count raw_taxes_count raw_depot_transactions_count <<<"${source_counts}"
 
 [ "${customer_count}" = "12" ] || { echo "expected 12 customers, got ${customer_count}" >&2; exit 1; }
 [ "${order_count}" = "30" ] || { echo "expected 30 orders, got ${order_count}" >&2; exit 1; }
 [ "${order_item_count}" = "60" ] || { echo "expected 60 order items, got ${order_item_count}" >&2; exit 1; }
+[ "${tax_count}" = "8" ] || { echo "expected 8 taxes, got ${tax_count}" >&2; exit 1; }
+[ "${depot_transaction_count}" = "18" ] || { echo "expected 18 depot transactions, got ${depot_transaction_count}" >&2; exit 1; }
 [ "${raw_customers_count}" = "12" ] || { echo "expected 12 raw customers export rows, got ${raw_customers_count}" >&2; exit 1; }
 [ "${raw_orders_count}" = "30" ] || { echo "expected 30 raw orders export rows, got ${raw_orders_count}" >&2; exit 1; }
 [ "${raw_order_items_count}" = "60" ] || { echo "expected 60 raw order item export rows, got ${raw_order_items_count}" >&2; exit 1; }
+[ "${raw_taxes_count}" = "8" ] || { echo "expected 8 raw taxes export rows, got ${raw_taxes_count}" >&2; exit 1; }
+[ "${raw_depot_transactions_count}" = "18" ] || { echo "expected 18 raw depot transactions export rows, got ${raw_depot_transactions_count}" >&2; exit 1; }
 
 catalog_rows="$(
   docker compose exec -T airflow-metadata-db \
@@ -149,10 +175,18 @@ case "${scope}" in
   customers)
     printf '%s\n' "${catalog_rows}" | grep -q "^${iceberg_catalog_name},${catalog_namespace},raw_customers," || { echo "missing ${iceberg_catalog_name}.${catalog_namespace}.raw_customers catalog entry" >&2; exit 1; }
     ;;
+  taxes)
+    printf '%s\n' "${catalog_rows}" | grep -q "^${iceberg_catalog_name},${catalog_namespace},raw_taxes," || { echo "missing ${iceberg_catalog_name}.${catalog_namespace}.raw_taxes catalog entry" >&2; exit 1; }
+    ;;
+  depot_transactions)
+    printf '%s\n' "${catalog_rows}" | grep -q "^${iceberg_catalog_name},${catalog_namespace},raw_depot_transactions," || { echo "missing ${iceberg_catalog_name}.${catalog_namespace}.raw_depot_transactions catalog entry" >&2; exit 1; }
+    ;;
   all)
     printf '%s\n' "${catalog_rows}" | grep -q "^${iceberg_catalog_name},${catalog_namespace},raw_customers," || { echo "missing ${iceberg_catalog_name}.${catalog_namespace}.raw_customers catalog entry" >&2; exit 1; }
     printf '%s\n' "${catalog_rows}" | grep -q "^${iceberg_catalog_name},${catalog_namespace},raw_order_items," || { echo "missing ${iceberg_catalog_name}.${catalog_namespace}.raw_order_items catalog entry" >&2; exit 1; }
     printf '%s\n' "${catalog_rows}" | grep -q "^${iceberg_catalog_name},${catalog_namespace},raw_orders," || { echo "missing ${iceberg_catalog_name}.${catalog_namespace}.raw_orders catalog entry" >&2; exit 1; }
+    printf '%s\n' "${catalog_rows}" | grep -q "^${iceberg_catalog_name},${catalog_namespace},raw_taxes," || { echo "missing ${iceberg_catalog_name}.${catalog_namespace}.raw_taxes catalog entry" >&2; exit 1; }
+    printf '%s\n' "${catalog_rows}" | grep -q "^${iceberg_catalog_name},${catalog_namespace},raw_depot_transactions," || { echo "missing ${iceberg_catalog_name}.${catalog_namespace}.raw_depot_transactions catalog entry" >&2; exit 1; }
     ;;
   *)
     echo "unsupported ingestion scope: ${scope}" >&2
@@ -195,8 +229,18 @@ if scope == "orders":
     expected = {"raw_orders": 30, "raw_order_items": 60}
 elif scope == "customers":
     expected = {"raw_customers": 12}
+elif scope == "taxes":
+    expected = {"raw_taxes": 8}
+elif scope == "depot_transactions":
+    expected = {"raw_depot_transactions": 18}
 else:
-    expected = {"raw_orders": 30, "raw_order_items": 60, "raw_customers": 12}
+    expected = {
+        "raw_orders": 30,
+        "raw_order_items": 60,
+        "raw_customers": 12,
+        "raw_taxes": 8,
+        "raw_depot_transactions": 18,
+    }
 
 minimum_metadata_files = len(expected)
 minimum_parquet_files = len(expected)

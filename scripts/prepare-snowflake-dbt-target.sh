@@ -19,7 +19,7 @@ case "${project_kind}" in
   source)
     default_core_schema_env="SNOWFLAKE_SDP_CORE_SCHEMA"
     ;;
-  edp)
+  edp|domain)
     default_core_schema_env="SNOWFLAKE_EDP_CORE_SCHEMA"
     ;;
   *)

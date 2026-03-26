@@ -4,6 +4,7 @@ import argparse
 import os
 
 import snowflake.connector
+from project_registry import project_by_slug
 
 
 def env(name: str, default: str | None = None) -> str:
@@ -39,52 +40,38 @@ def ensure_databases(cursor, databases: list[str], schemas: list[str]) -> None:
             cursor.execute(f"create schema if not exists {ident(database, schema)}")
 
 
-def source_targets() -> tuple[list[str], list[str]]:
-    return (
-        [
-            env("SNOWFLAKE_SDP_DATABASE"),
-            env("SNOWFLAKE_SDP_CUSTOMERS_DATABASE"),
-        ],
-        [
-            env("SNOWFLAKE_SDP_IN_SCHEMA", "INBOUND"),
-            env("SNOWFLAKE_SDP_CORE_SCHEMA", "CORE"),
-            env("SNOWFLAKE_SDP_ACC_SCHEMA", "ACCESS"),
-        ],
-    )
-
-
-def edp_targets() -> tuple[list[str], list[str]]:
-    return (
-        [env("SNOWFLAKE_EDP_DATABASE")],
-        [
-            env("SNOWFLAKE_EDP_IN_SCHEMA", "INBOUND"),
-            env("SNOWFLAKE_EDP_CORE_SCHEMA", "CORE"),
-            env("SNOWFLAKE_EDP_ACC_SCHEMA", "ACCESS"),
-        ],
-    )
-
-
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Ensure target Snowflake databases and schemas exist before dbt project deployment.")
-    parser.add_argument("target_kind", choices=("source", "edp"))
+    parser.add_argument("project_slug")
     return parser.parse_args()
 
 
 def main() -> int:
     args = parse_args()
-    if args.target_kind == "source":
-        databases, schemas = source_targets()
-    else:
-        databases, schemas = edp_targets()
+    project = project_by_slug(args.project_slug)
+    targets = project.get("prepare_targets", [])
+    if not isinstance(targets, list):
+        raise SystemExit(f"invalid prepare_targets for project: {args.project_slug}")
 
     connection = connect()
     try:
         with connection.cursor() as cursor:
-            ensure_databases(cursor, databases, schemas)
+            for target in targets:
+                if not isinstance(target, dict):
+                    continue
+                database_env = str(target.get("database_env", "")).strip()
+                schema_envs = target.get("schema_envs", [])
+                if not database_env or not isinstance(schema_envs, list):
+                    continue
+                database_name = env(database_env)
+                schemas = [env(schema_env) for schema_env in schema_envs if str(schema_env).strip()]
+                if not schemas:
+                    continue
+                ensure_databases(cursor, [database_name], schemas)
     finally:
         connection.close()
 
-    print({"target_kind": args.target_kind, "databases": databases, "schemas": schemas})
+    print({"project_slug": args.project_slug, "targets": targets})
     return 0
 
 

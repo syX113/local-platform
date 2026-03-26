@@ -1,4 +1,4 @@
-name: proj_edp_customers
+name: proj_domain_customer
 version: 1.0.0
 config-version: 2
 profile: local_platform
@@ -10,7 +10,7 @@ clean-targets:
   - dbt_packages
 
 models:
-  proj_edp_customers:
+  proj_domain_customer:
     inbound:
       +database: "{{ env_var('SNOWFLAKE_EDP_CUSTOMERS_DATABASE') }}"
       +schema: "{{ env_var('SNOWFLAKE_EDP_IN_SCHEMA', 'INBOUND') }}"

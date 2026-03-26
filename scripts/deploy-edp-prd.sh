@@ -12,7 +12,7 @@ cd "${ROOT_DIR}"
 source "${SCRIPT_DIR}/common.sh"
 ensure_platform_env
 
-project_slug="${1:-proj_edp_orders}"
+project_slug="${1:?project slug is required}"
 
 ARTIFACT_DIR="${ROOT_DIR}/artifacts/deploy-edp-prd"
 rm -rf "${ARTIFACT_DIR}"

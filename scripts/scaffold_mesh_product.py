@@ -411,7 +411,7 @@ def main() -> int:
               "CORE" \\
               "${{SNOW_DBT_TARGET_NAME}}" | tee "${{ARTIFACT_DIR}}/dbt_deploy_sdp.log"
             bash ./scripts/deploy-snowflake-dbt-project.sh \\
-              proj_edp_orders \\
+              proj_domain_transactions \\
               "${{SNOWFLAKE_EDP_DBT_PROJECT}}" \\
               "{edp_database}" \\
               "CORE" \\

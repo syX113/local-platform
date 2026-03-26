@@ -91,12 +91,16 @@ ci_variable_keys=(
   SNOWFLAKE_SDP_DATABASE
   SNOWFLAKE_SDP_ORDERS_DATABASE
   SNOWFLAKE_SDP_CUSTOMERS_DATABASE
+  SNOWFLAKE_SDP_TAXES_DATABASE
+  SNOWFLAKE_SDP_DEPOT_TRANSACTIONS_DATABASE
   SNOWFLAKE_SDP_IN_SCHEMA
   SNOWFLAKE_SDP_CORE_SCHEMA
   SNOWFLAKE_SDP_ACC_SCHEMA
   SNOWFLAKE_EDP_DATABASE
   SNOWFLAKE_EDP_ORDERS_DATABASE
   SNOWFLAKE_EDP_CUSTOMERS_DATABASE
+  SNOWFLAKE_EDP_TAXES_DATABASE
+  SNOWFLAKE_EDP_DEPOT_TRANSACTIONS_DATABASE
   SNOWFLAKE_EDP_IN_SCHEMA
   SNOWFLAKE_EDP_CORE_SCHEMA
   SNOWFLAKE_EDP_ACC_SCHEMA
@@ -153,10 +157,10 @@ fi
 
 if [ -n "${GITLAB_EDP_PROJECT_ID:-}" ]; then
   sync_project_variables "${GITLAB_EDP_PROJECT_ID}"
-  echo "Synced ${#ci_variable_keys[@]} GitLab CI/CD variables to EDP project ${GITLAB_EDP_PROJECT_ID}"
+  echo "Synced ${#ci_variable_keys[@]} GitLab CI/CD variables to domain transactions project ${GITLAB_EDP_PROJECT_ID}"
 fi
 
 if [ -n "${GITLAB_EDP_CUSTOMERS_PROJECT_ID:-}" ]; then
   sync_project_variables "${GITLAB_EDP_CUSTOMERS_PROJECT_ID}"
-  echo "Synced ${#ci_variable_keys[@]} GitLab CI/CD variables to EDP customers project ${GITLAB_EDP_CUSTOMERS_PROJECT_ID}"
+  echo "Synced ${#ci_variable_keys[@]} GitLab CI/CD variables to domain customer project ${GITLAB_EDP_CUSTOMERS_PROJECT_ID}"
 fi

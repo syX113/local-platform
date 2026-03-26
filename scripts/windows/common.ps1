@@ -112,6 +112,56 @@ function Update-EnvFileValue {
     Set-Content -LiteralPath $Path -Value $content -Encoding UTF8
 }
 
+function Merge-EnvFileWithExample {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$EnvFile,
+        [Parameter(Mandatory = $true)]
+        [string]$ExampleFile
+    )
+
+    if (-not (Test-Path -LiteralPath $ExampleFile)) {
+        return
+    }
+
+    if (-not (Test-Path -LiteralPath $EnvFile)) {
+        Copy-Item -LiteralPath $ExampleFile -Destination $EnvFile
+        return
+    }
+
+    $existingKeys = @{}
+    foreach ($line in Get-Content -LiteralPath $EnvFile) {
+        if ($line -match "^\s*([A-Za-z_][A-Za-z0-9_]*)=") {
+            $existingKeys[$Matches[1]] = $true
+        }
+    }
+
+    $lines = [System.Collections.Generic.List[string]]::new()
+    foreach ($line in Get-Content -LiteralPath $EnvFile) {
+        $lines.Add($line)
+    }
+
+    $appended = $false
+    foreach ($line in Get-Content -LiteralPath $ExampleFile) {
+        if ($line -match "^\s*([A-Za-z_][A-Za-z0-9_]*)=") {
+            $key = $Matches[1]
+            if (-not $existingKeys.ContainsKey($key)) {
+                $lines.Add($line)
+                $existingKeys[$key] = $true
+                $appended = $true
+            }
+        }
+    }
+
+    if ($appended) {
+        $content = ($lines -join [Environment]::NewLine)
+        if (-not $content.EndsWith([Environment]::NewLine)) {
+            $content += [Environment]::NewLine
+        }
+        Set-Content -LiteralPath $EnvFile -Value $content -Encoding UTF8
+    }
+}
+
 function Ensure-PlatformEnv {
     param(
         [string]$RootDir = (Get-RepoRoot)
@@ -132,6 +182,8 @@ function Ensure-PlatformEnv {
         }
         Write-Host "created .env from .env.example"
     }
+
+    Merge-EnvFileWithExample -EnvFile $envFile -ExampleFile (Join-Path $RootDir ".env.example")
 
     Import-EnvFile -Path $envFile
 
@@ -210,11 +262,11 @@ function Publish-SourceLoomManifests {
     $bucket = Get-LoomManifestBucket
     $edpRepoPath = Get-EnvValue -Name "GITLAB_EDP_PROJECT_PATH"
     if ([string]::IsNullOrEmpty($edpRepoPath)) {
-        $edpRepoPath = "proj_edp_orders"
+        $edpRepoPath = "proj_domain_transactions"
     }
     $edpCustomersRepoPath = Get-EnvValue -Name "GITLAB_EDP_CUSTOMERS_PROJECT_PATH"
     if ([string]::IsNullOrEmpty($edpCustomersRepoPath)) {
-        $edpCustomersRepoPath = "proj_edp_customers"
+        $edpCustomersRepoPath = "proj_domain_customer"
     }
 
     Invoke-DockerCompose -Arguments @(
@@ -233,8 +285,8 @@ function Ensure-DbtLoomManifestForProject {
     )
 
     switch ($ProjectSlug) {
-        "proj_edp_orders" {}
-        "proj_edp_customers" {}
+        "proj_domain_transactions" {}
+        "proj_domain_customer" {}
         default { return }
     }
 

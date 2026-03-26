@@ -151,7 +151,7 @@ def render_env_vars(raw_text: str) -> str:
 
 
 def render_env_vars_in_tree(root_dir: Path) -> None:
-    for config_path in list(root_dir.rglob("*.yml")) + list(root_dir.rglob("*.yaml")):
+    for config_path in list(root_dir.rglob("*.yml")) + list(root_dir.rglob("*.yaml")) + list(root_dir.rglob("*.sql")):
         if config_path.name == "profiles.yml":
             continue
         config_path.write_text(render_env_vars(config_path.read_text(encoding="utf-8")), encoding="utf-8")
@@ -301,7 +301,7 @@ def prepare_project_source(
     loom_env = {"DBT_LOOM_CONFIG": str(loom_config_path)} if loom_config_path else None
     manifest_object_key = str(spec.get("manifest_object_key", "")).strip()
 
-    if copy_downstream_dependencies and project_kind == "edp":
+    if copy_downstream_dependencies and project_kind in {"edp", "domain"}:
         upstream_project_slug = str(spec.get("upstream_project_slug", "")).strip()
         if not upstream_project_slug:
             raise SystemExit(f"missing upstream_project_slug for project: {project_identity}")

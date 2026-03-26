@@ -42,17 +42,15 @@ if [ "${should_destroy}" != "true" ]; then
   exit 0
 fi
 
-if [ -n "${AIRFLOW_SANDBOX_ORDERS_DAG_ID:-}" ]; then
-  remove_deployed_airflow_dag "${AIRFLOW_SANDBOX_ORDERS_DAG_ID}"
-fi
-
-if [ -n "${AIRFLOW_SANDBOX_CUSTOMERS_DAG_ID:-}" ]; then
-  remove_deployed_airflow_dag "${AIRFLOW_SANDBOX_CUSTOMERS_DAG_ID}"
-fi
-
-if [ -n "${AIRFLOW_SANDBOX_DAG_ID:-}" ]; then
-  remove_deployed_airflow_dag "${AIRFLOW_SANDBOX_DAG_ID}"
-fi
+while IFS='=' read -r key value; do
+  case "${key}" in
+    AIRFLOW_SANDBOX_DAG_ID|AIRFLOW_SANDBOX_*_DAG_ID)
+      if [ -n "${value}" ]; then
+        remove_deployed_airflow_dag "${value}"
+      fi
+      ;;
+  esac
+done < <(env)
 
 if [ -n "${ICEBERG_NAMESPACE:-}" ] && [ -n "${OBJECT_STORE_BUCKET:-}" ] && docker compose --profile tooling config --services 2>/dev/null | grep -qx "dlt-extractor"; then
   docker compose run --rm --no-deps \
@@ -67,33 +65,16 @@ if [ -n "${ICEBERG_NAMESPACE:-}" ] && [ -n "${OBJECT_STORE_BUCKET:-}" ] && docke
 fi
 
 if [ -n "${SNOWFLAKE_ACCOUNT:-}" ] && [ -n "${SNOWFLAKE_USER:-}" ] && [ -n "${SNOWFLAKE_PASSWORD:-}" ] \
-  && [ -n "${SNOWFLAKE_ROLE:-}" ] && [ -n "${SNOWFLAKE_WAREHOUSE:-}" ] \
-  && {
-    [ -n "${SNOWFLAKE_CLONE_OWNER_TOKEN:-}" ] && [ -n "${SNOWFLAKE_CLONE_BRANCH_TOKEN:-}" ] \
-      || [ -n "${SNOWFLAKE_SDP_DATABASE:-}" ] \
-      || [ -n "${SNOWFLAKE_SDP_CUSTOMERS_DATABASE:-}" ] \
-      || [ -n "${SNOWFLAKE_EDP_DATABASE:-}" ];
-  }; then
+  && [ -n "${SNOWFLAKE_ROLE:-}" ] && [ -n "${SNOWFLAKE_WAREHOUSE:-}" ]; then
+  clone_env_args=()
+  while IFS='=' read -r key value; do
+    case "${key}" in
+      SNOWFLAKE_*) clone_env_args+=(-e "${key}=${value}") ;;
+    esac
+  done < <(env)
+
   docker compose run --rm --no-deps \
-    -e "SNOWFLAKE_ACCOUNT=${SNOWFLAKE_ACCOUNT}" \
-    -e "SNOWFLAKE_USER=${SNOWFLAKE_USER}" \
-    -e "SNOWFLAKE_PASSWORD=${SNOWFLAKE_PASSWORD}" \
-    -e "SNOWFLAKE_ROLE=${SNOWFLAKE_ROLE}" \
-    -e "SNOWFLAKE_WAREHOUSE=${SNOWFLAKE_WAREHOUSE}" \
-    -e "SNOWFLAKE_CLONE_OWNER_TOKEN=${SNOWFLAKE_CLONE_OWNER_TOKEN:-}" \
-    -e "SNOWFLAKE_CLONE_BRANCH_TOKEN=${SNOWFLAKE_CLONE_BRANCH_TOKEN:-}" \
-    -e "SNOWFLAKE_SDP_DATABASE_BASE=${SNOWFLAKE_SDP_DATABASE_BASE:-}" \
-    -e "SNOWFLAKE_SDP_ORDERS_DATABASE_BASE=${SNOWFLAKE_SDP_ORDERS_DATABASE_BASE:-}" \
-    -e "SNOWFLAKE_SDP_CUSTOMERS_DATABASE_BASE=${SNOWFLAKE_SDP_CUSTOMERS_DATABASE_BASE:-}" \
-    -e "SNOWFLAKE_EDP_DATABASE_BASE=${SNOWFLAKE_EDP_DATABASE_BASE:-}" \
-    -e "SNOWFLAKE_EDP_ORDERS_DATABASE_BASE=${SNOWFLAKE_EDP_ORDERS_DATABASE_BASE:-}" \
-    -e "SNOWFLAKE_EDP_CUSTOMERS_DATABASE_BASE=${SNOWFLAKE_EDP_CUSTOMERS_DATABASE_BASE:-}" \
-    -e "SNOWFLAKE_SDP_DATABASE=${SNOWFLAKE_SDP_DATABASE:-}" \
-    -e "SNOWFLAKE_SDP_ORDERS_DATABASE=${SNOWFLAKE_SDP_ORDERS_DATABASE:-}" \
-    -e "SNOWFLAKE_SDP_CUSTOMERS_DATABASE=${SNOWFLAKE_SDP_CUSTOMERS_DATABASE:-}" \
-    -e "SNOWFLAKE_EDP_DATABASE=${SNOWFLAKE_EDP_DATABASE:-}" \
-    -e "SNOWFLAKE_EDP_ORDERS_DATABASE=${SNOWFLAKE_EDP_ORDERS_DATABASE:-}" \
-    -e "SNOWFLAKE_EDP_CUSTOMERS_DATABASE=${SNOWFLAKE_EDP_CUSTOMERS_DATABASE:-}" \
+    "${clone_env_args[@]}" \
     dbt-executor \
     python /opt/platform/dbt/scripts/manage_ci_clones.py drop
 fi

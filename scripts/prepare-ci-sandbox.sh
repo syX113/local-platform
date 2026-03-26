@@ -12,7 +12,7 @@ cd "${ROOT_DIR}"
 source "${SCRIPT_DIR}/common.sh"
 ensure_platform_env
 
-project_kind="${1:?project kind is required (sdp|edp)}"
+project_slug="${1:?project slug is required}"
 dotenv_path="${2:-${ROOT_DIR}/artifacts/context/ci.env}"
 tmp_dotenv_path="${dotenv_path}.tmp.$$"
 log_prefix="${dotenv_path%.env}"
@@ -22,12 +22,16 @@ clone_create_log="${log_prefix}.snowflake_clone_create.log"
 mkdir -p "$(dirname "${dotenv_path}")"
 trap 'rm -f "${tmp_dotenv_path}"' EXIT
 
-project_token="$(sanitize_branch_token "${CI_PROJECT_PATH_SLUG:-${project_kind}}")"
+project_kind="$(project_registry_kind "${project_slug}")"
+project_scopes="$(project_registry_product_scopes "${project_slug}")"
+upstream_project_slug="$(project_registry_lookup "${project_slug}" upstream_project_slug "")"
+
+project_token="$(sanitize_branch_token "${CI_PROJECT_PATH_SLUG:-${project_slug}}")"
 project_token="$(trim_identifier "${project_token}" 18)"
 branch_name_raw="${CI_MERGE_REQUEST_SOURCE_BRANCH_NAME:-${CI_COMMIT_BRANCH:-${CI_COMMIT_REF_NAME:-${CI_COMMIT_REF_SLUG:-local}}}}"
 branch_token="$(sanitize_branch_token "${branch_name_raw}")"
 branch_token="${branch_token:-local}"
-clone_owner_token="$(printf '%s' "${project_kind}" | tr '[:lower:]' '[:upper:]')"
+clone_owner_token="$(project_registry_clone_owner_token "${project_slug}")"
 merge_request_token_raw="${CI_MERGE_REQUEST_IID:-${CI_MERGE_REQUEST_ID:-}}"
 merge_request_token=""
 if [ -n "${merge_request_token_raw}" ]; then
@@ -66,34 +70,31 @@ project_path_slug="${CI_PROJECT_PATH_SLUG:-${project_kind}}"
 source_system_slug="${SOURCE_SYSTEM_SLUG:-postgres}"
 object_prefix="landing/ci/${project_path_slug}/${sandbox_kind}/${source_system_slug}"
 object_store_bucket="s3://${MINIO_BUCKET}/${object_prefix}"
-source_dbt_project="DBT_PROJECT_SOURCE_FINNOVA_${db_suffix}"
-edp_orders_dbt_project="DBT_PROJECT_EDP_ORDERS_${db_suffix}"
-edp_customers_dbt_project="DBT_PROJECT_EDP_CUSTOMERS_${db_suffix}"
-source_orders_pipeline_name="${project_kind}_${sandbox_kind}_${namespace_suffix}_orders"
-source_customers_pipeline_name="${project_kind}_${sandbox_kind}_${namespace_suffix}_customers"
+project_name_token="$(project_registry_project_name_token "${project_slug}")"
+branch_dbt_project="DBT_PROJECT_${project_name_token}_${db_suffix}"
 
-base_sdp_database="${SNOWFLAKE_SDP_ORDERS_DATABASE:-${SNOWFLAKE_SDP_DATABASE}}"
-base_sdp_customers_database="${SNOWFLAKE_SDP_CUSTOMERS_DATABASE}"
-base_edp_orders_database="${SNOWFLAKE_EDP_ORDERS_DATABASE:-${SNOWFLAKE_EDP_DATABASE}}"
-base_edp_customers_database="${SNOWFLAKE_EDP_CUSTOMERS_DATABASE}"
-branch_sdp_database="$(build_clone_database_name "${base_sdp_database}" "${clone_owner_token}" "${clone_branch_token}" 120)"
-branch_sdp_customers_database="$(build_clone_database_name "${base_sdp_customers_database}" "${clone_owner_token}" "${clone_branch_token}" 120)"
-branch_edp_orders_database="$(build_clone_database_name "${base_edp_orders_database}" "${clone_owner_token}" "${clone_branch_token}" 120)"
-branch_edp_customers_database="$(build_clone_database_name "${base_edp_customers_database}" "${clone_owner_token}" "${clone_branch_token}" 120)"
+set_scope_database_envs() {
+  local env_project_slug="${1:?project slug is required}"
+  local scope="${2:?scope is required}"
+  local scope_database_env scope_database_base_env base_database branch_database
 
-if printf '%s' "${project_path_slug}" | grep -qi 'customers'; then
-  base_edp_database="${base_edp_customers_database}"
-  branch_edp_database="${branch_edp_customers_database}"
-  edp_dbt_project="${edp_customers_dbt_project}"
-else
-  base_edp_database="${base_edp_orders_database}"
-  branch_edp_database="${branch_edp_orders_database}"
-  edp_dbt_project="${edp_orders_dbt_project}"
-fi
+  scope_database_env="$(project_registry_scope_database_env "${env_project_slug}" "${scope}")"
+  scope_database_base_env="$(project_registry_scope_database_base_env "${env_project_slug}" "${scope}")"
+  base_database="${!scope_database_base_env:-${!scope_database_env:-}}"
+  if [ -z "${base_database}" ]; then
+    echo "missing required Snowflake database environment variable: ${scope_database_base_env} or ${scope_database_env}" >&2
+    exit 1
+  fi
+  branch_database="$(build_clone_database_name "${base_database}" "${clone_owner_token}" "${clone_branch_token}" 120)"
+
+  printf '%s=%s\n' "${scope_database_base_env}" "${base_database}" >> "${tmp_dotenv_path}"
+  printf '%s=%s\n' "${scope_database_env}" "${branch_database}" >> "${tmp_dotenv_path}"
+}
 
 cat > "${tmp_dotenv_path}" <<EOF
 CI_SANDBOX_KIND=${sandbox_kind}
 CI_SANDBOX_PROJECT_KIND=${project_kind}
+CI_SANDBOX_PROJECT_SLUG=${project_slug}
 CI_SANDBOX_SLUG=${sandbox_slug}
 CI_SANDBOX_BRANCH_NAME=${branch_name_raw}
 CI_SANDBOX_MERGE_REQUEST=${CI_MERGE_REQUEST_IID:-}
@@ -103,34 +104,44 @@ CI_SANDBOX_OBJECT_PREFIX=${object_prefix}
 ICEBERG_CATALOG_NAME=ci_${project_kind}_${sandbox_kind}_${namespace_suffix}
 SNOWFLAKE_CLONE_OWNER_TOKEN=${clone_owner_token}
 SNOWFLAKE_CLONE_BRANCH_TOKEN=${clone_branch_token}
-SNOWFLAKE_SDP_DATABASE_BASE=${base_sdp_database}
-SNOWFLAKE_SDP_ORDERS_DATABASE_BASE=${base_sdp_database}
-SNOWFLAKE_SDP_CUSTOMERS_DATABASE_BASE=${base_sdp_customers_database}
-SNOWFLAKE_EDP_DATABASE_BASE=${base_edp_database}
-SNOWFLAKE_EDP_ORDERS_DATABASE_BASE=${base_edp_orders_database}
-SNOWFLAKE_EDP_CUSTOMERS_DATABASE_BASE=${base_edp_customers_database}
-SNOWFLAKE_SDP_DATABASE=${branch_sdp_database}
-SNOWFLAKE_SDP_ORDERS_DATABASE=${branch_sdp_database}
-SNOWFLAKE_SDP_CUSTOMERS_DATABASE=${branch_sdp_customers_database}
-SNOWFLAKE_EDP_DATABASE=${branch_edp_database}
-SNOWFLAKE_EDP_ORDERS_DATABASE=${branch_edp_orders_database}
-SNOWFLAKE_EDP_CUSTOMERS_DATABASE=${branch_edp_customers_database}
 SNOWFLAKE_CLONE_SCHEMA=CLONE_${db_suffix}
-SNOWFLAKE_SDP_DBT_PROJECT=${source_dbt_project}
-SNOWFLAKE_EDP_DBT_PROJECT=${edp_dbt_project}
-SNOWFLAKE_EDP_ORDERS_DBT_PROJECT=${edp_orders_dbt_project}
-SNOWFLAKE_EDP_CUSTOMERS_DBT_PROJECT=${edp_customers_dbt_project}
 MINIO_PREFIX=${object_prefix}
 OBJECT_STORE_BUCKET=${object_store_bucket}
 DLT_PIPELINE_NAME=${project_kind}_${sandbox_kind}_${namespace_suffix}
-SOURCE_ORDERS_DLT_PIPELINE_NAME=${source_orders_pipeline_name}
-SOURCE_CUSTOMERS_DLT_PIPELINE_NAME=${source_customers_pipeline_name}
 ICEBERG_NAMESPACE=${namespace_suffix}
 SNOW_DBT_TARGET_NAME=${sandbox_kind}
-AIRFLOW_SANDBOX_DAG_ID=$( [ "${sandbox_kind}" = "merge_request" ] && printf 'MR_%s_%s' "${project_kind}" "${namespace_suffix}" || printf 'DEV_%s_%s' "${project_kind}" "${namespace_suffix}" )
-AIRFLOW_SANDBOX_ORDERS_DAG_ID=$( [ "${sandbox_kind}" = "merge_request" ] && printf 'MR_%s_%s_orders' "${project_kind}" "${namespace_suffix}" || printf 'DEV_%s_%s_orders' "${project_kind}" "${namespace_suffix}" )
-AIRFLOW_SANDBOX_CUSTOMERS_DAG_ID=$( [ "${sandbox_kind}" = "merge_request" ] && printf 'MR_%s_%s_customers' "${project_kind}" "${namespace_suffix}" || printf 'DEV_%s_%s_customers' "${project_kind}" "${namespace_suffix}" )
 EOF
+
+while IFS= read -r scope; do
+  [ -n "${scope}" ] || continue
+  if [ "${project_kind}" = "domain" ] && [ -n "${upstream_project_slug}" ]; then
+    set_scope_database_envs "${upstream_project_slug}" "${scope}"
+  fi
+  set_scope_database_envs "${project_slug}" "${scope}"
+done < <(project_registry_product_scopes "${project_slug}")
+
+default_database_env_name="$(project_registry_default_database_env "${project_slug}")"
+default_database_base_env_name="${default_database_env_name}_BASE"
+default_database_value="${!default_database_env_name:-}"
+default_database_base_value="${!default_database_base_env_name:-${default_database_value}}"
+if [ -n "${default_database_value}" ]; then
+  printf '%s=%s\n' "${default_database_env_name}" "${default_database_value}" >> "${tmp_dotenv_path}"
+fi
+if [ -n "${default_database_base_value}" ]; then
+  printf '%s=%s\n' "${default_database_base_env_name}" "${default_database_base_value}" >> "${tmp_dotenv_path}"
+fi
+
+if [ "${project_kind}" = "source" ]; then
+  printf 'SNOWFLAKE_SDP_DBT_PROJECT=%s\n' "${branch_dbt_project}" >> "${tmp_dotenv_path}"
+  while IFS= read -r scope; do
+    [ -n "${scope}" ] || continue
+    scope_upper="$(printf '%s' "${scope}" | tr '[:lower:]' '[:upper:]')"
+    printf 'AIRFLOW_SANDBOX_%s_DAG_ID=%s\n' "${scope_upper}" "$( [ "${sandbox_kind}" = "merge_request" ] && printf 'MR_%s_%s_%s' "${project_kind}" "${namespace_suffix}" "${scope}" || printf 'DEV_%s_%s_%s' "${project_kind}" "${namespace_suffix}" "${scope}" )" >> "${tmp_dotenv_path}"
+  done < <(project_registry_product_scopes "${project_slug}")
+  printf 'AIRFLOW_SANDBOX_DAG_ID=%s\n' "$( [ "${sandbox_kind}" = "merge_request" ] && printf 'MR_%s_%s' "${project_kind}" "${namespace_suffix}" || printf 'DEV_%s_%s' "${project_kind}" "${namespace_suffix}" )" >> "${tmp_dotenv_path}"
+else
+  printf 'SNOWFLAKE_EDP_DBT_PROJECT=%s\n' "${branch_dbt_project}" >> "${tmp_dotenv_path}"
+fi
 
 bash "${SCRIPT_DIR}/ensure-snowflake-foundation.sh" | tee "${base_bootstrap_log}"
 
@@ -139,26 +150,15 @@ set -a
 source "${tmp_dotenv_path}"
 set +a
 
+clone_env_args=()
+while IFS='=' read -r key value; do
+  case "${key}" in
+    SNOWFLAKE_*) clone_env_args+=(-e "${key}=${value}") ;;
+  esac
+done < <(env)
+
 docker compose run --rm --no-deps \
-  -e "SNOWFLAKE_ACCOUNT=${SNOWFLAKE_ACCOUNT}" \
-  -e "SNOWFLAKE_USER=${SNOWFLAKE_USER}" \
-  -e "SNOWFLAKE_PASSWORD=${SNOWFLAKE_PASSWORD}" \
-  -e "SNOWFLAKE_ROLE=${SNOWFLAKE_ROLE}" \
-  -e "SNOWFLAKE_WAREHOUSE=${SNOWFLAKE_WAREHOUSE}" \
-  -e "SNOWFLAKE_CLONE_OWNER_TOKEN=${SNOWFLAKE_CLONE_OWNER_TOKEN}" \
-  -e "SNOWFLAKE_CLONE_BRANCH_TOKEN=${SNOWFLAKE_CLONE_BRANCH_TOKEN}" \
-  -e "SNOWFLAKE_SDP_DATABASE_BASE=${SNOWFLAKE_SDP_DATABASE_BASE}" \
-  -e "SNOWFLAKE_SDP_ORDERS_DATABASE_BASE=${SNOWFLAKE_SDP_ORDERS_DATABASE_BASE}" \
-  -e "SNOWFLAKE_SDP_CUSTOMERS_DATABASE_BASE=${SNOWFLAKE_SDP_CUSTOMERS_DATABASE_BASE}" \
-  -e "SNOWFLAKE_EDP_DATABASE_BASE=${SNOWFLAKE_EDP_DATABASE_BASE}" \
-  -e "SNOWFLAKE_EDP_ORDERS_DATABASE_BASE=${SNOWFLAKE_EDP_ORDERS_DATABASE_BASE}" \
-  -e "SNOWFLAKE_EDP_CUSTOMERS_DATABASE_BASE=${SNOWFLAKE_EDP_CUSTOMERS_DATABASE_BASE}" \
-  -e "SNOWFLAKE_SDP_DATABASE=${SNOWFLAKE_SDP_DATABASE}" \
-  -e "SNOWFLAKE_SDP_ORDERS_DATABASE=${SNOWFLAKE_SDP_ORDERS_DATABASE}" \
-  -e "SNOWFLAKE_SDP_CUSTOMERS_DATABASE=${SNOWFLAKE_SDP_CUSTOMERS_DATABASE}" \
-  -e "SNOWFLAKE_EDP_DATABASE=${SNOWFLAKE_EDP_DATABASE}" \
-  -e "SNOWFLAKE_EDP_ORDERS_DATABASE=${SNOWFLAKE_EDP_ORDERS_DATABASE}" \
-  -e "SNOWFLAKE_EDP_CUSTOMERS_DATABASE=${SNOWFLAKE_EDP_CUSTOMERS_DATABASE}" \
+  "${clone_env_args[@]}" \
   dbt-executor \
   python /opt/platform/dbt/scripts/manage_ci_clones.py "${CI_SANDBOX_CLONE_ACTION}" \
   | tee "${clone_create_log}"

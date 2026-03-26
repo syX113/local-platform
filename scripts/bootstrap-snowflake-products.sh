@@ -14,13 +14,23 @@ required_vars=(
   SNOWFLAKE_ROLE
   SNOWFLAKE_WAREHOUSE
   SNOWFLAKE_SDP_DATABASE
+  SNOWFLAKE_SDP_ORDERS_DATABASE
   SNOWFLAKE_SDP_CUSTOMERS_DATABASE
-  SNOWFLAKE_EDP_DATABASE
+  SNOWFLAKE_SDP_TAXES_DATABASE
+  SNOWFLAKE_SDP_DEPOT_TRANSACTIONS_DATABASE
+  SNOWFLAKE_EDP_ORDERS_DATABASE
   SNOWFLAKE_EDP_CUSTOMERS_DATABASE
+  SNOWFLAKE_EDP_TAXES_DATABASE
+  SNOWFLAKE_EDP_DEPOT_TRANSACTIONS_DATABASE
   PRD_SNOWFLAKE_SDP_DATABASE
+  PRD_SNOWFLAKE_SDP_ORDERS_DATABASE
   PRD_SNOWFLAKE_SDP_CUSTOMERS_DATABASE
-  PRD_SNOWFLAKE_EDP_DATABASE
+  PRD_SNOWFLAKE_SDP_TAXES_DATABASE
+  PRD_SNOWFLAKE_SDP_DEPOT_TRANSACTIONS_DATABASE
+  PRD_SNOWFLAKE_EDP_ORDERS_DATABASE
   PRD_SNOWFLAKE_EDP_CUSTOMERS_DATABASE
+  PRD_SNOWFLAKE_EDP_TAXES_DATABASE
+  PRD_SNOWFLAKE_EDP_DEPOT_TRANSACTIONS_DATABASE
 )
 
 for key in "${required_vars[@]}"; do
@@ -55,14 +65,24 @@ def ident(name: str) -> str:
 
 
 database_names = [
-    os.environ["PRD_SNOWFLAKE_EDP_CUSTOMERS_DATABASE"],
-    os.environ["PRD_SNOWFLAKE_EDP_DATABASE"],
-    os.environ["PRD_SNOWFLAKE_SDP_CUSTOMERS_DATABASE"],
     os.environ["PRD_SNOWFLAKE_SDP_DATABASE"],
-    os.environ["SNOWFLAKE_EDP_CUSTOMERS_DATABASE"],
-    os.environ["SNOWFLAKE_EDP_DATABASE"],
-    os.environ["SNOWFLAKE_SDP_CUSTOMERS_DATABASE"],
+    os.environ["PRD_SNOWFLAKE_SDP_ORDERS_DATABASE"],
+    os.environ["PRD_SNOWFLAKE_SDP_CUSTOMERS_DATABASE"],
+    os.environ["PRD_SNOWFLAKE_SDP_TAXES_DATABASE"],
+    os.environ["PRD_SNOWFLAKE_SDP_DEPOT_TRANSACTIONS_DATABASE"],
+    os.environ["PRD_SNOWFLAKE_EDP_ORDERS_DATABASE"],
+    os.environ["PRD_SNOWFLAKE_EDP_CUSTOMERS_DATABASE"],
+    os.environ["PRD_SNOWFLAKE_EDP_TAXES_DATABASE"],
+    os.environ["PRD_SNOWFLAKE_EDP_DEPOT_TRANSACTIONS_DATABASE"],
     os.environ["SNOWFLAKE_SDP_DATABASE"],
+    os.environ["SNOWFLAKE_SDP_ORDERS_DATABASE"],
+    os.environ["SNOWFLAKE_SDP_CUSTOMERS_DATABASE"],
+    os.environ["SNOWFLAKE_SDP_TAXES_DATABASE"],
+    os.environ["SNOWFLAKE_SDP_DEPOT_TRANSACTIONS_DATABASE"],
+    os.environ["SNOWFLAKE_EDP_ORDERS_DATABASE"],
+    os.environ["SNOWFLAKE_EDP_CUSTOMERS_DATABASE"],
+    os.environ["SNOWFLAKE_EDP_TAXES_DATABASE"],
+    os.environ["SNOWFLAKE_EDP_DEPOT_TRANSACTIONS_DATABASE"],
 ]
 
 connection = snowflake.connector.connect(
@@ -96,41 +116,19 @@ bash ./scripts/deploy-sdp-dev.sh
 echo "deploying PRD source data products"
 bash ./scripts/deploy-sdp-prd.sh
 
-echo "deploying DEV EDP customers data product"
-bash ./scripts/deploy-edp-dev.sh proj_edp_customers
+echo "deploying DEV domain customer data products"
+bash ./scripts/deploy-edp-dev.sh proj_domain_customer
 
-echo "deploying PRD EDP customers data product"
-bash ./scripts/deploy-edp-prd.sh proj_edp_customers
+echo "deploying PRD domain customer data products"
+bash ./scripts/deploy-edp-prd.sh proj_domain_customer
 
-echo "deploying DEV EDP orders dbt project object without materializing DEV objects"
-export_dev_runtime_env
-export SNOWFLAKE_EDP_DATABASE="${SNOWFLAKE_CONTROL_DATABASE}"
-export SNOWFLAKE_EDP_IN_SCHEMA="${SNOWFLAKE_CONTROL_SCHEMA}"
-export SNOWFLAKE_EDP_CORE_SCHEMA="${SNOWFLAKE_CONTROL_SCHEMA}"
-export SNOWFLAKE_EDP_ACC_SCHEMA="${SNOWFLAKE_CONTROL_SCHEMA}"
-bash ./scripts/deploy-snowflake-dbt-project.sh \
-  proj_edp_orders \
-  "${DEV_SNOWFLAKE_EDP_DBT_PROJECT}" \
-  "${SNOWFLAKE_CONTROL_DATABASE}" \
-  "${SNOWFLAKE_CONTROL_SCHEMA}" \
-  "dev"
+echo "deploying DEV domain transactions data products"
+bash ./scripts/deploy-edp-dev.sh proj_domain_transactions
 
-echo "deploying PRD EDP orders dbt project object without materializing PRD objects"
-export_prd_runtime_env
-export SNOWFLAKE_EDP_DATABASE="${SNOWFLAKE_CONTROL_DATABASE}"
-export SNOWFLAKE_EDP_IN_SCHEMA="${SNOWFLAKE_CONTROL_SCHEMA}"
-export SNOWFLAKE_EDP_CORE_SCHEMA="${SNOWFLAKE_CONTROL_SCHEMA}"
-export SNOWFLAKE_EDP_ACC_SCHEMA="${SNOWFLAKE_CONTROL_SCHEMA}"
-bash ./scripts/deploy-snowflake-dbt-project.sh \
-  proj_edp_orders \
-  "${PRD_SNOWFLAKE_EDP_DBT_PROJECT}" \
-  "${SNOWFLAKE_CONTROL_DATABASE}" \
-  "${SNOWFLAKE_CONTROL_SCHEMA}" \
-  "prd"
+echo "deploying PRD domain transactions data products"
+bash ./scripts/deploy-edp-prd.sh proj_domain_transactions
 
-export_dev_runtime_env
-
-echo "validating initialized DEV/PRD source products, deployed EDP customers, and undeployed EDP orders state"
+echo "validating initialized DEV/PRD source and domain data products"
 docker compose run --rm --no-deps dbt-executor python - <<'PY'
 import os
 
@@ -141,26 +139,34 @@ def ident(*parts: str) -> str:
     return ".".join(f'"{part}"' for part in parts)
 
 
-required_databases = [
+required_databases = {
     os.environ["SNOWFLAKE_SDP_DATABASE"],
+    os.environ["SNOWFLAKE_SDP_ORDERS_DATABASE"],
     os.environ["SNOWFLAKE_SDP_CUSTOMERS_DATABASE"],
+    os.environ["SNOWFLAKE_SDP_TAXES_DATABASE"],
+    os.environ["SNOWFLAKE_SDP_DEPOT_TRANSACTIONS_DATABASE"],
+    os.environ["SNOWFLAKE_EDP_ORDERS_DATABASE"],
     os.environ["SNOWFLAKE_EDP_CUSTOMERS_DATABASE"],
+    os.environ["SNOWFLAKE_EDP_TAXES_DATABASE"],
+    os.environ["SNOWFLAKE_EDP_DEPOT_TRANSACTIONS_DATABASE"],
     os.environ["PRD_SNOWFLAKE_SDP_DATABASE"],
+    os.environ["PRD_SNOWFLAKE_SDP_ORDERS_DATABASE"],
     os.environ["PRD_SNOWFLAKE_SDP_CUSTOMERS_DATABASE"],
+    os.environ["PRD_SNOWFLAKE_SDP_TAXES_DATABASE"],
+    os.environ["PRD_SNOWFLAKE_SDP_DEPOT_TRANSACTIONS_DATABASE"],
+    os.environ["PRD_SNOWFLAKE_EDP_ORDERS_DATABASE"],
     os.environ["PRD_SNOWFLAKE_EDP_CUSTOMERS_DATABASE"],
-]
-required_projects = [
+    os.environ["PRD_SNOWFLAKE_EDP_TAXES_DATABASE"],
+    os.environ["PRD_SNOWFLAKE_EDP_DEPOT_TRANSACTIONS_DATABASE"],
+}
+required_projects = {
     os.environ["DEV_SNOWFLAKE_SDP_DBT_PROJECT"],
     os.environ["DEV_SNOWFLAKE_EDP_DBT_PROJECT"],
     os.environ["DEV_SNOWFLAKE_EDP_CUSTOMERS_DBT_PROJECT"],
     os.environ["PRD_SNOWFLAKE_SDP_DBT_PROJECT"],
     os.environ["PRD_SNOWFLAKE_EDP_DBT_PROJECT"],
     os.environ["PRD_SNOWFLAKE_EDP_CUSTOMERS_DBT_PROJECT"],
-]
-forbidden_databases = [
-    os.environ["SNOWFLAKE_EDP_DATABASE"],
-    os.environ["PRD_SNOWFLAKE_EDP_DATABASE"],
-]
+}
 
 connection = snowflake.connector.connect(
     account=os.environ["SNOWFLAKE_ACCOUNT"],
@@ -174,19 +180,16 @@ try:
     with connection.cursor() as cursor:
         cursor.execute("show databases")
         databases = {row[1] for row in cursor.fetchall()}
-        missing_databases = sorted(set(required_databases) - databases)
+        missing_databases = sorted(required_databases - databases)
         if missing_databases:
             raise SystemExit(f"missing initialized databases: {', '.join(missing_databases)}")
-        unexpected_databases = sorted(set(forbidden_databases) & databases)
-        if unexpected_databases:
-            raise SystemExit(f"unexpected EDP databases after initialization: {', '.join(unexpected_databases)}")
 
         cursor.execute(
             f"show dbt projects in schema {ident(os.environ['SNOWFLAKE_CONTROL_DATABASE'], os.environ['SNOWFLAKE_CONTROL_SCHEMA'])}"
         )
         cursor.execute('select "name" from table(result_scan(last_query_id()))')
         dbt_projects = {row[0] for row in cursor.fetchall()}
-        missing_projects = sorted(set(required_projects) - dbt_projects)
+        missing_projects = sorted(required_projects - dbt_projects)
         if missing_projects:
             raise SystemExit(f"missing initialized dbt projects: {', '.join(missing_projects)}")
 finally:
@@ -194,13 +197,10 @@ finally:
 
 print(
     {
-        "initialized_databases": required_databases,
-        "initialized_projects": required_projects,
-        "undeployed_databases": forbidden_databases,
-        "undeployed_orders_projects_materialization_only": [
-            os.environ["DEV_SNOWFLAKE_EDP_DBT_PROJECT"],
-            os.environ["PRD_SNOWFLAKE_EDP_DBT_PROJECT"],
-        ],
+        "initialized_databases": sorted(required_databases),
+        "initialized_projects": sorted(required_projects),
+        "snowflake_control_database": os.environ["SNOWFLAKE_CONTROL_DATABASE"],
+        "snowflake_control_schema": os.environ["SNOWFLAKE_CONTROL_SCHEMA"],
     }
 )
 PY

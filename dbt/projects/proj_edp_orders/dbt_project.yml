@@ -1,4 +1,4 @@
-name: proj_edp_orders
+name: proj_domain_transactions
 version: 1.0.0
 config-version: 2
 profile: local_platform
@@ -10,16 +10,16 @@ clean-targets:
   - dbt_packages
 
 models:
-  proj_edp_orders:
+  proj_domain_transactions:
     inbound:
-      +database: "{{ env_var('SNOWFLAKE_EDP_DATABASE') }}"
+      +database: "{{ env_var('SNOWFLAKE_EDP_ORDERS_DATABASE') }}"
       +schema: "{{ env_var('SNOWFLAKE_EDP_IN_SCHEMA', 'INBOUND') }}"
       +materialized: view
     core:
-      +database: "{{ env_var('SNOWFLAKE_EDP_DATABASE') }}"
+      +database: "{{ env_var('SNOWFLAKE_EDP_ORDERS_DATABASE') }}"
       +schema: "{{ env_var('SNOWFLAKE_EDP_CORE_SCHEMA', 'CORE') }}"
       +materialized: table
     access:
-      +database: "{{ env_var('SNOWFLAKE_EDP_DATABASE') }}"
+      +database: "{{ env_var('SNOWFLAKE_EDP_ORDERS_DATABASE') }}"
       +schema: "{{ env_var('SNOWFLAKE_EDP_ACC_SCHEMA', 'ACCESS') }}"
       +materialized: table

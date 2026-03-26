@@ -25,6 +25,26 @@ CREATE TABLE IF NOT EXISTS order_items (
   unit_price NUMERIC(12, 2) NOT NULL CHECK (unit_price > 0)
 );
 
+CREATE TABLE IF NOT EXISTS taxes (
+  tax_id BIGSERIAL PRIMARY KEY,
+  tax_code TEXT NOT NULL UNIQUE,
+  tax_name TEXT NOT NULL,
+  jurisdiction TEXT NOT NULL,
+  rate NUMERIC(6, 4) NOT NULL CHECK (rate >= 0),
+  effective_at TIMESTAMPTZ NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS depot_transactions (
+  transaction_id TEXT PRIMARY KEY,
+  customer_id BIGINT NOT NULL REFERENCES customers(customer_id),
+  depot_code TEXT NOT NULL,
+  transaction_type TEXT NOT NULL CHECK (transaction_type IN ('load', 'unload', 'transfer')),
+  amount NUMERIC(12, 2) NOT NULL CHECK (amount >= 0),
+  transaction_at TIMESTAMPTZ NOT NULL,
+  source_system TEXT NOT NULL
+);
+
 CREATE OR REPLACE VIEW raw_orders_export AS
 SELECT
   o.order_id,
@@ -70,3 +90,26 @@ GROUP BY
   c.region,
   c.segment,
   c.created_at;
+
+CREATE OR REPLACE VIEW raw_taxes_export AS
+SELECT
+  tax_code,
+  tax_name,
+  jurisdiction,
+  rate,
+  effective_at,
+  created_at AS loaded_at
+FROM taxes;
+
+CREATE OR REPLACE VIEW raw_depot_transactions_export AS
+SELECT
+  transaction_id,
+  c.customer_code AS customer_id,
+  depot_code,
+  transaction_type,
+  amount,
+  transaction_at,
+  source_system,
+  transaction_at AS loaded_at
+FROM depot_transactions AS dt
+JOIN customers AS c ON c.customer_id = dt.customer_id;

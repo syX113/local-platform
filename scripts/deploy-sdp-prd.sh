@@ -32,7 +32,15 @@ docker image inspect "${source_dbt_image}" >/dev/null 2>&1
 docker tag "${source_dlt_image}" "${DLT_RUNNER_IMAGE}"
 docker tag "${source_dbt_image}" "${DBT_RUNNER_IMAGE}"
 
-for scope in orders customers; do
+source_scopes=()
+while IFS= read -r scope; do
+  [ -n "${scope}" ] || continue
+  source_scopes+=("${scope}")
+done < <(project_registry_product_scopes proj_source_finnova)
+
+for scope in "${source_scopes[@]}"; do
+  [ -n "${scope}" ] || continue
+  echo "deploying SDP source scope: ${scope}"
   activate_source_scope_runtime "${scope}"
   bash "${SCRIPT_DIR}/deploy-airflow-dag.sh" prd "${scope}" | tee "${ARTIFACT_DIR}/deploy_airflow_prd_${scope}.log"
   airflow_prd_subdir="/opt/airflow/dags/deployed/${AIRFLOW_ACTIVE_DAG_FILENAME}"

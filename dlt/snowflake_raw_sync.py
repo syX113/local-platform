@@ -53,6 +53,34 @@ from raw_customers_export
 order by customer_id
 """
 
+TAXES_EXPORT_SQL = """
+select
+  tax_code,
+  tax_name,
+  jurisdiction,
+  rate,
+  effective_at,
+  loaded_at,
+  :load_batch as load_batch
+from raw_taxes_export
+order by tax_code
+"""
+
+DEPOT_TRANSACTIONS_EXPORT_SQL = """
+select
+  transaction_id,
+  customer_id,
+  depot_code,
+  transaction_type,
+  amount,
+  transaction_at,
+  source_system,
+  loaded_at,
+  :load_batch as load_batch
+from raw_depot_transactions_export
+order by transaction_at, transaction_id
+"""
+
 
 def active_scope() -> str:
     return os.environ.get("RAW_SYNC_SCOPE", "all").strip().lower() or "all"
@@ -64,6 +92,14 @@ def sync_orders(scope: str) -> bool:
 
 def sync_customers(scope: str) -> bool:
     return scope in {"all", "customers"}
+
+
+def sync_taxes(scope: str) -> bool:
+    return scope in {"all", "taxes"}
+
+
+def sync_depot_transactions(scope: str) -> bool:
+    return scope in {"all", "depot_transactions"}
 
 
 def env_flag(name: str, default: bool = False) -> bool:
@@ -130,8 +166,10 @@ def rows_to_tuples(rows: Iterable[dict[str, Any]], columns: list[str]) -> list[t
 
 def ensure_foundation(cursor, scope: str) -> None:
     warehouse = os.environ["SNOWFLAKE_WAREHOUSE"]
-    sdp_database = os.environ["SNOWFLAKE_SDP_DATABASE"]
+    sdp_orders_database = os.environ["SNOWFLAKE_SDP_ORDERS_DATABASE"]
     sdp_customers_database = os.environ["SNOWFLAKE_SDP_CUSTOMERS_DATABASE"]
+    sdp_taxes_database = os.environ["SNOWFLAKE_SDP_TAXES_DATABASE"]
+    sdp_depot_transactions_database = os.environ["SNOWFLAKE_SDP_DEPOT_TRANSACTIONS_DATABASE"]
     sdp_in_schema = os.environ.get("SNOWFLAKE_SDP_IN_SCHEMA", "INBOUND")
 
     cursor.execute(f"use role {os.environ['SNOWFLAKE_ROLE']}")
@@ -145,11 +183,11 @@ def ensure_foundation(cursor, scope: str) -> None:
     )
     cursor.execute(f"use warehouse {warehouse}")
     if sync_orders(scope):
-        cursor.execute(f"create database if not exists {sdp_database}")
-        cursor.execute(f"create schema if not exists {ident(sdp_database, sdp_in_schema)}")
+        cursor.execute(f"create database if not exists {sdp_orders_database}")
+        cursor.execute(f"create schema if not exists {ident(sdp_orders_database, sdp_in_schema)}")
         cursor.execute(
             f"""
-            create or replace transient table {ident(sdp_database, sdp_in_schema, 'EXT_ORDERS_RAW')} (
+            create or replace transient table {ident(sdp_orders_database, sdp_in_schema, 'EXT_ORDERS_RAW')} (
               ORDER_ID varchar,
               CUSTOMER_ID varchar,
               STATUS varchar,
@@ -162,7 +200,7 @@ def ensure_foundation(cursor, scope: str) -> None:
         )
         cursor.execute(
             f"""
-            create or replace transient table {ident(sdp_database, sdp_in_schema, 'EXT_ORDER_ITEMS_RAW')} (
+            create or replace transient table {ident(sdp_orders_database, sdp_in_schema, 'EXT_ORDER_ITEMS_RAW')} (
               ORDER_ID varchar,
               ITEM_ID varchar,
               SKU varchar,
@@ -194,17 +232,57 @@ def ensure_foundation(cursor, scope: str) -> None:
             """
         )
 
+    if sync_taxes(scope):
+        cursor.execute(f"create database if not exists {sdp_taxes_database}")
+        cursor.execute(f"create schema if not exists {ident(sdp_taxes_database, sdp_in_schema)}")
+        cursor.execute(
+            f"""
+            create or replace transient table {ident(sdp_taxes_database, sdp_in_schema, 'EXT_TAXES_RAW')} (
+              TAX_CODE varchar,
+              TAX_NAME varchar,
+              JURISDICTION varchar,
+              RATE number(38, 4),
+              EFFECTIVE_AT varchar,
+              LOADED_AT varchar,
+              LOAD_BATCH varchar
+            )
+            """
+        )
+
+    if sync_depot_transactions(scope):
+        cursor.execute(f"create database if not exists {sdp_depot_transactions_database}")
+        cursor.execute(f"create schema if not exists {ident(sdp_depot_transactions_database, sdp_in_schema)}")
+        cursor.execute(
+            f"""
+            create or replace transient table {ident(sdp_depot_transactions_database, sdp_in_schema, 'EXT_DEPOT_TRANSACTIONS_RAW')} (
+              TRANSACTION_ID varchar,
+              CUSTOMER_ID varchar,
+              DEPOT_CODE varchar,
+              TRANSACTION_TYPE varchar,
+              AMOUNT number(38, 2),
+              TRANSACTION_AT varchar,
+              SOURCE_SYSTEM varchar,
+              LOADED_AT varchar,
+              LOAD_BATCH varchar
+            )
+            """
+        )
+
 
 def load_raw_tables() -> None:
     scope = active_scope()
-    sdp_database = os.environ["SNOWFLAKE_SDP_DATABASE"]
+    sdp_orders_database = os.environ["SNOWFLAKE_SDP_ORDERS_DATABASE"]
     sdp_customers_database = os.environ["SNOWFLAKE_SDP_CUSTOMERS_DATABASE"]
+    sdp_taxes_database = os.environ["SNOWFLAKE_SDP_TAXES_DATABASE"]
+    sdp_depot_transactions_database = os.environ["SNOWFLAKE_SDP_DEPOT_TRANSACTIONS_DATABASE"]
     sdp_in_schema = os.environ.get("SNOWFLAKE_SDP_IN_SCHEMA", "INBOUND")
     load_batch = datetime.utcnow().strftime("postgres-seed-%Y%m%dT%H%M%SZ")
 
     orders = fetch_rows(ORDERS_EXPORT_SQL, {"load_batch": load_batch}) if sync_orders(scope) else []
     order_items = fetch_rows(ORDER_ITEMS_EXPORT_SQL) if sync_orders(scope) else []
     customers = fetch_rows(CUSTOMERS_EXPORT_SQL, {"load_batch": load_batch}) if sync_customers(scope) else []
+    taxes = fetch_rows(TAXES_EXPORT_SQL, {"load_batch": load_batch}) if sync_taxes(scope) else []
+    depot_transactions = fetch_rows(DEPOT_TRANSACTIONS_EXPORT_SQL, {"load_batch": load_batch}) if sync_depot_transactions(scope) else []
 
     order_columns = [
         "order_id",
@@ -236,6 +314,26 @@ def load_raw_tables() -> None:
         "customer_created_at",
         "load_batch",
     ]
+    tax_columns = [
+        "tax_code",
+        "tax_name",
+        "jurisdiction",
+        "rate",
+        "effective_at",
+        "loaded_at",
+        "load_batch",
+    ]
+    depot_transaction_columns = [
+        "transaction_id",
+        "customer_id",
+        "depot_code",
+        "transaction_type",
+        "amount",
+        "transaction_at",
+        "source_system",
+        "loaded_at",
+        "load_batch",
+    ]
 
     connection = connect_snowflake()
     try:
@@ -244,7 +342,7 @@ def load_raw_tables() -> None:
             if sync_orders(scope):
                 cursor.executemany(
                     f"""
-                    insert into {ident(sdp_database, sdp_in_schema, 'EXT_ORDERS_RAW')}
+                    insert into {ident(sdp_orders_database, sdp_in_schema, 'EXT_ORDERS_RAW')}
                     (ORDER_ID, CUSTOMER_ID, STATUS, ITEM_COUNT, ORDER_TOTAL, ORDER_CREATED_AT, LOAD_BATCH)
                     values (%s, %s, %s, %s, %s, %s, %s)
                     """,
@@ -252,7 +350,7 @@ def load_raw_tables() -> None:
                 )
                 cursor.executemany(
                     f"""
-                    insert into {ident(sdp_database, sdp_in_schema, 'EXT_ORDER_ITEMS_RAW')}
+                    insert into {ident(sdp_orders_database, sdp_in_schema, 'EXT_ORDER_ITEMS_RAW')}
                     (ORDER_ID, ITEM_ID, SKU, QUANTITY, UNIT_PRICE, LINE_TOTAL, LOADED_AT)
                     values (%s, %s, %s, %s, %s, %s, %s)
                     """,
@@ -267,17 +365,39 @@ def load_raw_tables() -> None:
                     """,
                     rows_to_tuples(customers, customer_columns),
                 )
+            if sync_taxes(scope):
+                cursor.executemany(
+                    f"""
+                    insert into {ident(sdp_taxes_database, sdp_in_schema, 'EXT_TAXES_RAW')}
+                    (TAX_CODE, TAX_NAME, JURISDICTION, RATE, EFFECTIVE_AT, LOADED_AT, LOAD_BATCH)
+                    values (%s, %s, %s, %s, %s, %s, %s)
+                    """,
+                    rows_to_tuples(taxes, tax_columns),
+                )
+            if sync_depot_transactions(scope):
+                cursor.executemany(
+                    f"""
+                    insert into {ident(sdp_depot_transactions_database, sdp_in_schema, 'EXT_DEPOT_TRANSACTIONS_RAW')}
+                    (TRANSACTION_ID, CUSTOMER_ID, DEPOT_CODE, TRANSACTION_TYPE, AMOUNT, TRANSACTION_AT, SOURCE_SYSTEM, LOADED_AT, LOAD_BATCH)
+                    values (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    """,
+                    rows_to_tuples(depot_transactions, depot_transaction_columns),
+                )
             connection.commit()
 
         print(
             {
                 "scope": scope,
-                "snowflake_sdp_database": sdp_database,
+                "snowflake_sdp_orders_database": sdp_orders_database,
                 "snowflake_sdp_customers_database": sdp_customers_database,
+                "snowflake_sdp_taxes_database": sdp_taxes_database,
+                "snowflake_sdp_depot_transactions_database": sdp_depot_transactions_database,
                 "snowflake_sdp_in_schema": sdp_in_schema,
                 "raw_orders": len(orders),
                 "raw_order_items": len(order_items),
                 "raw_customers": len(customers),
+                "raw_taxes": len(taxes),
+                "raw_depot_transactions": len(depot_transactions),
             }
         )
     finally:

@@ -33,6 +33,14 @@ def projects() -> list[dict[str, object]]:
     return [project for project in registry["projects"] if isinstance(project, dict)]
 
 
+def project_slugs() -> int:
+    for project in projects():
+        slug = str(project.get("slug", "")).strip()
+        if slug:
+            print(slug)
+    return 0
+
+
 def project_by_slug(slug: str) -> dict[str, object]:
     normalized_slug = slug.strip()
     for project in projects():
@@ -45,11 +53,14 @@ def project_by_name(project_name: str) -> dict[str, object]:
     normalized_name = project_name.strip()
     for project in projects():
         snowflake_names = project.get("snowflake_project_names", [])
-        if not isinstance(snowflake_names, list):
-            continue
-        for candidate in snowflake_names:
-            if str(candidate).strip() == normalized_name:
-                return project
+        if isinstance(snowflake_names, dict):
+            for candidate in snowflake_names.values():
+                if str(candidate).strip() == normalized_name:
+                    return project
+        elif isinstance(snowflake_names, list):
+            for candidate in snowflake_names:
+                if str(candidate).strip() == normalized_name:
+                    return project
         prefixes = project.get("snowflake_project_name_prefixes", [])
         if not isinstance(prefixes, list):
             continue
@@ -91,6 +102,18 @@ def manifest_publish_keys(slug: str) -> int:
     return 0
 
 
+def product_scopes(slug: str) -> int:
+    project = project_by_slug(slug)
+    scopes = project.get("product_scopes", [])
+    if not isinstance(scopes, list):
+        raise SystemExit(f"invalid product_scopes for project: {slug}")
+    for scope in scopes:
+        text = str(scope).strip()
+        if text:
+            print(text)
+    return 0
+
+
 def prepare_targets(slug: str) -> int:
     project = project_by_slug(slug)
     targets = project.get("prepare_targets", [])
@@ -112,20 +135,22 @@ def prepare_targets(slug: str) -> int:
 def project_name_for_target(slug: str, target_name: str) -> int:
     project = project_by_slug(slug)
     snowflake_names = project.get("snowflake_project_names", [])
-    if not isinstance(snowflake_names, list) or not snowflake_names:
-        raise SystemExit(f"invalid snowflake_project_names for project: {slug}")
-
     target = target_name.strip().lower()
-    if len(snowflake_names) == 1:
+    if isinstance(snowflake_names, dict):
+        if target not in snowflake_names:
+            raise SystemExit(f"invalid target name for project {slug}: {target_name}")
+        print(str(snowflake_names[target]).strip())
+        return 0
+    if isinstance(snowflake_names, list) and snowflake_names:
+        if len(snowflake_names) == 1:
+            print(str(snowflake_names[0]).strip())
+            return 0
+        if target == "prd" and len(snowflake_names) > 1:
+            print(str(snowflake_names[1]).strip())
+            return 0
         print(str(snowflake_names[0]).strip())
         return 0
-
-    if target == "prd" and len(snowflake_names) > 1:
-        print(str(snowflake_names[1]).strip())
-        return 0
-
-    print(str(snowflake_names[0]).strip())
-    return 0
+    raise SystemExit(f"invalid snowflake_project_names for project: {slug}")
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -143,8 +168,13 @@ def build_parser() -> argparse.ArgumentParser:
     manifest_key_parser = subparsers.add_parser("manifest-key")
     manifest_key_parser.add_argument("--project-slug", required=True)
 
+    slugs_parser = subparsers.add_parser("project-slugs")
+
     publish_keys_parser = subparsers.add_parser("manifest-publish-keys")
     publish_keys_parser.add_argument("--project-slug", required=True)
+
+    product_scopes_parser = subparsers.add_parser("product-scopes")
+    product_scopes_parser.add_argument("--project-slug", required=True)
 
     prepare_targets_parser = subparsers.add_parser("prepare-targets")
     prepare_targets_parser.add_argument("--project-slug", required=True)
@@ -164,8 +194,12 @@ def main() -> int:
         return project_dir(args.project_slug)
     if args.command == "manifest-key":
         return manifest_key(args.project_slug)
+    if args.command == "project-slugs":
+        return project_slugs()
     if args.command == "manifest-publish-keys":
         return manifest_publish_keys(args.project_slug)
+    if args.command == "product-scopes":
+        return product_scopes(args.project_slug)
     if args.command == "prepare-targets":
         return prepare_targets(args.project_slug)
     if args.command == "project-name":

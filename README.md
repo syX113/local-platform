@@ -13,8 +13,8 @@ The full bootstrap initializes the local services, reloads deterministic sample 
 The platform repo is the control plane. During GitLab bootstrap it renders and pushes three separate GitLab project repos:
 
 - `proj_source_finnova`: owns the Airflow DAG, the dlt ingestion code, and both SDP dbt projects for the Finnova source
-- `proj_edp_orders`: owns the orders EDP dbt project
-- `proj_edp_customers`: owns the customers EDP dbt project
+- `proj_domain_transactions`: owns the transactions domain dbt project
+- `proj_domain_customer`: owns the customer domain dbt project
 
 The dbt source-of-truth now lives only under `dbt/projects/*`. The old flat `dbt/models` and root `dbt/dbt_project.yml` layout is not used anymore.
 
@@ -604,15 +604,15 @@ docker compose run --rm dbt-executor python /opt/platform/dbt/scripts/zero_copy_
 The local platform keeps a strict separation between the source repo and the hosted/platform GitLab repos.
 
 - source repo: this repository, with Docker assets, Airflow, dlt, dbt, bootstrap scripts, and render logic
-- platform repos: rendered working trees under [gitlab-projects/generated/proj_source_finnova](/Users/taagiti2/Documents/01%20Projects/Valiant/repos/local-platform/gitlab-projects/generated/proj_source_finnova), [gitlab-projects/generated/proj_edp_orders](/Users/taagiti2/Documents/01%20Projects/Valiant/repos/local-platform/gitlab-projects/generated/proj_edp_orders), and [gitlab-projects/generated/proj_edp_customers](/Users/taagiti2/Documents/01%20Projects/Valiant/repos/local-platform/gitlab-projects/generated/proj_edp_customers)
+- platform repos: rendered working trees under [gitlab-projects/generated/proj_source_finnova](/Users/taagiti2/Documents/01%20Projects%20Valiant/repos/local-platform/gitlab-projects/generated/proj_source_finnova), [gitlab-projects/generated/proj_domain_transactions](/Users/taagiti2/Documents/01%20Projects%20Valiant/repos/local-platform/gitlab-projects/generated/proj_domain_transactions), and [gitlab-projects/generated/proj_domain_customer](/Users/taagiti2/Documents/01%20Projects%20Valiant/repos/local-platform/gitlab-projects/generated/proj_domain_customer)
 
 Only the rendered platform repos are pushed to the hosted GitLab instance. The source repo itself is not bootstrapped into GitLab and `bootstrap-gitlab.sh` or `publish-platform-repos.sh` do not add or change a remote on the source repo root.
 
 The ownership split is:
 
 - `proj_source_finnova`: promotes the Airflow DAG, dlt ingestion runtime, and both SDP dbt models for the Finnova source
-- `proj_edp_orders`: promotes only the orders EDP dbt models that consume the SDP access layer
-- `proj_edp_customers`: promotes only the customers EDP dbt models that consume the SDP access layer
+- `proj_domain_transactions`: promotes only the transactions domain dbt models that consume the SDP access layer
+- `proj_domain_customer`: promotes only the customer domain dbt models that consume the SDP access layer
 
 Each generated project ships its own `.gitlab-ci.yml` with isolated CI/CD verification:
 
@@ -648,7 +648,7 @@ Default-branch and PRD pipelines now include real deployment jobs:
 
 The expected GitLab operator flow is:
 
-1. Create a new branch in `proj_source_finnova`, `proj_edp_orders`, or `proj_edp_customers`.
+1. Create a new branch in `proj_source_finnova`, `proj_domain_transactions`, or `proj_domain_customer`.
 2. Wait for the platform webhook handler to create the isolated branch sandbox automatically.
 3. Push commits to that branch and rerun the branch CI pipeline as often as needed.
 4. Open a merge request. The platform creates an MR-scoped sandbox automatically and the MR pipeline validates the candidate there in detail.
