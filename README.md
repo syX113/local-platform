@@ -350,7 +350,7 @@ Current DEV targets after a fresh initialization:
 - Snowflake SDP customers database: `DB_SDP_CUSTOMERS`
 - Snowflake EDP orders database target: `DB_EDP_ORDERS` (not materialized after initialization; branch and MR CI use isolated suffixed databases)
 - Snowflake EDP customers database target after initialization: `DB_EDP_CUSTOMERS`
-- Snowflake dbt project objects after initialization: `DEV_DBT_PROJECT_SOURCE_FINNOVA`, `DEV_DBT_PROJECT_EDP_ORDERS`, `DEV_DBT_PROJECT_EDP_CUSTOMERS`
+- Snowflake dbt project objects after initialization: `DEV_DBT_PROJECT_SOURCE_FINNOVA`, `DEV_DBT_PROJECT_DOMAIN_TRANSACTIONS`, `DEV_DBT_PROJECT_DOMAIN_CUSTOMER`
 - Only the EDP customers database is materialized during initialization; the EDP orders dbt project is deployed but its DEV database is created only by CD deployment or isolated branch/MR test runs
 - DEV SDP runtime image prefix: `local-platform-dev-sdp`
 - DEV EDP runtime image prefix: `local-platform-dev-edp`
@@ -367,7 +367,7 @@ Current PRD targets:
 - Snowflake SDP customers database target after initialization: `PRD_DB_SDP_CUSTOMERS`
 - Snowflake EDP orders database target: `PRD_DB_EDP_ORDERS` (not materialized after initialization; PRD database is created only by PRD CD deployment)
 - Snowflake EDP customers database target after initialization: `PRD_DB_EDP_CUSTOMERS`
-- Snowflake dbt project objects after initialization: `PRD_DBT_PROJECT_SOURCE_FINNOVA`, `PRD_DBT_PROJECT_EDP_ORDERS`, `PRD_DBT_PROJECT_EDP_CUSTOMERS`
+- Snowflake dbt project objects after initialization: `PRD_DBT_PROJECT_SOURCE_FINNOVA`, `PRD_DBT_PROJECT_DOMAIN_TRANSACTIONS`, `PRD_DBT_PROJECT_DOMAIN_CUSTOMER`
 - Only the EDP customers PRD database is materialized during initialization; the EDP orders PRD dbt project is deployed but its PRD database is created only by PRD CD deployment
 - PRD SDP runtime image prefix: `local-platform-prd-sdp`
 - PRD EDP runtime image prefix: `local-platform-prd-edp`

@@ -129,6 +129,12 @@ echo "deploying PRD domain transactions data products"
 bash ./scripts/deploy-edp-prd.sh proj_domain_transactions
 
 echo "validating initialized DEV/PRD source and domain data products"
+export DEV_SNOWFLAKE_SDP_DBT_PROJECT="$(project_registry_project_name_for_target proj_source_finnova dev)"
+export DEV_SNOWFLAKE_EDP_DBT_PROJECT="$(project_registry_project_name_for_target proj_domain_transactions dev)"
+export DEV_SNOWFLAKE_EDP_CUSTOMERS_DBT_PROJECT="$(project_registry_project_name_for_target proj_domain_customer dev)"
+export PRD_SNOWFLAKE_SDP_DBT_PROJECT="$(project_registry_project_name_for_target proj_source_finnova prd)"
+export PRD_SNOWFLAKE_EDP_DBT_PROJECT="$(project_registry_project_name_for_target proj_domain_transactions prd)"
+export PRD_SNOWFLAKE_EDP_CUSTOMERS_DBT_PROJECT="$(project_registry_project_name_for_target proj_domain_customer prd)"
 docker compose run --rm --no-deps dbt-executor python - <<'PY'
 import os
 

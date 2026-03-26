@@ -70,9 +70,9 @@ function Resolve-ScopeConfig {
             $cfg.SnowflakeEdpDatabase = if ($SourceScope -eq "orders") { Get-EnvValue -Name "SNOWFLAKE_EDP_DATABASE" } else { Get-EnvValue -Name "SNOWFLAKE_EDP_CUSTOMERS_DATABASE" }
             $cfg.SnowflakeSdpDbtProject = if ([string]::IsNullOrEmpty((Get-EnvValue -Name "DEV_SNOWFLAKE_SDP_DBT_PROJECT"))) { "DEV_DBT_PROJECT_SOURCE_FINNOVA" } else { Get-EnvValue -Name "DEV_SNOWFLAKE_SDP_DBT_PROJECT" }
             $cfg.SnowflakeEdpDbtProject = if ($SourceScope -eq "orders") {
-                if ([string]::IsNullOrEmpty((Get-EnvValue -Name "DEV_SNOWFLAKE_EDP_DBT_PROJECT"))) { "DEV_DBT_PROJECT_EDP_ORDERS" } else { Get-EnvValue -Name "DEV_SNOWFLAKE_EDP_DBT_PROJECT" }
+                if ([string]::IsNullOrEmpty((Get-EnvValue -Name "DEV_SNOWFLAKE_EDP_DBT_PROJECT"))) { "DEV_DBT_PROJECT_DOMAIN_TRANSACTIONS" } else { Get-EnvValue -Name "DEV_SNOWFLAKE_EDP_DBT_PROJECT" }
             } else {
-                if ([string]::IsNullOrEmpty((Get-EnvValue -Name "DEV_SNOWFLAKE_EDP_CUSTOMERS_DBT_PROJECT"))) { "DEV_DBT_PROJECT_EDP_CUSTOMERS" } else { Get-EnvValue -Name "DEV_SNOWFLAKE_EDP_CUSTOMERS_DBT_PROJECT" }
+                if ([string]::IsNullOrEmpty((Get-EnvValue -Name "DEV_SNOWFLAKE_EDP_CUSTOMERS_DBT_PROJECT"))) { "DEV_DBT_PROJECT_DOMAIN_CUSTOMER" } else { Get-EnvValue -Name "DEV_SNOWFLAKE_EDP_CUSTOMERS_DBT_PROJECT" }
             }
             $cfg.TargetLabel = "dev-$SourceScope"
             $cfg.SnowDbtTargetName = "dev"
@@ -93,9 +93,9 @@ function Resolve-ScopeConfig {
             $cfg.SnowflakeEdpDatabase = if ($SourceScope -eq "orders") { Get-EnvValue -Name "PRD_SNOWFLAKE_EDP_DATABASE" } else { Get-EnvValue -Name "PRD_SNOWFLAKE_EDP_CUSTOMERS_DATABASE" }
             $cfg.SnowflakeSdpDbtProject = if ([string]::IsNullOrEmpty((Get-EnvValue -Name "PRD_SNOWFLAKE_SDP_DBT_PROJECT"))) { "PRD_DBT_PROJECT_SOURCE_FINNOVA" } else { Get-EnvValue -Name "PRD_SNOWFLAKE_SDP_DBT_PROJECT" }
             $cfg.SnowflakeEdpDbtProject = if ($SourceScope -eq "orders") {
-                if ([string]::IsNullOrEmpty((Get-EnvValue -Name "PRD_SNOWFLAKE_EDP_DBT_PROJECT"))) { "PRD_DBT_PROJECT_EDP_ORDERS" } else { Get-EnvValue -Name "PRD_SNOWFLAKE_EDP_DBT_PROJECT" }
+                if ([string]::IsNullOrEmpty((Get-EnvValue -Name "PRD_SNOWFLAKE_EDP_DBT_PROJECT"))) { "PRD_DBT_PROJECT_DOMAIN_TRANSACTIONS" } else { Get-EnvValue -Name "PRD_SNOWFLAKE_EDP_DBT_PROJECT" }
             } else {
-                if ([string]::IsNullOrEmpty((Get-EnvValue -Name "PRD_SNOWFLAKE_EDP_CUSTOMERS_DBT_PROJECT"))) { "PRD_DBT_PROJECT_EDP_CUSTOMERS" } else { Get-EnvValue -Name "PRD_SNOWFLAKE_EDP_CUSTOMERS_DBT_PROJECT" }
+                if ([string]::IsNullOrEmpty((Get-EnvValue -Name "PRD_SNOWFLAKE_EDP_CUSTOMERS_DBT_PROJECT"))) { "PRD_DBT_PROJECT_DOMAIN_CUSTOMER" } else { Get-EnvValue -Name "PRD_SNOWFLAKE_EDP_CUSTOMERS_DBT_PROJECT" }
             }
             $cfg.TargetLabel = "prd-$SourceScope"
             $cfg.SnowDbtTargetName = "prd"

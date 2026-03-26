@@ -400,7 +400,7 @@ def main() -> int:
             export SNOWFLAKE_SDP_IN_SCHEMA="INBOUND"
             export SNOWFLAKE_LOCAL_RAW_SYNC="true"
             export SNOWFLAKE_SDP_DBT_PROJECT="DEV_DBT_PROJECT_SDP_{product_prefix}"
-            export SNOWFLAKE_EDP_DBT_PROJECT="DEV_DBT_PROJECT_EDP_{product_prefix}"
+            export SNOWFLAKE_EDP_DBT_PROJECT="DEV_DBT_PROJECT_DOMAIN_{product_prefix}"
             export SNOW_DBT_TARGET_NAME="dev"
 
             docker compose run --rm --no-deps dlt-extractor python /opt/platform/dlt/snowflake_raw_sync.py | tee "${{ARTIFACT_DIR}}/snowflake_raw_sync.log"

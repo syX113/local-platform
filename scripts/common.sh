@@ -753,6 +753,7 @@ export_prd_runtime_env() {
   local prd_prefix source_dlt_pipeline source_iceberg_namespace source_minio_prefix
   local source_sdp_database source_sdp_customers_database source_sdp_taxes_database source_sdp_depot_transactions_database
   local source_edp_database source_edp_customers_database source_edp_taxes_database source_edp_depot_transactions_database
+  local source_sdp_project_name source_domain_transactions_project_name source_domain_customer_project_name
   local source_system_slug_value
 
   prd_prefix="${PRD_DEPLOYMENT_PREFIX:-PRD}"
@@ -768,6 +769,9 @@ export_prd_runtime_env() {
   source_edp_customers_database="${PRD_SOURCE_EDP_CUSTOMERS_DATABASE:-${SNOWFLAKE_EDP_CUSTOMERS_DATABASE_BASE:-${SNOWFLAKE_EDP_CUSTOMERS_DATABASE:-}}}"
   source_edp_taxes_database="${PRD_SOURCE_EDP_TAXES_DATABASE:-${SNOWFLAKE_EDP_TAXES_DATABASE_BASE:-${SNOWFLAKE_EDP_TAXES_DATABASE:-}}}"
   source_edp_depot_transactions_database="${PRD_SOURCE_EDP_DEPOT_TRANSACTIONS_DATABASE:-${SNOWFLAKE_EDP_DEPOT_TRANSACTIONS_DATABASE_BASE:-${SNOWFLAKE_EDP_DEPOT_TRANSACTIONS_DATABASE:-}}}"
+  source_sdp_project_name="$(project_registry_project_name_for_target proj_source_finnova "${prd_prefix}")"
+  source_domain_transactions_project_name="$(project_registry_project_name_for_target proj_domain_transactions "${prd_prefix}")"
+  source_domain_customer_project_name="$(project_registry_project_name_for_target proj_domain_customer "${prd_prefix}")"
 
   export PRD_DEPLOYMENT_PREFIX="${prd_prefix}"
   export ACTIVE_RUNTIME_ENV="prd"
@@ -809,9 +813,9 @@ export_prd_runtime_env() {
   export PRD_SNOWFLAKE_EDP_DEPOT_TRANSACTIONS_DATABASE="${PRD_SNOWFLAKE_EDP_DEPOT_TRANSACTIONS_DATABASE:-$(prefixed_identifier "${source_edp_depot_transactions_database}" "${prd_prefix}")}"
   export PRD_SDP_RUNTIME_IMAGE_PREFIX="${PRD_SDP_RUNTIME_IMAGE_PREFIX:-local-platform-prd-sdp}"
   export PRD_EDP_RUNTIME_IMAGE_PREFIX="${PRD_EDP_RUNTIME_IMAGE_PREFIX:-local-platform-prd-edp}"
-  export PRD_SNOWFLAKE_SDP_DBT_PROJECT="${PRD_SNOWFLAKE_SDP_DBT_PROJECT:-$(snowflake_dbt_project_object_name source_finnova "${prd_prefix}")}"
-  export PRD_SNOWFLAKE_EDP_DBT_PROJECT="${PRD_SNOWFLAKE_EDP_DBT_PROJECT:-$(snowflake_dbt_project_object_name domain_transactions "${prd_prefix}")}"
-  export PRD_SNOWFLAKE_EDP_CUSTOMERS_DBT_PROJECT="${PRD_SNOWFLAKE_EDP_CUSTOMERS_DBT_PROJECT:-$(snowflake_dbt_project_object_name domain_customer "${prd_prefix}")}"
+  export PRD_SNOWFLAKE_SDP_DBT_PROJECT="${source_sdp_project_name}"
+  export PRD_SNOWFLAKE_EDP_DBT_PROJECT="${source_domain_transactions_project_name}"
+  export PRD_SNOWFLAKE_EDP_CUSTOMERS_DBT_PROJECT="${source_domain_customer_project_name}"
   export PRD_SNOW_DBT_TARGET_NAME="${PRD_SNOW_DBT_TARGET_NAME:-prd}"
 
   export SNOWFLAKE_SDP_DATABASE_BASE="${source_sdp_database}"
@@ -849,6 +853,7 @@ export_dev_runtime_env() {
   local dev_prefix source_dlt_pipeline source_iceberg_namespace source_minio_prefix
   local source_sdp_database source_sdp_customers_database source_sdp_taxes_database source_sdp_depot_transactions_database
   local source_edp_database source_edp_customers_database source_edp_taxes_database source_edp_depot_transactions_database
+  local source_sdp_project_name source_domain_transactions_project_name source_domain_customer_project_name
   local source_system_slug_value
 
   dev_prefix="${DEV_DEPLOYMENT_PREFIX:-DEV}"
@@ -864,6 +869,9 @@ export_dev_runtime_env() {
   source_edp_customers_database="${DEV_SOURCE_EDP_CUSTOMERS_DATABASE:-${SNOWFLAKE_EDP_CUSTOMERS_DATABASE_BASE:-${SNOWFLAKE_EDP_CUSTOMERS_DATABASE:-}}}"
   source_edp_taxes_database="${DEV_SOURCE_EDP_TAXES_DATABASE:-${SNOWFLAKE_EDP_TAXES_DATABASE_BASE:-${SNOWFLAKE_EDP_TAXES_DATABASE:-}}}"
   source_edp_depot_transactions_database="${DEV_SOURCE_EDP_DEPOT_TRANSACTIONS_DATABASE:-${SNOWFLAKE_EDP_DEPOT_TRANSACTIONS_DATABASE_BASE:-${SNOWFLAKE_EDP_DEPOT_TRANSACTIONS_DATABASE:-}}}"
+  source_sdp_project_name="$(project_registry_project_name_for_target proj_source_finnova "${dev_prefix}")"
+  source_domain_transactions_project_name="$(project_registry_project_name_for_target proj_domain_transactions "${dev_prefix}")"
+  source_domain_customer_project_name="$(project_registry_project_name_for_target proj_domain_customer "${dev_prefix}")"
 
   export DEV_DEPLOYMENT_PREFIX="${dev_prefix}"
   export ACTIVE_RUNTIME_ENV="dev"
@@ -905,9 +913,9 @@ export_dev_runtime_env() {
   export DEV_SNOWFLAKE_EDP_DEPOT_TRANSACTIONS_DATABASE="${DEV_SNOWFLAKE_EDP_DEPOT_TRANSACTIONS_DATABASE:-${source_edp_depot_transactions_database}}"
   export DEV_SDP_RUNTIME_IMAGE_PREFIX="${DEV_SDP_RUNTIME_IMAGE_PREFIX:-local-platform-dev-sdp}"
   export DEV_EDP_RUNTIME_IMAGE_PREFIX="${DEV_EDP_RUNTIME_IMAGE_PREFIX:-local-platform-dev-edp}"
-  export DEV_SNOWFLAKE_SDP_DBT_PROJECT="${DEV_SNOWFLAKE_SDP_DBT_PROJECT:-$(snowflake_dbt_project_object_name source_finnova "${dev_prefix}")}"
-  export DEV_SNOWFLAKE_EDP_DBT_PROJECT="${DEV_SNOWFLAKE_EDP_DBT_PROJECT:-$(snowflake_dbt_project_object_name domain_transactions "${dev_prefix}")}"
-  export DEV_SNOWFLAKE_EDP_CUSTOMERS_DBT_PROJECT="${DEV_SNOWFLAKE_EDP_CUSTOMERS_DBT_PROJECT:-$(snowflake_dbt_project_object_name domain_customer "${dev_prefix}")}"
+  export DEV_SNOWFLAKE_SDP_DBT_PROJECT="${source_sdp_project_name}"
+  export DEV_SNOWFLAKE_EDP_DBT_PROJECT="${source_domain_transactions_project_name}"
+  export DEV_SNOWFLAKE_EDP_CUSTOMERS_DBT_PROJECT="${source_domain_customer_project_name}"
   export DEV_SNOW_DBT_TARGET_NAME="${DEV_SNOW_DBT_TARGET_NAME:-dev}"
 
   export SNOWFLAKE_SDP_DATABASE_BASE="${source_sdp_database}"

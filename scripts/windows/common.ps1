@@ -187,6 +187,23 @@ function Ensure-PlatformEnv {
 
     Import-EnvFile -Path $envFile
 
+    $projectEnvValues = @{
+        "DEV_SNOWFLAKE_SDP_DBT_PROJECT" = (Get-ProjectRegistryNameForTarget -ProjectSlug "proj_source_finnova" -TargetName "dev")
+        "PRD_SNOWFLAKE_SDP_DBT_PROJECT" = (Get-ProjectRegistryNameForTarget -ProjectSlug "proj_source_finnova" -TargetName "prd")
+        "DEV_SNOWFLAKE_EDP_DBT_PROJECT" = (Get-ProjectRegistryNameForTarget -ProjectSlug "proj_domain_transactions" -TargetName "dev")
+        "PRD_SNOWFLAKE_EDP_DBT_PROJECT" = (Get-ProjectRegistryNameForTarget -ProjectSlug "proj_domain_transactions" -TargetName "prd")
+        "DEV_SNOWFLAKE_EDP_CUSTOMERS_DBT_PROJECT" = (Get-ProjectRegistryNameForTarget -ProjectSlug "proj_domain_customer" -TargetName "dev")
+        "PRD_SNOWFLAKE_EDP_CUSTOMERS_DBT_PROJECT" = (Get-ProjectRegistryNameForTarget -ProjectSlug "proj_domain_customer" -TargetName "prd")
+        "SNOWFLAKE_SDP_DBT_PROJECT" = (Get-ProjectRegistryNameForTarget -ProjectSlug "proj_source_finnova" -TargetName "dev")
+        "SNOWFLAKE_EDP_DBT_PROJECT" = (Get-ProjectRegistryNameForTarget -ProjectSlug "proj_domain_transactions" -TargetName "dev")
+        "SNOWFLAKE_EDP_CUSTOMERS_DBT_PROJECT" = (Get-ProjectRegistryNameForTarget -ProjectSlug "proj_domain_customer" -TargetName "dev")
+    }
+
+    foreach ($entry in $projectEnvValues.GetEnumerator()) {
+        Set-EnvValue -Name $entry.Key -Value $entry.Value
+        Update-EnvFileValue -Path $envFile -Name $entry.Key -Value $entry.Value
+    }
+
     if ([string]::IsNullOrEmpty((Get-EnvValue -Name "LOCAL_PLATFORM_ROOT"))) {
         Set-EnvValue -Name "LOCAL_PLATFORM_ROOT" -Value $RootDir
         Update-EnvFileValue -Path $envFile -Name "LOCAL_PLATFORM_ROOT" -Value $RootDir
@@ -251,6 +268,61 @@ function Get-LoomManifestObjectKeyForRepo {
     )
 
     return "dbt-loom/$RepoPath/manifest.json.gz"
+}
+
+function Get-ProjectRegistry {
+    $candidates = @(
+        (Join-Path (Get-RepoRoot) "snowflake\project_registry.json"),
+        (Join-Path (Get-RepoRoot) "ci\snowflake\project_registry.json")
+    )
+
+    foreach ($candidate in $candidates) {
+        if (-not (Test-Path -LiteralPath $candidate)) {
+            continue
+        }
+
+        $payload = Get-Content -LiteralPath $candidate -Raw | ConvertFrom-Json
+        if ($null -eq $payload.projects) {
+            throw "invalid project registry: $candidate"
+        }
+
+        return $payload
+    }
+
+    throw "unable to locate project registry JSON"
+}
+
+function Get-ProjectRegistryNameForTarget {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$ProjectSlug,
+        [Parameter(Mandatory = $true)]
+        [ValidateSet("dev", "prd")]
+        [string]$TargetName
+    )
+
+    $registry = Get-ProjectRegistry
+    foreach ($project in $registry.projects) {
+        if ($null -eq $project -or [string]::IsNullOrEmpty([string]$project.slug)) {
+            continue
+        }
+
+        if ([string]$project.slug -ne $ProjectSlug) {
+            continue
+        }
+
+        $names = $project.snowflake_project_names
+        if ($null -eq $names) {
+            break
+        }
+
+        $resolved = [string]($names.$TargetName)
+        if (-not [string]::IsNullOrEmpty($resolved)) {
+            return $resolved.Trim()
+        }
+    }
+
+    throw "unknown Snowflake dbt project for slug '$ProjectSlug' and target '$TargetName'"
 }
 
 function Publish-SourceLoomManifests {
