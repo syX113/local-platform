@@ -84,7 +84,7 @@ required_vars=(
   SNOWFLAKE_EDP_IN_SCHEMA
   SNOWFLAKE_EDP_CORE_SCHEMA
   SNOWFLAKE_EDP_ACC_SCHEMA
-  SNOWFLAKE_SDP_DATABASE
+  SNOWFLAKE_SDP_ORDERS_DATABASE
   SNOWFLAKE_SDP_CUSTOMERS_DATABASE
   SNOWFLAKE_SDP_TAXES_DATABASE
   SNOWFLAKE_SDP_DEPOT_TRANSACTIONS_DATABASE
@@ -149,7 +149,7 @@ source_checks = {
     },
     "proj_domain_transactions": {
         "orders": (
-            "SNOWFLAKE_SDP_DATABASE",
+            "SNOWFLAKE_SDP_ORDERS_DATABASE",
             {
                 "T_ORDERS_ORDER_GRAIN": 30,
                 "T_ORDERS_CUSTOMER_GRAIN": 12,
@@ -213,13 +213,13 @@ if [ "${skip_dbt}" != "true" ]; then
     "${SNOWFLAKE_EDP_DBT_PROJECT}" \
     parse | tee "${ARTIFACT_DIR}/dbt_parse.log"
 
-  bash "${SCRIPT_DIR}/prepare-snowflake-dbt-target.sh" \
-    "${project_slug}" \
-    "${SNOWFLAKE_EDP_DBT_PROJECT}" | tee "${ARTIFACT_DIR}/dbt_prepare.log"
-
+  # The upstream source project is vendored as a local dbt package so that
+  # ref('<source project>', ...) resolves. Excluding it keeps the domain build
+  # inside its own data-product boundary instead of rebuilding and overwriting
+  # the source product tables owned by another repository.
   bash "${SCRIPT_DIR}/execute-snowflake-dbt-project.sh" \
     "${SNOWFLAKE_EDP_DBT_PROJECT}" \
-    build | tee "${ARTIFACT_DIR}/dbt_build.log"
+    build --exclude "package:${upstream_project_slug}" | tee "${ARTIFACT_DIR}/dbt_build.log"
 fi
 
 docker compose run --rm --no-deps -e "PROJECT_SLUG=${project_slug}" dbt-executor python - <<'PY' | tee "${ARTIFACT_DIR}/snowflake_validation.txt"

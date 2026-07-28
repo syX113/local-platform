@@ -92,7 +92,8 @@
           ]
         }
       ],
-      "manifest_object_key": "dbt-loom/proj_domain_customer/manifest.json.gz"
+      "manifest_object_key": "dbt-loom/proj_domain_customer/manifest.json.gz",
+      "zero_copy_fact_table": "FCT_CUSTOMER_VALUE_STAR"
     },
     {
       "slug": "proj_domain_transactions",
@@ -129,7 +130,8 @@
           ]
         }
       ],
-      "manifest_object_key": "dbt-loom/proj_domain_transactions/manifest.json.gz"
+      "manifest_object_key": "dbt-loom/proj_domain_transactions/manifest.json.gz",
+      "zero_copy_fact_table": "FCT_ORDER_REVENUE_STAR"
     }
   ]
 }

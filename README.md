@@ -504,9 +504,9 @@ The Unix/macOS commands are the `.sh` entrypoints under `scripts/`. Windows host
 - `./scripts/verify-ingestion-promotion.sh`
   Validates the source ingestion path only: PostgreSQL -> Airflow -> dlt -> MinIO/Iceberg.
 - `./scripts/verify-sdp-promotion.sh`
-  Validates the SDP Snowflake/dbt promotion path. It deploys the SDP Snowflake dbt project object and executes `parse`, `run`, and `test` inside Snowflake. Internal `--skip-foundation`, `--skip-raw-sync`, and `--skip-dbt` flags exist for bootstrap and CI reuse.
+  Validates the SDP Snowflake/dbt promotion path. It deploys the SDP Snowflake dbt project object and executes `parse`, `run`, and `test` inside Snowflake. Internal `--skip-foundation`, `--skip-raw-sync`, `--skip-dbt`, and `--skip-deploy` flags exist for bootstrap and CI reuse. `--skip-deploy` reuses an already deployed project object and only rebuilds the selected scope, which is what the multi-scope deployment scripts use.
 - `./scripts/verify-edp-promotion.sh`
-  Validates the EDP Snowflake/dbt promotion path. It deploys the EDP Snowflake dbt project object and executes `parse`, `run`, and `test` inside Snowflake. Internal `--skip-foundation` and `--skip-dbt` flags exist for bootstrap and CI reuse.
+  Validates the EDP Snowflake/dbt promotion path. It deploys the EDP Snowflake dbt project object and executes `parse`, `run`, and `test` inside Snowflake. The upstream source project is vendored as a local dbt package so cross-project `ref()` resolves, but it is excluded from the build so a domain never rebuilds or overwrites the source data product. Internal `--skip-foundation` and `--skip-dbt` flags exist for bootstrap and CI reuse.
 - `./scripts/deploy-airflow-dag.sh dev|prd|current orders|customers`
   Deploys the selected scoped Airflow DAG wrapper into the shared Airflow service so the source ingestion pipelines are available separately for `orders` and `customers` in DEV, PRD, or CI sandbox mode.
 - `./scripts/deploy-snowflake-dbt-project.sh`
@@ -516,7 +516,7 @@ The Unix/macOS commands are the `.sh` entrypoints under `scripts/`. Windows host
 - `./scripts/drop-snowflake-dbt-project.sh`
   Drops a Snowflake dbt project object and removes its staged project files from the Snowflake control stage.
 - `./scripts/deploy-sdp-dev.sh`  
-  Deploys the owned SDP artifacts into the shared DEV target automatically after merge: refreshes the shared Airflow services in place, deploys both `DEV_` source DAGs (`orders` and `customers`), validates both ingestion paths again, and deploys plus executes the shared source dbt project object natively in Snowflake.
+  Deploys the owned SDP artifacts into the shared DEV target automatically after merge: refreshes the shared Airflow services in place, applies the Snowflake foundation and deploys the shared source dbt project object once, then per source scope deploys the `DEV_` DAG, validates the ingestion path, and rebuilds only that scope natively in Snowflake.
 - `./scripts/deploy-edp-dev.sh`  
   Deploys the owned EDP artifacts into the shared DEV target automatically after merge by deploying plus executing the EDP dbt project object natively in Snowflake.
 - `./scripts/deploy-sdp-prd.sh`
@@ -539,8 +539,8 @@ The Unix/macOS commands are the `.sh` entrypoints under `scripts/`. Windows host
 
 ### Branch Sandbox Lifecycle
 
-- `./scripts/manage-branch-sandbox.sh`
-  Manual helper to create or destroy a branch sandbox outside of the automatic GitLab webhook flow.
+- `./scripts/manage-branch-sandbox.sh provision|destroy <project_slug> <gitlab_project_path_slug> <branch> [default_branch]`
+  Manual helper to create or destroy a branch sandbox outside of the automatic GitLab webhook flow. `<project_slug>` is a registry slug such as `proj_source_finnova`, `proj_domain_transactions`, or `proj_domain_customer`.
 - `./scripts/prepare-ci-sandbox.sh`
   Internal CI helper that creates or reuses the Snowflake clone environment and, for SDP, the isolated MinIO/Iceberg namespace.
 - `./scripts/cleanup-ci-sandbox.sh`

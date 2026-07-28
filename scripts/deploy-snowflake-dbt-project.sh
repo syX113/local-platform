@@ -22,32 +22,9 @@ profile_schema="${SNOWFLAKE_CONTROL_SCHEMA}"
 
 container_project_dir="$(resolve_container_dbt_project_dir "${project_slug}")"
 
-run_with_retry "${SNOW_DBT_RETRY_ATTEMPTS:-4}" "${SNOW_DBT_RETRY_SLEEP_SECONDS:-5}" \
-  docker compose run --rm --no-deps \
-    -e "SNOWFLAKE_ACCOUNT=${SNOWFLAKE_ACCOUNT}" \
-    -e "SNOWFLAKE_USER=${SNOWFLAKE_USER}" \
-    -e "SNOWFLAKE_PASSWORD=${SNOWFLAKE_PASSWORD}" \
-    -e "SNOWFLAKE_ROLE=${SNOWFLAKE_ROLE}" \
-    -e "SNOWFLAKE_WAREHOUSE=${SNOWFLAKE_WAREHOUSE}" \
-    -e "MINIO_MANIFEST_BUCKET=${MINIO_MANIFEST_BUCKET:-}" \
-    -e "SNOWFLAKE_SDP_ORDERS_DATABASE=${SNOWFLAKE_SDP_ORDERS_DATABASE:-}" \
-    -e "SNOWFLAKE_SDP_CUSTOMERS_DATABASE=${SNOWFLAKE_SDP_CUSTOMERS_DATABASE:-}" \
-    -e "SNOWFLAKE_SDP_TAXES_DATABASE=${SNOWFLAKE_SDP_TAXES_DATABASE:-}" \
-    -e "SNOWFLAKE_SDP_DEPOT_TRANSACTIONS_DATABASE=${SNOWFLAKE_SDP_DEPOT_TRANSACTIONS_DATABASE:-}" \
-    -e "SNOWFLAKE_SDP_IN_SCHEMA=${SNOWFLAKE_SDP_IN_SCHEMA:-}" \
-    -e "SNOWFLAKE_SDP_CORE_SCHEMA=${SNOWFLAKE_SDP_CORE_SCHEMA:-}" \
-    -e "SNOWFLAKE_SDP_ACC_SCHEMA=${SNOWFLAKE_SDP_ACC_SCHEMA:-}" \
-    -e "SNOWFLAKE_EDP_ORDERS_DATABASE=${SNOWFLAKE_EDP_ORDERS_DATABASE:-}" \
-    -e "SNOWFLAKE_EDP_CUSTOMERS_DATABASE=${SNOWFLAKE_EDP_CUSTOMERS_DATABASE:-}" \
-    -e "SNOWFLAKE_EDP_TAXES_DATABASE=${SNOWFLAKE_EDP_TAXES_DATABASE:-}" \
-    -e "SNOWFLAKE_EDP_DEPOT_TRANSACTIONS_DATABASE=${SNOWFLAKE_EDP_DEPOT_TRANSACTIONS_DATABASE:-}" \
-    -e "SNOWFLAKE_EDP_IN_SCHEMA=${SNOWFLAKE_EDP_IN_SCHEMA:-}" \
-    -e "SNOWFLAKE_EDP_CORE_SCHEMA=${SNOWFLAKE_EDP_CORE_SCHEMA:-}" \
-    -e "SNOWFLAKE_EDP_ACC_SCHEMA=${SNOWFLAKE_EDP_ACC_SCHEMA:-}" \
-    dbt-executor \
-    python /opt/platform/dbt/scripts/ensure_target_databases.py \
-      "${project_slug}"
-
+# The Snowflake dbt project deploy already creates every registered target
+# database and schema for the project before uploading the sources, so no
+# separate preparation pass is needed here.
 run_with_retry "${SNOW_DBT_RETRY_ATTEMPTS:-4}" "${SNOW_DBT_RETRY_SLEEP_SECONDS:-5}" \
   docker compose run --rm --no-deps \
     -e "SNOWFLAKE_ACCOUNT=${SNOWFLAKE_ACCOUNT}" \

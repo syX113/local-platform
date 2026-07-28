@@ -18,6 +18,7 @@ scope="${SOURCE_SCOPE:-all}"
 skip_foundation="false"
 skip_raw_sync="false"
 skip_dbt="false"
+skip_deploy="false"
 
 while [ $# -gt 0 ]; do
   case "${1}" in
@@ -33,6 +34,9 @@ while [ $# -gt 0 ]; do
       ;;
     --skip-dbt)
       skip_dbt="true"
+      ;;
+    --skip-deploy)
+      skip_deploy="true"
       ;;
     *)
       echo "unsupported argument: ${1}" >&2
@@ -62,7 +66,6 @@ required_vars=(
   SNOWFLAKE_SDP_CORE_SCHEMA
   SNOWFLAKE_SDP_ACC_SCHEMA
 )
-
 for key in "${required_vars[@]}"; do
   if [ -z "${!key:-}" ]; then
     echo "missing required SDP promotion variable: ${key}" >&2
@@ -102,11 +105,11 @@ if scope in {"all", "orders"}:
     queries.update(
         {
             "sdp_ext_raw_orders": (
-                f"select count(*) from {ident(os.environ['SNOWFLAKE_SDP_DATABASE'], os.environ['SNOWFLAKE_SDP_IN_SCHEMA'], 'EXT_ORDERS_RAW')}",
+                f"select count(*) from {ident(os.environ['SNOWFLAKE_SDP_ORDERS_DATABASE'], os.environ['SNOWFLAKE_SDP_IN_SCHEMA'], 'EXT_ORDERS_RAW')}",
                 30,
             ),
             "sdp_ext_raw_order_items": (
-                f"select count(*) from {ident(os.environ['SNOWFLAKE_SDP_DATABASE'], os.environ['SNOWFLAKE_SDP_IN_SCHEMA'], 'EXT_ORDER_ITEMS_RAW')}",
+                f"select count(*) from {ident(os.environ['SNOWFLAKE_SDP_ORDERS_DATABASE'], os.environ['SNOWFLAKE_SDP_IN_SCHEMA'], 'EXT_ORDER_ITEMS_RAW')}",
                 60,
             ),
         }
@@ -172,20 +175,18 @@ if [ "${skip_dbt}" != "true" ]; then
     dbt_select_args=(--select "${scope}")
   fi
 
-  bash "${SCRIPT_DIR}/deploy-snowflake-dbt-project.sh" \
-    proj_source_finnova \
-    "${SNOWFLAKE_SDP_DBT_PROJECT}" \
-    "${SNOWFLAKE_SDP_DATABASE}" \
-    "${SNOWFLAKE_SDP_CORE_SCHEMA}" \
-    "${dbt_target_name}" | tee "${ARTIFACT_DIR}/dbt_deploy.log"
+  if [ "${skip_deploy}" != "true" ]; then
+    bash "${SCRIPT_DIR}/deploy-snowflake-dbt-project.sh" \
+      proj_source_finnova \
+      "${SNOWFLAKE_SDP_DBT_PROJECT}" \
+      "${SNOWFLAKE_SDP_DATABASE}" \
+      "${SNOWFLAKE_SDP_CORE_SCHEMA}" \
+      "${dbt_target_name}" | tee "${ARTIFACT_DIR}/dbt_deploy.log"
 
-  bash "${SCRIPT_DIR}/execute-snowflake-dbt-project.sh" \
-    "${SNOWFLAKE_SDP_DBT_PROJECT}" \
-    parse | tee "${ARTIFACT_DIR}/dbt_parse.log"
-
-  bash "${SCRIPT_DIR}/prepare-snowflake-dbt-target.sh" \
-    proj_source_finnova \
-    "${SNOWFLAKE_SDP_DBT_PROJECT}" | tee "${ARTIFACT_DIR}/dbt_prepare.log"
+    bash "${SCRIPT_DIR}/execute-snowflake-dbt-project.sh" \
+      "${SNOWFLAKE_SDP_DBT_PROJECT}" \
+      parse | tee "${ARTIFACT_DIR}/dbt_parse.log"
+  fi
 
   bash "${SCRIPT_DIR}/execute-snowflake-dbt-project.sh" \
     "${SNOWFLAKE_SDP_DBT_PROJECT}" \
@@ -208,31 +209,31 @@ if scope in {"all", "orders"}:
     queries.update(
         {
             "sdp_ext_raw_orders": (
-                f"select count(*) from {ident(os.environ['SNOWFLAKE_SDP_DATABASE'], os.environ['SNOWFLAKE_SDP_IN_SCHEMA'], 'EXT_ORDERS_RAW')}",
+                f"select count(*) from {ident(os.environ['SNOWFLAKE_SDP_ORDERS_DATABASE'], os.environ['SNOWFLAKE_SDP_IN_SCHEMA'], 'EXT_ORDERS_RAW')}",
                 30,
             ),
             "sdp_ext_raw_order_items": (
-                f"select count(*) from {ident(os.environ['SNOWFLAKE_SDP_DATABASE'], os.environ['SNOWFLAKE_SDP_IN_SCHEMA'], 'EXT_ORDER_ITEMS_RAW')}",
+                f"select count(*) from {ident(os.environ['SNOWFLAKE_SDP_ORDERS_DATABASE'], os.environ['SNOWFLAKE_SDP_IN_SCHEMA'], 'EXT_ORDER_ITEMS_RAW')}",
                 60,
             ),
             "sdp_core_orders_clean": (
-                f"select count(*) from {ident(os.environ['SNOWFLAKE_SDP_DATABASE'], os.environ['SNOWFLAKE_SDP_CORE_SCHEMA'], 'T_ORDERS_CLEAN')}",
+                f"select count(*) from {ident(os.environ['SNOWFLAKE_SDP_ORDERS_DATABASE'], os.environ['SNOWFLAKE_SDP_CORE_SCHEMA'], 'T_ORDERS_CLEAN')}",
                 30,
             ),
             "sdp_core_order_items_clean": (
-                f"select count(*) from {ident(os.environ['SNOWFLAKE_SDP_DATABASE'], os.environ['SNOWFLAKE_SDP_CORE_SCHEMA'], 'T_ORDER_ITEMS_CLEAN')}",
+                f"select count(*) from {ident(os.environ['SNOWFLAKE_SDP_ORDERS_DATABASE'], os.environ['SNOWFLAKE_SDP_CORE_SCHEMA'], 'T_ORDER_ITEMS_CLEAN')}",
                 60,
             ),
             "sdp_access_orders_order_grain": (
-                f"select count(*) from {ident(os.environ['SNOWFLAKE_SDP_DATABASE'], os.environ['SNOWFLAKE_SDP_ACC_SCHEMA'], 'T_ORDERS_ORDER_GRAIN')}",
+                f"select count(*) from {ident(os.environ['SNOWFLAKE_SDP_ORDERS_DATABASE'], os.environ['SNOWFLAKE_SDP_ACC_SCHEMA'], 'T_ORDERS_ORDER_GRAIN')}",
                 30,
             ),
             "sdp_access_orders_customer_grain": (
-                f"select count(*) from {ident(os.environ['SNOWFLAKE_SDP_DATABASE'], os.environ['SNOWFLAKE_SDP_ACC_SCHEMA'], 'T_ORDERS_CUSTOMER_GRAIN')}",
+                f"select count(*) from {ident(os.environ['SNOWFLAKE_SDP_ORDERS_DATABASE'], os.environ['SNOWFLAKE_SDP_ACC_SCHEMA'], 'T_ORDERS_CUSTOMER_GRAIN')}",
                 12,
             ),
             "sdp_access_order_lines_order_grain": (
-                f"select count(*) from {ident(os.environ['SNOWFLAKE_SDP_DATABASE'], os.environ['SNOWFLAKE_SDP_ACC_SCHEMA'], 'T_ORDER_LINES_ORDER_GRAIN')}",
+                f"select count(*) from {ident(os.environ['SNOWFLAKE_SDP_ORDERS_DATABASE'], os.environ['SNOWFLAKE_SDP_ACC_SCHEMA'], 'T_ORDER_LINES_ORDER_GRAIN')}",
                 60,
             ),
         }

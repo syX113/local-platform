@@ -431,53 +431,6 @@ def execute_project(*, project_name: str, dbt_command: str, command_args: list[s
     )
 
 
-def run_local_dbt(
-    *,
-    project_dir: Path,
-    project_slug: str | None = None,
-    database: str,
-    schema: str,
-    target_name: str,
-    dbt_args: list[str],
-    connection_database: str | None = None,
-    connection_schema: str | None = None,
-    enable_loom: bool = True,
-) -> None:
-    profile_database = connection_database or database
-    profile_schema = connection_schema or schema
-    prepared_dir = prepare_project_source(
-        project_dir,
-        project_slug=project_slug,
-        database=profile_database,
-        schema=profile_schema,
-        target_name=target_name,
-        enable_loom=enable_loom,
-    )
-    try:
-        loom_config_path = prepared_dir / "dbt_loom.config.yml" if enable_loom else None
-        extra_env = {"DBT_LOOM_CONFIG": str(loom_config_path)} if loom_config_path and loom_config_path.exists() else None
-        completed = subprocess.run(
-            [
-                shutil.which("dbt") or "dbt",
-                *dbt_args,
-                "--profiles-dir",
-                str(prepared_dir),
-                "--project-dir",
-                str(prepared_dir),
-                "--target",
-                target_name,
-            ],
-            check=False,
-            text=True,
-            env=snow_env(extra_env),
-            cwd=str(prepared_dir),
-        )
-        if completed.returncode != 0:
-            raise SystemExit(completed.returncode)
-    finally:
-        shutil.rmtree(prepared_dir.parent, ignore_errors=True)
-
-
 def prepare_target(
     *,
     project_dir: Path,
@@ -487,22 +440,38 @@ def prepare_target(
     target_name: str,
     schemas: list[str],
 ) -> None:
-    run_local_dbt(
-        project_dir=project_dir,
-        project_slug=project_slug,
-        database=database,
-        schema=schema,
-        target_name=target_name,
-        enable_loom=False,
-        dbt_args=[
-            "run-operation",
-            "ensure_target_database_and_schemas",
-            "--args",
-            json.dumps({"database_name": database, "schemas": schemas}),
-        ],
-        connection_database=control_database(),
-        connection_schema=control_schema(),
+    """Create the target database and schemas if they do not exist yet.
+
+    This runs as plain DDL over a single Snowflake connection instead of a local
+    ``dbt run-operation``. Spawning dbt required copying the whole project tree,
+    resolving packages and starting a dbt process for every single target, which
+    dominated deployment time while producing exactly the same DDL.
+    """
+    del project_dir, project_slug, schema, target_name
+
+    ordered_schemas = list(dict.fromkeys(name for name in schemas if name.strip()))
+    if not database.strip() or not ordered_schemas:
+        return
+
+    connection = snowflake.connector.connect(
+        account=env("SNOWFLAKE_ACCOUNT"),
+        user=env("SNOWFLAKE_USER"),
+        password=env("SNOWFLAKE_PASSWORD"),
+        role=env("SNOWFLAKE_ROLE"),
+        warehouse=env("SNOWFLAKE_WAREHOUSE"),
+        autocommit=True,
     )
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute(f"use role {ident(env('SNOWFLAKE_ROLE'))}")
+            cursor.execute(f"use warehouse {ident(env('SNOWFLAKE_WAREHOUSE'))}")
+            cursor.execute(f"create database if not exists {ident(database)}")
+            for schema_name in ordered_schemas:
+                cursor.execute(f"create schema if not exists {ident(database, schema_name)}")
+    finally:
+        connection.close()
+
+    print({"prepared_database": database, "prepared_schemas": ordered_schemas})
 
 
 def drop_project(project_name: str) -> None:

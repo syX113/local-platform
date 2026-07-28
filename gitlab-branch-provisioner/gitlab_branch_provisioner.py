@@ -106,16 +106,19 @@ def wait_for_bootstrap() -> tuple[str, list[dict[str, str]]]:
         projects = [
             {
                 "kind": "sdp",
+                "registry_slug": "proj_source_finnova",
                 "id": projects_env.get("GITLAB_SDP_PROJECT_ID", ""),
                 "path": projects_env.get("GITLAB_SDP_PROJECT_PATH", ""),
             },
             {
                 "kind": "edp",
+                "registry_slug": "proj_domain_transactions",
                 "id": projects_env.get("GITLAB_EDP_PROJECT_ID", ""),
                 "path": projects_env.get("GITLAB_EDP_PROJECT_PATH", ""),
             },
             {
                 "kind": "edp",
+                "registry_slug": "proj_domain_customer",
                 "id": projects_env.get("GITLAB_EDP_CUSTOMERS_PROJECT_ID", ""),
                 "path": projects_env.get("GITLAB_EDP_CUSTOMERS_PROJECT_PATH", ""),
             },
@@ -172,12 +175,12 @@ def persist_mr_state(known: dict[str, dict[str, str]]) -> None:
     save_state(MR_STATE_FILE, sorted(known.values(), key=lambda item: (item["project_kind"], item["mr_iid"])))
 
 
-def run_manage(action: str, project_kind: str, project_slug: str, branch_name: str, default_branch: str) -> None:
+def run_manage(action: str, registry_slug: str, project_slug: str, branch_name: str, default_branch: str) -> None:
     command = [
         "bash",
         str(ROOT_DIR / "scripts" / "manage-branch-sandbox.sh"),
         action,
-        project_kind,
+        registry_slug,
         project_slug,
         branch_name,
         default_branch,
@@ -212,6 +215,7 @@ def current_branch_entries(token: str, projects: list[dict[str, str]]) -> list[d
                 {
                     "project_id": project["id"],
                     "project_kind": project["kind"],
+                    "registry_slug": project["registry_slug"],
                     "project_path": project["path"],
                     "project_slug": project_slug,
                     "default_branch": default_branch,
@@ -237,6 +241,7 @@ def current_merge_request_entries(token: str, projects: list[dict[str, str]]) ->
                 {
                     "project_id": project["id"],
                     "project_kind": project["kind"],
+                    "registry_slug": project["registry_slug"],
                     "project_path": project["path"],
                     "project_slug": project_slug,
                     "default_branch": default_branch,
@@ -259,7 +264,7 @@ def ensure_entry(entry: dict[str, str]) -> None:
     log(f"detected branch sandbox target {entry['project_kind']}:{entry['branch_name']} -> provision")
     run_manage(
         "provision",
-        entry["project_kind"],
+        entry["registry_slug"],
         entry["project_slug"],
         entry["branch_name"],
         entry["default_branch"],
@@ -283,7 +288,7 @@ def destroy_entry(entry: dict[str, str]) -> None:
     log(f"branch disappeared from GitLab {entry['project_kind']}:{entry['branch_name']} -> destroy")
     run_manage(
         "destroy",
-        entry["project_kind"],
+        entry["registry_slug"],
         entry["project_slug"],
         entry["branch_name"],
         entry["default_branch"],
@@ -312,7 +317,7 @@ def ensure_mr_entry(entry: dict[str, str]) -> None:
         "bash",
         str(ROOT_DIR / "scripts" / "manage-merge-request-sandbox.sh"),
         "provision",
-        entry["project_kind"],
+        entry["registry_slug"],
         entry["project_slug"],
         entry["branch_name"],
         entry["default_branch"],
@@ -353,7 +358,7 @@ def destroy_mr_entry(entry: dict[str, str]) -> None:
         "bash",
         str(ROOT_DIR / "scripts" / "manage-merge-request-sandbox.sh"),
         "destroy",
-        entry["project_kind"],
+        entry["registry_slug"],
         entry["project_slug"],
         entry["branch_name"],
         entry["default_branch"],
@@ -487,6 +492,7 @@ def project_lookup(token: str, projects: list[dict[str, str]], payload: dict[str
             return {
                 "project_id": candidate["id"],
                 "project_kind": candidate["kind"],
+                "registry_slug": candidate["registry_slug"],
                 "project_path": candidate["path"],
                 "project_slug": gitlab_slug(details.get("path_with_namespace", payload_paths[0] if payload_paths else f"root/{candidate['path']}")),
                 "default_branch": details.get("default_branch") or "main",
@@ -501,6 +507,7 @@ def project_lookup(token: str, projects: list[dict[str, str]], payload: dict[str
                 return {
                     "project_id": candidate["id"],
                     "project_kind": candidate["kind"],
+                    "registry_slug": candidate["registry_slug"],
                     "project_path": candidate["path"],
                     "project_slug": gitlab_slug(details.get("path_with_namespace", payload_path or f"root/{candidate['path']}")),
                     "default_branch": details.get("default_branch") or "main",

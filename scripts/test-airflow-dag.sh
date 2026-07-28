@@ -170,7 +170,12 @@ fi
 
 exec_env_args=()
 for key in "${env_keys[@]}"; do
-  if [ -n "${!key:-}" ]; then
+  # Forward the variable whenever it is set, including when it is deliberately
+  # set to an empty value. verify-ingestion-promotion.sh blanks the Snowflake and
+  # Open Catalog credentials on purpose so the DAG short-circuits before the
+  # Snowflake tasks; skipping empty values here would leak the credentials that
+  # are already baked into the shared Airflow container environment.
+  if [ -n "${!key+set}" ]; then
     exec_env_args+=(-e "${key}=${!key}")
   fi
 done

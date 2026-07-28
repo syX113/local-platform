@@ -8,11 +8,22 @@ source "${ROOT_DIR}/scripts/common.sh"
 ensure_platform_env
 
 action="${1:?action is required (provision|destroy)}"
-project_kind="${2:?project kind is required (sdp|edp)}"
+project_slug="${2:?project slug is required (proj_source_finnova|proj_domain_transactions|proj_domain_customer)}"
 project_path_slug="${3:?project path slug is required}"
 branch_name="${4:?branch name is required}"
 default_branch="${5:-main}"
 merge_request_iid="${6:?merge request iid is required}"
+
+# prepare-ci-sandbox.sh is driven by the registry project slug, while the state
+# layout is grouped by the coarse sdp/edp kind.
+case "$(project_registry_kind "${project_slug}")" in
+  source) project_kind="sdp" ;;
+  domain) project_kind="edp" ;;
+  *)
+    echo "unsupported project slug for merge request sandbox: ${project_slug}" >&2
+    exit 1
+    ;;
+esac
 
 state_dir="${GITLAB_BRANCH_PROVISIONER_STATE_DIR:-${ROOT_DIR}/gitlab-branch-provisioner/state}"
 
@@ -53,7 +64,7 @@ export CI_MERGE_REQUEST_SOURCE_BRANCH_NAME="${branch_name}"
 
 case "${action}" in
   provision)
-    bash ./scripts/prepare-ci-sandbox.sh "${project_kind}" "${dotenv_path}"
+    bash ./scripts/prepare-ci-sandbox.sh "${project_slug}" "${dotenv_path}"
     printf 'merge request sandbox ready for %s:!%s (%s) at %s\n' "${project_kind}" "${merge_request_iid}" "${branch_name}" "${dotenv_path}"
     ;;
   destroy)

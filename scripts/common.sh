@@ -113,6 +113,38 @@ ensure_docker_socket_access() {
   esac
 }
 
+# Resolve a reachable Docker daemon endpoint.
+#
+# On macOS the default /var/run/docker.sock is often a stale symlink left behind
+# by a previously installed Docker Desktop, while the active runtime (Rancher
+# Desktop, Colima, OrbStack, Podman) listens on its own user-scoped socket.
+# Without this, every `docker compose` call in the platform scripts fails with
+# "failed to connect to the docker API".
+ensure_docker_daemon_endpoint() {
+  if docker version --format '{{.Server.Version}}' >/dev/null 2>&1; then
+    return 0
+  fi
+
+  local candidate
+  for candidate in \
+    "${HOME}/.rd/docker.sock" \
+    "${HOME}/.colima/default/docker.sock" \
+    "${HOME}/.docker/run/docker.sock" \
+    "${HOME}/.orbstack/run/docker.sock" \
+    "${HOME}/.local/share/containers/podman/machine/podman.sock" \
+    "/var/run/docker.sock"; do
+    [ -S "${candidate}" ] || continue
+    if DOCKER_HOST="unix://${candidate}" docker version --format '{{.Server.Version}}' >/dev/null 2>&1; then
+      export DOCKER_HOST="unix://${candidate}"
+      echo "using docker endpoint: ${DOCKER_HOST}" >&2
+      return 0
+    fi
+  done
+
+  echo "no reachable Docker daemon found; start Docker Desktop, Rancher Desktop, Colima, or OrbStack first" >&2
+  return 1
+}
+
 project_registry_script_path() {
   local candidates=(
     "${ROOT_DIR}/dbt/scripts/project_registry.py"
@@ -551,11 +583,14 @@ load_env_preserving_existing() {
   preserved_env="$(mktemp)"
 
   # Use null-delimited env output so CI variables containing newlines do not
-  # corrupt the restore file.
+  # corrupt the restore file. Empty values are preserved as well: callers such as
+  # verify-ingestion-promotion.sh blank credentials on purpose to scope a run,
+  # and dropping those would silently restore the value from the env file.
   while IFS='=' read -r -d '' key value; do
-    if [ -n "${value}" ]; then
-      printf 'export %s=%q\n' "${key}" "${value}"
-    fi
+    case "${key}" in
+      [!A-Za-z_]*|*[!A-Za-z0-9_]*) continue ;;
+    esac
+    printf 'export %s=%q\n' "${key}" "${value}"
   done < <(env -0) > "${preserved_env}"
 
   set -a
@@ -631,6 +666,7 @@ ensure_platform_env() {
 
   load_env_preserving_existing .env
   ensure_docker_cli_runtime
+  ensure_docker_daemon_endpoint
   ensure_docker_socket_access
 
   export AIRFLOW_UID="${AIRFLOW_UID:-50000}"

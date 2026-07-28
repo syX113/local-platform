@@ -36,9 +36,6 @@ if [ -n "${SNOWFLAKE_ACCOUNT:-}" ] && [ -n "${SNOWFLAKE_USER:-}" ] && [ -n "${SN
     "${SNOWFLAKE_SDP_DATABASE}" \
     "${SNOWFLAKE_SDP_CORE_SCHEMA}" \
     dev
-  bash ./scripts/prepare-snowflake-dbt-target.sh \
-    proj_source_finnova \
-    "${SNOWFLAKE_SDP_DBT_PROJECT}"
   bash ./scripts/execute-snowflake-dbt-project.sh "${SNOWFLAKE_SDP_DBT_PROJECT}" build
   bash ./scripts/deploy-edp-dev.sh proj_domain_transactions
   bash ./scripts/deploy-edp-dev.sh proj_domain_customer

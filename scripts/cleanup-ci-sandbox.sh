@@ -79,20 +79,12 @@ if [ -n "${SNOWFLAKE_ACCOUNT:-}" ] && [ -n "${SNOWFLAKE_USER:-}" ] && [ -n "${SN
     python /opt/platform/dbt/scripts/manage_ci_clones.py drop
 fi
 
-if [ -n "${SNOWFLAKE_SDP_DBT_PROJECT:-}" ]; then
-  bash "${SCRIPT_DIR}/drop-snowflake-dbt-project.sh" "${SNOWFLAKE_SDP_DBT_PROJECT}" || true
-fi
-
-if [ -n "${SNOWFLAKE_EDP_DBT_PROJECT:-}" ]; then
-  bash "${SCRIPT_DIR}/drop-snowflake-dbt-project.sh" "${SNOWFLAKE_EDP_DBT_PROJECT}" || true
-fi
-
-if [ -n "${SNOWFLAKE_EDP_ORDERS_DBT_PROJECT:-}" ]; then
-  bash "${SCRIPT_DIR}/drop-snowflake-dbt-project.sh" "${SNOWFLAKE_EDP_ORDERS_DBT_PROJECT}" || true
-fi
-
-if [ -n "${SNOWFLAKE_EDP_CUSTOMERS_DBT_PROJECT:-}" ]; then
-  bash "${SCRIPT_DIR}/drop-snowflake-dbt-project.sh" "${SNOWFLAKE_EDP_CUSTOMERS_DBT_PROJECT}" || true
+# Only the sandbox-scoped Snowflake dbt project object may be dropped here.
+# Falling back to SNOWFLAKE_SDP_DBT_PROJECT / SNOWFLAKE_EDP_DBT_PROJECT would
+# resolve to the shared DEV project names whenever the sandbox dotenv does not
+# override them, which would delete shared deployments during MR cleanup.
+if [ -n "${CI_SANDBOX_DBT_PROJECT:-}" ]; then
+  bash "${SCRIPT_DIR}/drop-snowflake-dbt-project.sh" "${CI_SANDBOX_DBT_PROJECT}" || true
 fi
 
 rm -f \

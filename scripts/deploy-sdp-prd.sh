@@ -38,6 +38,20 @@ while IFS= read -r scope; do
   source_scopes+=("${scope}")
 done < <(project_registry_product_scopes proj_source_finnova)
 
+# Foundation and the Snowflake dbt project object are scope independent, so they
+# are deployed once here. The per-scope loop below only ingests and rebuilds the
+# models it owns.
+bash "${SCRIPT_DIR}/ensure-snowflake-foundation.sh" | tee "${ARTIFACT_DIR}/snowflake_foundation.log"
+bash "${SCRIPT_DIR}/deploy-snowflake-dbt-project.sh" \
+  proj_source_finnova \
+  "${SNOWFLAKE_SDP_DBT_PROJECT}" \
+  "${SNOWFLAKE_SDP_ORDERS_DATABASE}" \
+  "${SNOWFLAKE_SDP_CORE_SCHEMA}" \
+  "${SNOW_DBT_TARGET_NAME:-prd}" | tee "${ARTIFACT_DIR}/deploy_sdp_dbt_project.log"
+bash "${SCRIPT_DIR}/execute-snowflake-dbt-project.sh" \
+  "${SNOWFLAKE_SDP_DBT_PROJECT}" \
+  parse | tee "${ARTIFACT_DIR}/parse_sdp_dbt_project.log"
+
 for scope in "${source_scopes[@]}"; do
   [ -n "${scope}" ] || continue
   echo "deploying SDP source scope: ${scope}"
@@ -48,17 +62,22 @@ for scope in "${source_scopes[@]}"; do
     "${1:-2026-03-07}" \
     "${AIRFLOW_ACTIVE_DAG_ID}" \
     "${airflow_prd_subdir}" | tee "${ARTIFACT_DIR}/verify_ingestion_prd_${scope}.log"
-  SOURCE_SCOPE="${scope}" bash "${SCRIPT_DIR}/verify-sdp-promotion.sh" | tee "${ARTIFACT_DIR}/verify_sdp_prd_${scope}.log"
+  SOURCE_SCOPE="${scope}" bash "${SCRIPT_DIR}/verify-sdp-promotion.sh" \
+    --skip-foundation --skip-deploy | tee "${ARTIFACT_DIR}/verify_sdp_prd_${scope}.log"
 done
 
 publish_source_loom_manifests
 
 cat > "${ARTIFACT_DIR}/summary.txt" <<EOF
 sdp_prd_deploy=passed
+source.scopes=${source_scopes[*]}
 airflow.prd_orders_dag_id=${PRD_ORDERS_AIRFLOW_DAG_ID}
 airflow.prd_customers_dag_id=${PRD_CUSTOMERS_AIRFLOW_DAG_ID}
-snowflake.prd_sdp_database=${SNOWFLAKE_SDP_DATABASE}
-snowflake.prd_edp_database=${SNOWFLAKE_EDP_DATABASE}
+snowflake.prd_sdp_dbt_project=${SNOWFLAKE_SDP_DBT_PROJECT}
+snowflake.prd_sdp_orders_database=${SNOWFLAKE_SDP_ORDERS_DATABASE}
+snowflake.prd_sdp_customers_database=${SNOWFLAKE_SDP_CUSTOMERS_DATABASE}
+snowflake.prd_sdp_taxes_database=${SNOWFLAKE_SDP_TAXES_DATABASE}
+snowflake.prd_sdp_depot_transactions_database=${SNOWFLAKE_SDP_DEPOT_TRANSACTIONS_DATABASE}
 iceberg.prd_namespace=${ICEBERG_NAMESPACE}
 object_store.prd_bucket=${OBJECT_STORE_BUCKET}
 runtime.dlt_image=${DLT_RUNNER_IMAGE}

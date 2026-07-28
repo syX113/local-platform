@@ -13,11 +13,11 @@ models:
   proj_source_finnova:
     orders:
       core:
-        +database: "{{ env_var('SNOWFLAKE_SDP_DATABASE') }}"
+        +database: "{{ env_var('SNOWFLAKE_SDP_ORDERS_DATABASE') }}"
         +schema: "{{ env_var('SNOWFLAKE_SDP_CORE_SCHEMA', 'CORE') }}"
         +materialized: table
       access:
-        +database: "{{ env_var('SNOWFLAKE_SDP_DATABASE') }}"
+        +database: "{{ env_var('SNOWFLAKE_SDP_ORDERS_DATABASE') }}"
         +schema: "{{ env_var('SNOWFLAKE_SDP_ACC_SCHEMA', 'ACCESS') }}"
         +materialized: table
         +access: public

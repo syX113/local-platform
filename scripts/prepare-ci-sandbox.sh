@@ -101,6 +101,7 @@ CI_SANDBOX_MERGE_REQUEST=${CI_MERGE_REQUEST_IID:-}
 CI_SANDBOX_CLONE_ACTION=${clone_action}
 CI_SANDBOX_CLEANUP_MODE=${cleanup_mode}
 CI_SANDBOX_OBJECT_PREFIX=${object_prefix}
+CI_SANDBOX_DBT_PROJECT=${branch_dbt_project}
 ICEBERG_CATALOG_NAME=ci_${project_kind}_${sandbox_kind}_${namespace_suffix}
 SNOWFLAKE_CLONE_OWNER_TOKEN=${clone_owner_token}
 SNOWFLAKE_CLONE_BRANCH_TOKEN=${clone_branch_token}
@@ -124,12 +125,22 @@ default_database_env_name="$(project_registry_default_database_env "${project_sl
 default_database_base_env_name="${default_database_env_name}_BASE"
 default_database_value="${!default_database_env_name:-}"
 default_database_base_value="${!default_database_base_env_name:-${default_database_value}}"
-if [ -n "${default_database_value}" ]; then
-  printf '%s=%s\n' "${default_database_env_name}" "${default_database_value}" >> "${tmp_dotenv_path}"
-fi
-if [ -n "${default_database_base_value}" ]; then
-  printf '%s=%s\n' "${default_database_base_env_name}" "${default_database_base_value}" >> "${tmp_dotenv_path}"
-fi
+
+# The scope loop above already mapped every registered scope database onto its
+# sandbox clone. Only fill the default database entries when the loop did not
+# cover them; re-appending them unconditionally would override the clone name
+# with the shared DEV database and silently break branch isolation.
+append_env_default() {
+  local key="${1:?key is required}"
+  local value="${2:-}"
+
+  [ -n "${value}" ] || return 0
+  grep -q "^${key}=" "${tmp_dotenv_path}" && return 0
+  printf '%s=%s\n' "${key}" "${value}" >> "${tmp_dotenv_path}"
+}
+
+append_env_default "${default_database_env_name}" "${default_database_value}"
+append_env_default "${default_database_base_env_name}" "${default_database_base_value}"
 
 if [ "${project_kind}" = "source" ]; then
   printf 'SNOWFLAKE_SDP_DBT_PROJECT=%s\n' "${branch_dbt_project}" >> "${tmp_dotenv_path}"
