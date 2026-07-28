@@ -614,6 +614,35 @@ The ownership split is:
 - `proj_domain_transactions`: promotes only the transactions domain dbt models that consume the SDP access layer
 - `proj_domain_customer`: promotes only the customer domain dbt models that consume the SDP access layer
 
+## Cross Data Product References
+
+Domain projects reference source data products with cross-project refs, for example
+`ref('proj_source_finnova', 'model_sdp_customers_access_customers_entity_grain')`.
+`dbt-loom` owns that contract, and consumer repositories never contain producer code.
+
+There are two runtimes involved, and they need different things:
+
+- `dbt-core`, which runs in the platform/CI container and **can** load the `dbt-loom` plugin
+- Snowflake-native dbt, which runs the deployed project object and **cannot** load plugins
+
+The workflow therefore splits the responsibility:
+
+1. **Publish.** After a successful SDP deployment, `publish_source_loom_manifests` parses the source project with dbt-core and uploads its manifest to the MinIO/S3 bucket `dbt-manifests`, one key per consuming domain.
+2. **Fetch and retarget.** When a domain project is deployed, the manifest is fetched and its node databases are rewritten to the currently active target, so DEV, PRD and branch/MR zero-copy clones resolve to the right physical relations.
+3. **Validate with dbt-loom.** `validate_upstream_contract` runs a dbt-core `dbt parse` of the domain project with `DBT_LOOM_CONFIG` set and no vendored code. The plugin injects the producer manifest and resolves every cross-project `ref`. This enforces the producer's `access` settings, so a consumer referencing a `protected` `CORE` model fails here with `... is not allowed because the referenced node is protected`, before anything is deployed.
+4. **Adapt for Snowflake.** `build_upstream_contract_package` turns the same manifest into a generated stub dbt package: one placeholder model per `public` upstream node, carrying only `database`, `schema` and `alias`. This is what lets `ref('<source project>', ...)` resolve inside Snowflake-native dbt.
+5. **Deploy.** Loom config, manifests and runtime logs are stripped from the uploaded artifact, so the Snowflake dbt project object contains only the domain models plus the contract stub package.
+6. **Execute.** `snow_dbt_cli.py` automatically appends `--exclude package:<upstream project>` to every selector-aware Snowflake dbt execution, so the stubs are never built and producer-owned relations are never rewritten.
+
+What this gives you:
+
+- consumer repositories contain no producer business logic, so the products are decoupled and independently deployable
+- only nodes the producer marks `+access: public` (the `ACCESS` layer) are consumable, and that is enforced by dbt-loom in step 3
+- if a producer moves a data product to another database, consumers pick it up from the next published manifest without a code change
+- contract drift fails in CI, not in Snowflake
+
+Note: the platform currently implements the SDP and EDP tiers only. There is no CDP (consumer data product) tier in the registry, data products, dbt projects, or scaffolders yet. The same publish/validate/adapt flow extends to it unchanged.
+
 Each generated project ships its own `.gitlab-ci.yml` with isolated CI/CD verification:
 
 - the platform auto-provisions a branch sandbox from GitLab webhook events when a new non-default branch appears in GitLab

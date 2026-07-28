@@ -16,7 +16,7 @@ from snow_dbt_cli import default_database_for_project, default_schema_for_projec
 
 
 SOURCE_SCOPE_TO_DATABASE_ENV = {
-    "orders": "SNOWFLAKE_SDP_DATABASE",
+    "orders": "SNOWFLAKE_SDP_ORDERS_DATABASE",
     "customers": "SNOWFLAKE_SDP_CUSTOMERS_DATABASE",
     "taxes": "SNOWFLAKE_SDP_TAXES_DATABASE",
     "depot_transactions": "SNOWFLAKE_SDP_DEPOT_TRANSACTIONS_DATABASE",

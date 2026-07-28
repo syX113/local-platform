@@ -283,9 +283,11 @@ def render_domain_repo(project_slug: str) -> None:
     copy_path("snowflake/project_registry.json", repo_dir, "ci/snowflake/project_registry.json")
 
     copy_registered_project(project_slug, repo_dir)
+    # The producer repository is deliberately NOT vendored here. Cross-product
+    # dependencies are resolved from the published dbt-loom manifest, which the
+    # deploy step turns into a contract stub package, so consumer repositories
+    # stay decoupled from producer implementation code.
     upstream_project_slug = str(spec.get("upstream_project_slug", "")).strip()
-    if upstream_project_slug:
-        copy_registered_project(upstream_project_slug, repo_dir)
 
     project_title = f"Domain {str(spec.get('domain', project_slug)).replace('_', ' ').title()} Promotion"
     scopes = [str(scope).strip() for scope in spec.get("product_scopes", []) if str(scope).strip()]

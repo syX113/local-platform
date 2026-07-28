@@ -16,11 +16,9 @@ project_slug="${1:?usage: lint-prepared-dbt-project.sh <project-slug> [workspace
 workspace_name="${2:-${project_slug}}"
 workspace_container="/tmp/sqlfluff/${workspace_name}"
 
-if [ -f "${ROOT_DIR}/dbt/projects/${project_slug}/dbt_project.yml" ]; then
-  project_dir="$(resolve_container_dbt_project_dir "${project_slug}")"
-elif [ -f "${ROOT_DIR}/dbt/dbt_project.yml" ]; then
-  project_dir="/opt/platform/dbt"
-else
+# Resolve through the registry: a domain slug such as proj_domain_customer maps to
+# a directory named proj_edp_customers, so the slug cannot be used as a path.
+if ! project_dir="$(resolve_container_dbt_project_dir "${project_slug}")"; then
   echo "unable to resolve dbt project root for ${project_slug}" >&2
   exit 1
 fi

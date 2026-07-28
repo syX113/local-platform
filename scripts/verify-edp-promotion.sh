@@ -213,13 +213,12 @@ if [ "${skip_dbt}" != "true" ]; then
     "${SNOWFLAKE_EDP_DBT_PROJECT}" \
     parse | tee "${ARTIFACT_DIR}/dbt_parse.log"
 
-  # The upstream source project is vendored as a local dbt package so that
-  # ref('<source project>', ...) resolves. Excluding it keeps the domain build
-  # inside its own data-product boundary instead of rebuilding and overwriting
-  # the source product tables owned by another repository.
+  # The upstream data product is represented by a generated contract stub
+  # package so that ref('<source project>', ...) resolves inside Snowflake. The
+  # deploy tooling excludes that package from execution automatically.
   bash "${SCRIPT_DIR}/execute-snowflake-dbt-project.sh" \
     "${SNOWFLAKE_EDP_DBT_PROJECT}" \
-    build --exclude "package:${upstream_project_slug}" | tee "${ARTIFACT_DIR}/dbt_build.log"
+    build | tee "${ARTIFACT_DIR}/dbt_build.log"
 fi
 
 docker compose run --rm --no-deps -e "PROJECT_SLUG=${project_slug}" dbt-executor python - <<'PY' | tee "${ARTIFACT_DIR}/snowflake_validation.txt"

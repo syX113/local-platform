@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import gzip
 import json
 import os
 import re
@@ -233,6 +234,98 @@ def project_profile_name(project_dir: Path) -> str:
     return match.group(1)
 
 
+def build_upstream_contract_package(
+    prepared_dir: Path,
+    *,
+    upstream_project_slug: str,
+    manifest_path: Path,
+) -> int:
+    """Materialise the upstream data-product contract as a stub dbt package.
+
+    Snowflake executes dbt with its own managed runtime, which does not load the
+    ``dbt-loom`` plugin, so ``ref('<source project>', ...)`` cannot be resolved
+    from a loom manifest at run time. Instead the published loom manifest -- the
+    contract between the data products -- is translated here into a minimal local
+    package that contains one placeholder model per ``public`` upstream node,
+    carrying only the physical relation coordinates.
+
+    This keeps the repositories decoupled: no upstream business logic is vendored
+    into the consuming repository, and only nodes the producer explicitly marked
+    as ``public`` (the ACCESS layer) can be referenced.
+    """
+    if not manifest_path.exists():
+        raise SystemExit(
+            f"missing upstream contract manifest for {upstream_project_slug}: {manifest_path}. "
+            "Publish the source project manifest before deploying a domain project."
+        )
+
+    try:
+        manifest = json.loads(gzip.decompress(manifest_path.read_bytes()).decode("utf-8"))
+    except Exception as exc:  # pragma: no cover - surfaced as process failure
+        raise SystemExit(f"unable to read upstream contract manifest {manifest_path}: {exc}") from exc
+
+    nodes = manifest.get("nodes", {})
+    if not isinstance(nodes, dict):
+        raise SystemExit(f"invalid upstream contract manifest: {manifest_path}")
+
+    package_dir = prepared_dir / upstream_project_slug
+    shutil.rmtree(package_dir, ignore_errors=True)
+    models_dir = package_dir / "models"
+    models_dir.mkdir(parents=True)
+
+    package_dir.joinpath("dbt_project.yml").write_text(
+        f"name: {upstream_project_slug}\n"
+        "version: 1.0.0\n"
+        "config-version: 2\n"
+        'model-paths: ["models"]\n',
+        encoding="utf-8",
+    )
+
+    exported = 0
+    for node in nodes.values():
+        if not isinstance(node, dict):
+            continue
+        if node.get("resource_type") != "model":
+            continue
+        if str(node.get("package_name", "")).strip() != upstream_project_slug:
+            continue
+        if str(node.get("access", "")).strip() != "public":
+            continue
+
+        name = str(node.get("name", "")).strip()
+        database = str(node.get("database", "")).strip()
+        schema = str(node.get("schema", "")).strip()
+        alias = str(node.get("alias", "")).strip() or name
+        if not name or not database or not schema:
+            continue
+
+        # The body is never executed: domain builds exclude this package. If it
+        # ever were executed it would fail loudly on the self reference instead
+        # of overwriting the producer-owned relation.
+        models_dir.joinpath(f"{name}.sql").write_text(
+            "{{ config(\n"
+            f"    database={database!r},\n"
+            f"    schema={schema!r},\n"
+            f"    alias={alias!r},\n"
+            "    materialized='view'\n"
+            ") }}\n\n"
+            f"-- Contract stub for {upstream_project_slug}.{name}.\n"
+            f"-- Generated from the published dbt-loom manifest; the model is owned\n"
+            f"-- and materialised by the {upstream_project_slug} repository.\n"
+            "select * from {{ this }}\n",
+            encoding="utf-8",
+        )
+        exported += 1
+
+    if not exported:
+        raise SystemExit(
+            f"upstream contract manifest {manifest_path} exposes no public models for {upstream_project_slug}"
+        )
+
+    print(f"generated upstream contract package: {upstream_project_slug} ({exported} public models)")
+    return exported
+
+
 def build_profiles_yml(project_dir: Path, *, database: str, schema: str, target_name: str) -> str:
     return (
         f"{project_profile_name(project_dir)}:\n"
@@ -298,62 +391,7 @@ def prepare_project_source(
     )
 
     loom_config_path = dbt_loom_config_path(prepared_dir) if enable_loom else None
-    loom_env = {"DBT_LOOM_CONFIG": str(loom_config_path)} if loom_config_path else None
     manifest_object_key = str(spec.get("manifest_object_key", "")).strip()
-
-    if copy_downstream_dependencies and project_kind in {"edp", "domain"}:
-        upstream_project_slug = str(spec.get("upstream_project_slug", "")).strip()
-        if not upstream_project_slug:
-            raise SystemExit(f"missing upstream_project_slug for project: {project_identity}")
-
-        local_source_project_dir = project_dir.parent / upstream_project_slug
-        if local_source_project_dir.exists():
-            local_dependency_dir = prepared_dir / upstream_project_slug
-            shutil.copytree(
-                local_source_project_dir,
-                local_dependency_dir,
-                ignore=shutil.ignore_patterns(*EXCLUDED_PATH_NAMES),
-            )
-            render_env_vars_in_tree(local_dependency_dir)
-
-            prepared_dir.joinpath("packages.yml").write_text(
-                "packages:\n"
-                f"  - local: {upstream_project_slug}\n",
-                encoding="utf-8",
-            )
-
-            loom_config_backup: Path | None = None
-            if loom_config_path is not None:
-                loom_config_backup = prepared_dir / "dbt_loom.config.yml.disabled"
-                if loom_config_path.exists():
-                    loom_config_path.rename(loom_config_backup)
-
-            try:
-                completed = subprocess.run(
-                    [
-                        shutil.which("dbt") or "dbt",
-                        "deps",
-                        "--profiles-dir",
-                        str(prepared_dir),
-                        "--project-dir",
-                        str(prepared_dir),
-                        "--target",
-                        target_name,
-                    ],
-                    check=False,
-                    text=True,
-                    env=snow_env(loom_env),
-                    capture_output=quiet,
-                )
-                if completed.returncode != 0:
-                    if completed.stdout:
-                        print(completed.stdout, file=sys.stdout, end="")
-                    if completed.stderr:
-                        print(completed.stderr, file=sys.stderr, end="")
-                    raise SystemExit(completed.returncode)
-            finally:
-                if loom_config_backup and loom_config_backup.exists():
-                    loom_config_backup.rename(prepared_dir / "dbt_loom.config.yml")
 
     if enable_loom and manifest_object_key:
         if loom_config_path is None:
@@ -366,7 +404,128 @@ def prepare_project_source(
         )
         rewrite_loom_config_for_prepared_project(prepared_dir, loom_config_path)
 
+    if copy_downstream_dependencies and project_kind in {"edp", "domain"}:
+        upstream_project_slug = str(spec.get("upstream_project_slug", "")).strip()
+        if not upstream_project_slug:
+            raise SystemExit(f"missing upstream_project_slug for project: {project_identity}")
+
+        build_upstream_contract_package(
+            prepared_dir,
+            upstream_project_slug=upstream_project_slug,
+            manifest_path=prepared_dir / "loom" / "manifest.json.gz",
+        )
+
+        prepared_dir.joinpath("packages.yml").write_text(
+            "packages:\n"
+            f"  - local: {upstream_project_slug}\n",
+            encoding="utf-8",
+        )
+
+        # The loom manifest is fetched above, before this point, so dbt-loom can
+        # load it cleanly during `dbt deps` and does not need to be disabled here.
+        completed = subprocess.run(
+            [
+                shutil.which("dbt") or "dbt",
+                "deps",
+                "--profiles-dir",
+                str(prepared_dir),
+                "--project-dir",
+                str(prepared_dir),
+                "--target",
+                target_name,
+            ],
+            check=False,
+            text=True,
+            env=snow_env(),
+            capture_output=quiet,
+        )
+        if completed.returncode != 0:
+            if completed.stdout:
+                print(completed.stdout, file=sys.stdout, end="")
+            if completed.stderr:
+                print(completed.stderr, file=sys.stderr, end="")
+            raise SystemExit(completed.returncode)
+
     return prepared_dir
+
+
+def strip_non_deployable_artifacts(prepared_dir: Path) -> None:
+    """Remove everything that must not end up in the Snowflake dbt project object.
+
+    The loom config and manifest are build-time inputs only: Snowflake cannot load
+    the dbt-loom plugin, and the rewritten config points at a local temporary path
+    that does not exist server side. Shipping it would advertise a dependency the
+    Snowflake runtime silently ignores.
+    """
+    for relative_path in ("dbt_loom.config.yml", "dbt_loom.config.yml.disabled", "loom", ".loom", "logs", ".user.yml"):
+        target = prepared_dir / relative_path
+        if target.is_dir():
+            shutil.rmtree(target, ignore_errors=True)
+        elif target.exists():
+            target.unlink()
+
+
+def validate_upstream_contract(
+    project_dir: Path,
+    *,
+    project_slug: str | None = None,
+    database: str,
+    schema: str,
+    target_name: str,
+    quiet: bool = False,
+) -> None:
+    """Resolve the cross-project graph through dbt-loom before deploying.
+
+    This is where the dbt-loom plugin actually runs: dbt-core parses the consumer
+    project with the producer manifest injected, which proves every
+    ``ref('<producer>', ...)`` still resolves to a node the producer publishes as
+    ``public``. Snowflake executes dbt with its own runtime and cannot load the
+    plugin, so this parse is what keeps the data-product contract honest before
+    anything is deployed.
+    """
+    prepared_dir = prepare_project_source(
+        project_dir,
+        project_slug=project_slug,
+        database=database,
+        schema=schema,
+        target_name=target_name,
+        quiet=quiet,
+        copy_downstream_dependencies=False,
+        enable_loom=True,
+    )
+    try:
+        loom_config_path = prepared_dir / "dbt_loom.config.yml"
+        if not loom_config_path.exists():
+            raise SystemExit(f"missing dbt_loom.config.yml for contract validation: {prepared_dir}")
+
+        completed = subprocess.run(
+            [
+                shutil.which("dbt") or "dbt",
+                "parse",
+                "--profiles-dir",
+                str(prepared_dir),
+                "--project-dir",
+                str(prepared_dir),
+                "--target",
+                target_name,
+            ],
+            check=False,
+            text=True,
+            env=snow_env({"DBT_LOOM_CONFIG": str(loom_config_path)}),
+            capture_output=quiet,
+        )
+        if completed.returncode != 0:
+            if completed.stdout:
+                print(completed.stdout, file=sys.stdout, end="")
+            if completed.stderr:
+                print(completed.stderr, file=sys.stderr, end="")
+            raise SystemExit(
+                "dbt-loom contract validation failed: the consumer references upstream nodes that the "
+                "producer does not publish. Redeploy the producer or fix the cross-project refs."
+            )
+        print("dbt-loom contract validated: cross-project refs resolve against the published manifest")
+    finally:
+        shutil.rmtree(prepared_dir.parent, ignore_errors=True)
 
 
 def deploy_project(*, project_dir: Path, project_name: str, database: str, schema: str, target_name: str, project_slug: str | None = None) -> None:
@@ -393,6 +552,16 @@ def deploy_project(*, project_dir: Path, project_name: str, database: str, schem
                 schemas=target_schemas,
             )
 
+    if str(spec.get("kind", "")).strip() in {"edp", "domain"}:
+        validate_upstream_contract(
+            project_dir,
+            project_slug=project_slug,
+            database=database,
+            schema=schema,
+            target_name=target_name,
+            quiet=True,
+        )
+
     prepared_dir = prepare_project_source(
         project_dir,
         project_slug=project_slug,
@@ -401,6 +570,7 @@ def deploy_project(*, project_dir: Path, project_name: str, database: str, schem
         target_name=target_name,
     )
     try:
+        strip_non_deployable_artifacts(prepared_dir)
         run_snow(
             "dbt",
             "deploy",
@@ -413,11 +583,37 @@ def deploy_project(*, project_dir: Path, project_name: str, database: str, schem
             "--default-target",
             target_name,
             "--force",
-            extra_env={"DBT_LOOM_CONFIG": str(prepared_dir / "dbt_loom.config.yml")},
             cwd=prepared_dir,
         )
     finally:
         shutil.rmtree(prepared_dir.parent, ignore_errors=True)
+
+
+SELECTOR_DBT_COMMANDS = {"build", "run", "test", "compile", "list", "ls", "snapshot", "seed"}
+
+
+def upstream_exclude_args(project_name: str, dbt_command: str, command_args: list[str]) -> list[str]:
+    """Keep a domain execution inside its own data-product boundary.
+
+    The upstream contract package only carries placeholder models, so it must
+    never be built. Applying the exclusion here rather than at every call site
+    means no caller can forget it.
+    """
+    if dbt_command not in SELECTOR_DBT_COMMANDS:
+        return []
+    if any(arg in {"--exclude", "--selector"} for arg in command_args):
+        return []
+
+    try:
+        spec = project_by_name(project_name)
+    except SystemExit:
+        return []
+    if str(spec.get("kind", "")).strip() not in {"edp", "domain"}:
+        return []
+    upstream_project_slug = str(spec.get("upstream_project_slug", "")).strip()
+    if not upstream_project_slug:
+        return []
+    return ["--exclude", f"package:{upstream_project_slug}"]
 
 
 def execute_project(*, project_name: str, dbt_command: str, command_args: list[str]) -> None:
@@ -428,6 +624,7 @@ def execute_project(*, project_name: str, dbt_command: str, command_args: list[s
         fully_qualified_project_name(project_name),
         dbt_command,
         *command_args,
+        *upstream_exclude_args(project_name, dbt_command, command_args),
     )
 
 

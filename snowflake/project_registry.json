@@ -10,6 +10,11 @@
         "dev": "DEV_DBT_PROJECT_SOURCE_FINNOVA",
         "prd": "PRD_DBT_PROJECT_SOURCE_FINNOVA"
       },
+      "snowflake_project_name_prefixes": [
+        "DBT_PROJECT_SOURCE_FINNOVA",
+        "DEV_DBT_PROJECT_SOURCE_FINNOVA",
+        "PRD_DBT_PROJECT_SOURCE_FINNOVA"
+      ],
       "default_database_env": "SNOWFLAKE_SDP_ORDERS_DATABASE",
       "default_schema_env": "SNOWFLAKE_SDP_CORE_SCHEMA",
       "product_scopes": [
@@ -68,6 +73,11 @@
         "dev": "DEV_DBT_PROJECT_DOMAIN_CUSTOMER",
         "prd": "PRD_DBT_PROJECT_DOMAIN_CUSTOMER"
       },
+      "snowflake_project_name_prefixes": [
+        "DBT_PROJECT_DOMAIN_CUSTOMER",
+        "DEV_DBT_PROJECT_DOMAIN_CUSTOMER",
+        "PRD_DBT_PROJECT_DOMAIN_CUSTOMER"
+      ],
       "default_database_env": "SNOWFLAKE_EDP_CUSTOMERS_DATABASE",
       "default_schema_env": "SNOWFLAKE_EDP_CORE_SCHEMA",
       "product_scopes": [
@@ -106,6 +116,11 @@
         "dev": "DEV_DBT_PROJECT_DOMAIN_TRANSACTIONS",
         "prd": "PRD_DBT_PROJECT_DOMAIN_TRANSACTIONS"
       },
+      "snowflake_project_name_prefixes": [
+        "DBT_PROJECT_DOMAIN_TRANSACTIONS",
+        "DEV_DBT_PROJECT_DOMAIN_TRANSACTIONS",
+        "PRD_DBT_PROJECT_DOMAIN_TRANSACTIONS"
+      ],
       "default_database_env": "SNOWFLAKE_EDP_ORDERS_DATABASE",
       "default_schema_env": "SNOWFLAKE_EDP_CORE_SCHEMA",
       "product_scopes": [
